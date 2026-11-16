@@ -40,6 +40,20 @@ output x_o, y_o [11:0], valid_o      (고정 LATENCY, backpressure 없음)
 - ALGO 인코딩: 0 `BARRETT`, 1 `MONT12`, 2 `SHIFTADD`, 3 `K2RED`. mode: 0 `CT`, 1 `GS`. `mlkem_pkg.sv`에 enum으로 고정하고 DPI 인자와 같은 값을 쓴다(golden model의 기존 `mul_kind` 인코딩과 다르므로 섞어 쓰지 않는다).
 - 보정 상수(golden model 실측): MONT12는 S = 2704, S^-1 = 767, K2 = 2385. K2RED는 S = 169, S^-1 = 2285, K2 = 1353.
 
+## bfu 파이프라인 (2026-11-16, P2-3 결과 반영)
+- parameter: `PRE_REG`(0..1), `MUL_REG`(0..1), `RED_PIPE`(0..2), `OUT_REG`(0..1). `LATENCY = PRE_REG + MUL_REG + RED_PIPE + OUT_REG`, CT와 GS에서 동일.
+- 단계 구성:
+  1. pre 단: GS의 `s = a + b`, `d = b - a` 계산(CT는 통과). `PRE_REG`가 그 뒤 레지스터.
+  2. mul 단: `mod_mul`(`MUL_REG`, `RED_PIPE`). 피연산자는 CT (b, z), GS (d, z). 곱을 거치지 않는 신호(CT의 a, GS의 s)는 `mod_mul.LATENCY`만큼 지연선으로 맞춘다.
+  3. post 단: CT `x = a + t`, `y = a - t` / GS `x = half(s)`, `y = half(m)`. `OUT_REG`가 출력 레지스터.
+- `mod_add`, `mod_sub`는 pre 단과 post 단이 mode에 따라 한 쌍을 공유한다(GS는 pre에서, CT는 post에서 사용). 입력 mux로 공유하며 인스턴스는 각 1개.
+- z와 mode는 데이터와 같은 지연을 따라간다. bfu 입력 a, b, z는 모두 canonical [0, q)여야 한다(`mod_mul`의 MONT12 정의역 보장 전제).
+- 하위 L0 인스턴스의 `PIPE`는 0으로 두고 bfu가 직접 단 사이 레지스터를 둔다(절단 위치를 bfu 한 곳에서 관리).
+
+## 회귀 구성
+- `./sim/run.sh quick`: 모듈당 필수 구성만(조합 전부, 대표 1단, 최대 단수). 상위 계층 작업 중 반복 실행용.
+- `./sim/run.sh all`: 전체 조합. 마일스톤 통과 판정과 커밋 전에 실행. 2026-11-16 기준 68 run, 약 450초.
+
 ## basemul 데이터패스 요구 (ntt_ctrl)
 - 쌍 시작 시 a0, a1, b0, b1을 operand 레지스터(12b x 4)에 latch한다. op마다 RAM을 다시 읽으면 c0를 쓴 뒤 a0를 읽는 RAW hazard가 생긴다.
 - 임시 레지스터: S = 1은 1개(R0), S != 1은 2개(R0, R1).

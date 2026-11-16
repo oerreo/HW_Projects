@@ -42,4 +42,4 @@ L0은 valid/ready 없이 `valid_i`와 고정 latency의 `valid_o`만 갖는다(b
 | `mod_sub` | `a_i[11:0]`, `b_i[11:0]`, `valid_i` | `diff_o[11:0]`, `valid_o` | 조건부 가산 1회 |
 | `mod_red` | `x_i[23:0]`, `valid_i` | `r_o[11:0]`, `valid_o` | `parameter ALGO`. 변형별 허용 입력 범위는 golden model 주석과 일치시킨다. 출력은 x * S mod q (S = 1, 2^-12, 1, 169)이며 래퍼는 S를 제거하지 않는다. 보정은 `arch.md`의 ROM 사전 보정과 basemul K2 op이 담당. PIPE 0~2 지원 |
 | `mod_half` | `x_i[11:0]`, `valid_i` | `h_o[11:0]`, `valid_o` | 가산 1회, 2 * h_o mod Q == x_i |
-| `mod_mul` | `a_i[11:0]`, `b_i[11:0]`, `valid_i` | `p_o[11:0]`, `valid_o` | 곱셈기 1개 + `mod_red` |
+| `mod_mul` | `a_i[11:0]`, `b_i[11:0]`, `valid_i` | `p_o[11:0]`, `valid_o` | 곱셈기 1개 + `mod_red`. p = a * b * S mod q. 단일 `PIPE` 대신 `MUL_REG`(0..1), `RED_PIPE`(0..2) 두 parameter, `LATENCY = MUL_REG + RED_PIPE` (같은 latency라도 절단 위치가 다른 구성을 비교하기 위한 예외) |

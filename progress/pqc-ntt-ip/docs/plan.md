@@ -51,8 +51,8 @@ bottom-up으로 진행한다. 모듈 트리, 진행 순서, L0 인터페이스�
 | P2-0 (완료) | Opus | golden model에 `arch.md`의 basemul micro-op 시퀀스(MONT12, K2RED 7 op / BARRETT, SHIFTADD 5 op)와 `mod_half`, halving GS butterfly를 추가 | `model/` | 모든 ALGO에서 multiply_ntts와 INTT가 기준 구현, pq-crystals 교차 확인과 일치. 기존 38개 항목 유지 |
 | P2-1 (완료) | Opus | `mod_add`, `mod_sub`, `mod_half` RTL + TB (DPI-C 또는 벡터) | `rtl/l0/`, `tb/` | Questa, 정의역 전체 exhaustive, mismatch 0 |
 | P2-2 (완료) | Opus | `mod_red` 4종 RTL + TB, `mlkem_dpi_pkg.sv` 갱신, `mod_half` TB를 DPI 대조로 교체 | `rtl/l0/` | 변형별 정의역 전체 exhaustive, mismatch 0 |
-| P2-3 (진행 중) | Opus | `mod_mul` RTL + TB | `rtl/l0/` | q^2 쌍 exhaustive x 4종, mismatch 0 |
-| P2-4 | Opus | `mod_red`, `mod_mul` Catapult HLS판 | `hls/` | 같은 TB와 벡터로 mismatch 0, Catapult 리포트 보관 |
+| P2-3 (완료) | Opus | `mod_mul` RTL + TB | `rtl/l0/` | q^2 쌍 exhaustive x 4종, mismatch 0 |
+| P2-4 (진행 중) | Opus | `mod_red`, `mod_mul` Catapult HLS판 | `hls/` | 같은 TB와 벡터로 mismatch 0, Catapult 리포트 보관 |
 | P2-5 | Opus | QoR 측정 전 정리: golden 선언 폭을 실측 폭으로 조정(Barrett r/d 13b, MONT12 d s13, SHIFTADD y5 13b와 d1/d2), MONT12 `s` 하위 12b 생략 축약. golden과 RTL, HLS에 동일 적용 | `model/`, `rtl/l0/`, `hls/` | exhaustive 재통과, width 검사 위반 0 |
 P2-5는 비교의 공정성을 위한 것이다(hand RTL이 불필요하게 넓은 폭을 쓰면 RTL 쪽이 불리해진다). P6 측정 전에 반드시 끝낸다.
 각 sub job의 결과는 `docs/agent-log.csv`에 기록한다(`docs/spec/agent-metrics.md`).
@@ -61,7 +61,7 @@ P2-5는 비교의 공정성을 위한 것이다(hand RTL이 불필요하게 넓�
 | ID | 담당 | 내용 | 산출물 | 상태 |
 |---|---|---|---|---|
 | V-1 | Opus | NTT/INTT/basemul 스케줄 interactive viewer (golden model trace 기반 player) | `docs/viewer/` | 완료 (Artifact: https://claude.ai/artifact/5F5nzds9zbxzuMcZDcnGrr) |
-| V-2 | Sonnet | 계층 block diagram, L0 모듈 data flow (Mermaid) | `docs/diagrams/`, 스펙 문서 | P2-2 통과 후 |
+| V-2 | Sonnet | 계층 block diagram, L0 모듈 data flow (Mermaid) | `docs/diagrams/`, 스펙 문서 | 진행 중 |
 | V-3 | Sonnet | `bfu` 데이터패스(draw.io), `ntt_ctrl` control flow | `docs/diagrams/` | P3 해당 모듈 통과 후 |
 | V-4 | Opus | viewer 확장: RTL 시뮬레이션 trace, AXI 트랜잭션 | `docs/viewer/` | P3, P5 |
 

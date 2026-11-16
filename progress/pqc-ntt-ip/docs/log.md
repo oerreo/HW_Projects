@@ -1,5 +1,13 @@
 # 진행 로그: pqc-ntt-ip
 
+## 2026-11-16: P2-3 L0 `mod_mul` RTL 통과, L0 hand RTL 완료  [notion: pending]
+- 단계: P2
+- 한 일: `mod_mul`(12b x 12b 곱셈기 + `mod_red`, `MUL_REG` 0..1, `RED_PIPE` 0..2), `tb_mod_mul`, cfg 4개.
+- 결과: 수퍼바이저가 4개 변형의 cfg를 재실행, 36 run 실패 0. 변형마다 파이프라인 6개 조합 각각 q^2 = 11,082,241 쌍 exhaustive mismatch 0 (golden DPI 대비, Questa 2024.2, 시드 1). agent의 전체 회귀는 68 run 실패 0, 약 450초(agent 보고).
+- agent 보고(수퍼바이저 미재현): 변이 7종 중 검출 5, 통과가 정상인 대조군 2(피연산자 교환, 상시 enable).
+- 결정: `mod_mul`은 단일 `PIPE` 대신 `MUL_REG`/`RED_PIPE`(hierarchy.md 갱신). bfu 파이프라인 규칙(`PRE_REG`, `MUL_REG`, `RED_PIPE`, `OUT_REG`, CT/GS 동일 LATENCY)과 회귀 구성(`quick`/`all`)을 arch.md에 추가.
+- 다음: P2-4 Catapult HLS판(진행 중), V-2 다이어그램(진행 중), 이후 P3 bfu.
+
 ## 2026-11-16: V-1 NTT Schedule Player (interactive viewer)  [notion: pending]
 - 단계: 시각 자료
 - 한 일: `docs/viewer/ntt_player.html` (단일 HTML, 약 243 KB, 외부 의존성 없음). NTT/INTT/BASEMUL x 4 ALGO x 입력 2종의 golden model trace를 재생. player(재생, step, 속도, scrubber, 단축키), 2-bank 메모리 격자, bfu 데이터 경로와 수식, layer별 주소 패턴, basemul micro-op 표. 생성과 검사 스크립트는 `docs/viewer/tools/`.

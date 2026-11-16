@@ -8,3 +8,4 @@ NOTION-2,2026-11-16,doc,Notion pages 6-8,,sonnet,1,149327,24,147,pass,0,0,0,flag
 P2-0,2026-11-16,model,hw-structure model (bfu sched basemul ROM DPI),,opus,1,211860,31,818,pass,0,0,1,agent found orchestrator spec error (GS subtract order) and reported instead of silently adapting; supervisor reran 66 items + L0 regression
 P2-2,2026-11-16,rtl,mod_red x4 + wrapper,L0,opus,1,190995,36,1339,pass,0,0,1,all domains exhaustive PIPE 0-2; found slack in golden declared widths (spec-level); supervisor reran 32 runs 0 fail
 V-1,2026-11-16,doc,interactive viewer ntt_player.html,,opus,1,212340,41,905,pass,0,0,0,supervisor reran 140054 checks and read source; publish done by orchestrator after agent's publish attempt was blocked
+P2-3,2026-11-16,rtl,mod_mul,L0,opus,1,141466,29,998,pass,0,0,1,q^2 exhaustive x 4 algo x 6 pipe combos; proposed 2-parameter pipeline (spec updated); supervisor reran 36 runs 0 fail
