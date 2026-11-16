@@ -157,7 +157,7 @@ arch.md 의 두 시퀀스는 위와 같고 그대로 맞았다(4 ALGO, random 20
 | hw dpi | 추가한 DPI 함수 == C++ API, 범위 밖 입력 거부 |
 
 ### DPI-C (추가 함수)
-`tb/common/mlkem_dpi_pkg.sv` 는 아직 갱신하지 않았다. 다음 작업에서 아래 선언을 추가한다. 잘못된 algo/mode/범위 밖 입력은 -1 (다항식 함수는 반환값 -1).
+`tb/common/mlkem_dpi_pkg.sv` 는 P2-2에서 아래 선언을 포함하도록 갱신됐다. 잘못된 algo/mode/범위 밖 입력은 -1 (다항식 함수는 반환값 -1).
 ```
   // algo: 0 BARRETT, 1 MONT12, 2 SHIFTADD, 3 K2RED (mul_kind 와 다름). mode: 0 CT, 1 GS.
   import "DPI-C" pure function int mlkem_dpi_barrett_reduce(input int x);

@@ -57,11 +57,19 @@ bottom-up으로 진행한다. 모듈 트리, 진행 순서, L0 인터페이스�
 P2-5는 비교의 공정성을 위한 것이다(hand RTL이 불필요하게 넓은 폭을 쓰면 RTL 쪽이 불리해진다). P6 측정 전에 반드시 끝낸다.
 각 sub job의 결과는 `docs/agent-log.csv`에 기록한다(`docs/spec/agent-metrics.md`).
 
+## P3 sub job (L1~L3)
+| ID | 담당 | 내용 | 산출물 | 통과 기준 |
+|---|---|---|---|---|
+| P3-1 (완료) | Opus | `bfu` RTL + TB | `rtl/l1/`, `tb/l1/` | golden DPI 대비 경계, ROM z, random, mode 혼합, trace 재생 mismatch 0 |
+| P3-2 (진행 중) | Opus | `zeta_rom`(ALGO별 ROM 3종), `coef_ram`, `ntt_ctrl`(NTT/INTT 스케줄, basemul micro-op 시퀀서) | `rtl/l2/` | 주소와 제어 시퀀스가 golden trace와 일치 |
+| P3-3 | Opus | `ntt_core` 통합 | `rtl/l3/` | 다항식 단위 벡터(외부 전부 + random + 경계) mismatch 0, stall random |
+| P3-4 | Opus | `sim/run.sh` 정리: `quick`/`all`, `L[01]_RANGE` 집계 | `sim/` | 전체 회귀 통과 |
+
 ## 시각 자료 (`.claude/rules/visual-docs.md`)
 | ID | 담당 | 내용 | 산출물 | 상태 |
 |---|---|---|---|---|
 | V-1 | Opus | NTT/INTT/basemul 스케줄 interactive viewer (golden model trace 기반 player) | `docs/viewer/` | 완료 (Artifact: https://claude.ai/artifact/5F5nzds9zbxzuMcZDcnGrr) |
-| V-2 | Sonnet | 계층 block diagram, L0 모듈 data flow (Mermaid) | `docs/diagrams/`, 스펙 문서 | 진행 중 |
+| V-2 | Sonnet | 계층 block diagram, L0 모듈 data flow (Mermaid) | `docs/diagrams/`, 스펙 문서 | 완료 (GitHub 렌더링 확인 필요) |
 | V-3 | Sonnet | `bfu` 데이터패스(draw.io), `ntt_ctrl` control flow | `docs/diagrams/` | P3 해당 모듈 통과 후 |
 | V-4 | Opus | viewer 확장: RTL 시뮬레이션 trace, AXI 트랜잭션 | `docs/viewer/` | P3, P5 |
 

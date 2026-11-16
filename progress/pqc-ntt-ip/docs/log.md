@@ -1,6 +1,22 @@
 # 진행 로그: pqc-ntt-ip
 
-## 2026-11-16: P2-3 L0 `mod_mul` RTL 통과, L0 hand RTL 완료  [notion: pending]
+## 2026-11-16: P3-1 L1 `bfu` RTL 통과, add/sub 공유 스펙 정정  [notion: pending]
+- 단계: P3
+- 한 일: `rtl/l1/bfu.sv`(L0 인스턴스 + mux, 지연선, 단 레지스터), `tb/l1/tb_bfu.sv`, cfg 4개. parameter `PRE_REG`, `MUL_REG`, `RED_PIPE`, `OUT_REG`, `SHARE_ADDSUB`.
+- 결과: 수퍼바이저가 MONT12, K2RED의 전체 구성을 재실행, 각 34 run 실패 0. run당 경계 686, ROM z 1,028,000, random 4,000,000, mode 혼합 스트림 2,000,000, golden trace 재생 2,688(NTT 896 + INTT 896 + BASEMUL 896) 검사에서 mismatch 0 (golden DPI 대비, Questa 2024.2). BARRETT, SHIFTADD는 agent 보고로 각 34 run 통과(수퍼바이저 미재실행).
+- 발견: 오케스트레이터 스펙의 "add/sub 한 쌍 공유"는 무조건 성립하지 않음. CT 입력 뒤 정확히 D cycle 후 GS 입력이 오면 충돌, D = 0이면 조합 루프. 기본을 분리 구현(`SHARE_ADDSUB = 0`)으로, 공유는 선택 옵션(op 경계에서 LATENCY 이상 대기 필요)으로 정정.
+- agent 보고(수퍼바이저 미재현): 변이 12종 모두 검출. 공유 구성에 mode 혼합 입력을 넣으면 `L1_SHARE` assertion 8,644회, mismatch 8,639건으로 FAIL. 범위 밖 입력 run은 `run.sh`의 집계가 `L0_RANGE`만 세어 cfg에 넣지 못하고 수동 실행(P3-4에서 정리).
+- 미확인: irun, 합성, 면적과 타이밍, 공유 구성의 나머지 파이프라인 조합.
+- 다음: P3-2 L2(`zeta_rom`, `coef_ram`, `ntt_ctrl`), P2-4 HLS(진행 중).
+
+## 2026-11-16: V-2 계층과 L0 다이어그램 (Mermaid)  [notion: synced]
+- 단계: 시각 자료
+- 한 일: `docs/diagrams/00_hierarchy.md`(인스턴스 트리와 상태, 인터페이스, bfu와 L0 연결, LOAD~UNLOAD 데이터 흐름), `l0_modules.md`(L0 9개 모듈의 data flow, 비트폭, PIPE 절단 위치, 4변형 비교 표), `l0_valid_timing.md`(PIPE 0/1/2 valid 타이밍). 다이어그램 16개.
+- 결과: 수퍼바이저가 `l0_modules.md`의 신호 이름 38개를 RTL 식별자와 대조, 불일치 0. 일부 원문을 읽어 확인.
+- 미확인: 실제 Mermaid 파서로의 문법 검사와 GitHub 렌더링. agent는 따옴표/괄호 균형, 노드 ID, 간선 끝점을 스크립트로만 점검. 수퍼바이저의 headless 브라우저 파싱 시도는 권한 정책으로 차단되어 실행하지 못함.
+- 주의: L1 이상은 "계획(arch.md 기준)" 표시. 타이밍 문서는 RTL 구조에서 도출한 것이며 시뮬레이션 파형이 아님.
+
+## 2026-11-16: P2-3 L0 `mod_mul` RTL 통과, L0 hand RTL 완료  [notion: synced]
 - 단계: P2
 - 한 일: `mod_mul`(12b x 12b 곱셈기 + `mod_red`, `MUL_REG` 0..1, `RED_PIPE` 0..2), `tb_mod_mul`, cfg 4개.
 - 결과: 수퍼바이저가 4개 변형의 cfg를 재실행, 36 run 실패 0. 변형마다 파이프라인 6개 조합 각각 q^2 = 11,082,241 쌍 exhaustive mismatch 0 (golden DPI 대비, Questa 2024.2, 시드 1). agent의 전체 회귀는 68 run 실패 0, 약 450초(agent 보고).
@@ -8,7 +24,7 @@
 - 결정: `mod_mul`은 단일 `PIPE` 대신 `MUL_REG`/`RED_PIPE`(hierarchy.md 갱신). bfu 파이프라인 규칙(`PRE_REG`, `MUL_REG`, `RED_PIPE`, `OUT_REG`, CT/GS 동일 LATENCY)과 회귀 구성(`quick`/`all`)을 arch.md에 추가.
 - 다음: P2-4 Catapult HLS판(진행 중), V-2 다이어그램(진행 중), 이후 P3 bfu.
 
-## 2026-11-16: V-1 NTT Schedule Player (interactive viewer)  [notion: pending]
+## 2026-11-16: V-1 NTT Schedule Player (interactive viewer)  [notion: synced]
 - 단계: 시각 자료
 - 한 일: `docs/viewer/ntt_player.html` (단일 HTML, 약 243 KB, 외부 의존성 없음). NTT/INTT/BASEMUL x 4 ALGO x 입력 2종의 golden model trace를 재생. player(재생, step, 속도, scrubber, 단축키), 2-bank 메모리 격자, bfu 데이터 경로와 수식, layer별 주소 패턴, basemul micro-op 표. 생성과 검사 스크립트는 `docs/viewer/tools/`.
 - 결과: 수퍼바이저가 `check_viewer.py` 재실행, 140,054건 불일치 0 (내장 데이터 == 원본 trace, 독립 Python 재생, viewer 상태 재구성 엔진, 마지막 bank == golden, 외부 참조 없음). 수퍼바이저가 소스 전체와 스크린샷 1장 확인. Artifact로 게시: https://claude.ai/artifact/5F5nzds9zbxzuMcZDcnGrr
@@ -16,10 +32,10 @@
 - 한계: 1 step = bfu 호출 1회(cycle 단위 아님). Firefox, Safari, 실제 휴대폰은 미확인.
 - 개선 제안(반영 예정): golden trace에 bfu 내부값(t, s, d, m)과 basemul의 write 주소를 선택 필드로 추가하면 `ntt_ctrl` 검증과 viewer 양쪽에 쓰인다.
 
-## 2026-11-16: P2-2 L0 `mod_red` 4종 RTL 통과, GitHub 연결, 시각 자료 규칙  [notion: pending]
+## 2026-11-16: P2-2 L0 `mod_red` 4종 RTL 통과, GitHub 연결, 시각 자료 규칙  [notion: synced]
 - 단계: P2
 - 한 일: `mod_red_barrett`, `mod_red_mont12`, `mod_red_shiftadd`, `mod_red_k2red`와 래퍼 `mod_red`(PIPE 0~2), 공용 TB `tb_mod_red`. `mlkem_pkg`에 ALGO/mode enum, DPI 패키지 갱신, `mod_half` TB를 golden DPI 대조로 교체.
-- 결과: 수퍼바이저가 `./sim/run.sh all` 재실행, 8 cfg 32 run 실패 0. 변형별 정의역 전체 exhaustive: BARRETT, SHIFTADD, K2RED는 2^24 = 16,777,216 입력, MONT12는 q*2^12 = 13,635,584 입력, 각각 PIPE 0/1/2에서 mismatch 0 (golden DPI 대비, Questa 2024.2, 시드 1). `mod_half`는 q개 입력 golden DPI 대비 mismatch 0.
+- 결과: 수퍼바이저가 `./sim/run.sh all` 재실행, 7 cfg 32 run 실패 0. 변형별 정의역 전체 exhaustive: BARRETT, SHIFTADD, K2RED는 2^24 = 16,777,216 입력, MONT12는 q*2^12 = 13,635,584 입력, 각각 PIPE 0/1/2에서 mismatch 0 (golden DPI 대비, Questa 2024.2, 시드 1). `mod_half`는 q개 입력 golden DPI 대비 mismatch 0.
 - 구조(RTL, 측정값 아님): BARRETT만 넓은 상수 곱(x*5039, 24b x 13b)을 `*`로 두어 FPGA에서 DSP 사용 가능. 나머지 상수 곱은 shift-add. PIPE=2 절단 위치는 BARRETT qhat 뒤, MONT12 t 뒤, SHIFTADD fold 3 뒤, K2RED 두 단계 사이.
 - agent 보고(수퍼바이저 미재현): 변이 30여 종 중 4종이 통과했는데 모두 golden 선언 폭에 여유가 있는 경우(Barrett r/d, MONT12 d, SHIFTADD y5/d1/d2)로 전 정의역 실측과 일치.
 - 결정: 선언 폭 여유와 MONT12 축약은 QoR 측정 전에 golden, RTL, HLS에 동일하게 정리(P2-5). 래퍼는 스케일 S를 제거하지 않음(hierarchy.md 문구 정정).
@@ -27,7 +43,7 @@
 - 미확인: irun 교차 확인, 합성 가능성, 면적과 타이밍.
 - 다음: P2-3 `mod_mul`, V-1 viewer, V-2 다이어그램.
 
-## 2026-11-16: P2-0 golden model 확장, GS 정의 정정  [notion: pending]
+## 2026-11-16: P2-0 golden model 확장, GS 정의 정정  [notion: synced]
 - 단계: P2
 - 한 일: golden model에 `mod_half`, `bfu`(4 ALGO x CT/GS), ALGO별 ROM, 하드웨어 스케줄 NTT/INTT(2-bank ping-pong, trace), basemul micro-op 시퀀스, DPI 함수 17개 추가. 기존 함수는 유지.
 - 결과: 수퍼바이저가 `make test` 재실행, 66개 항목(기존 38 + 신규 28) mismatch 0. 하드웨어 스케줄 NTT/INTT/basemul이 4 ALGO 모두 기준 구현 및 외부 벡터(NTT 855, INTT 450, basemul 2,145 다항식)와 일치. model 변경 뒤 L0 회귀 12 run 재실행, 실패 0.

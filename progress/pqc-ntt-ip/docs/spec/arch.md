@@ -24,7 +24,7 @@
 ## bfu 인터페이스
 ```
 parameter ALGO   : BARRETT | MONT12 | SHIFTADD | K2RED
-parameter PIPE   : 내부 파이프라인 구성 (LATENCY는 localparam으로 노출)
+parameter PRE_REG, MUL_REG, RED_PIPE, OUT_REG, SHARE_ADDSUB  (LATENCY는 localparam으로 노출, "bfu 파이프라인" 절)
 input  mode_i    : CT | GS
 input  a_i, b_i, z_i [11:0], valid_i
 output x_o, y_o [11:0], valid_o      (고정 LATENCY, backpressure 없음)
@@ -46,7 +46,10 @@ output x_o, y_o [11:0], valid_o      (고정 LATENCY, backpressure 없음)
   1. pre 단: GS의 `s = a + b`, `d = b - a` 계산(CT는 통과). `PRE_REG`가 그 뒤 레지스터.
   2. mul 단: `mod_mul`(`MUL_REG`, `RED_PIPE`). 피연산자는 CT (b, z), GS (d, z). 곱을 거치지 않는 신호(CT의 a, GS의 s)는 `mod_mul.LATENCY`만큼 지연선으로 맞춘다.
   3. post 단: CT `x = a + t`, `y = a - t` / GS `x = half(s)`, `y = half(m)`. `OUT_REG`가 출력 레지스터.
-- `mod_add`, `mod_sub`는 pre 단과 post 단이 mode에 따라 한 쌍을 공유한다(GS는 pre에서, CT는 post에서 사용). 입력 mux로 공유하며 인스턴스는 각 1개.
+- `mod_add`, `mod_sub` 공유 (2026-11-16 P3-1 결과로 정정): 초안의 "한 쌍 공유"는 무조건 성립하지 않는다. GS는 pre 단(입력 cycle c), CT는 post 단(cycle c + D, D = `PRE_REG + MUL_REG + RED_PIPE`)에서 쓰므로, CT 입력 뒤 정확히 D cycle 후에 GS 입력이 오면 충돌하고, D = 0이면 조합 루프가 된다.
+  - `SHARE_ADDSUB = 0` (기본): pre 용과 post 용을 따로 둔다(`mod_add` 2, `mod_sub` 2). 입력 순서에 제약이 없다.
+  - `SHARE_ADDSUB = 1` (선택): 한 쌍 공유 + 12b 2:1 mux 4개. D >= 1 필요. CT에서 GS로 바뀔 때 LATENCY 이상 비워야 한다(`L1_SHARE` assertion). NTT, INTT, BASEMUL은 각각 한 mode만 쓰므로 op 경계에서만 대기하면 된다.
+  - v1 `ntt_core`는 op 경계에서 항상 LATENCY 이상 대기하도록 만들어 두 설정 모두 쓸 수 있게 하고, 면적 차이는 QoR 측정(P6)에서 두 설정을 모두 재서 보고한다.
 - z와 mode는 데이터와 같은 지연을 따라간다. bfu 입력 a, b, z는 모두 canonical [0, q)여야 한다(`mod_mul`의 MONT12 정의역 보장 전제).
 - 하위 L0 인스턴스의 `PIPE`는 0으로 두고 bfu가 직접 단 사이 레지스터를 둔다(절단 위치를 bfu 한 곳에서 관리).
 
