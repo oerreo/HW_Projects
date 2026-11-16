@@ -60,7 +60,7 @@ P2-5는 비교의 공정성을 위한 것이다(hand RTL이 불필요하게 넓�
 ## 시각 자료 (`.claude/rules/visual-docs.md`)
 | ID | 담당 | 내용 | 산출물 | 상태 |
 |---|---|---|---|---|
-| V-1 | Opus | NTT/INTT/basemul 스케줄 interactive viewer (golden model trace 기반 player) | `docs/viewer/` | 진행 중 |
+| V-1 | Opus | NTT/INTT/basemul 스케줄 interactive viewer (golden model trace 기반 player) | `docs/viewer/` | 완료 (Artifact: https://claude.ai/artifact/5F5nzds9zbxzuMcZDcnGrr) |
 | V-2 | Sonnet | 계층 block diagram, L0 모듈 data flow (Mermaid) | `docs/diagrams/`, 스펙 문서 | P2-2 통과 후 |
 | V-3 | Sonnet | `bfu` 데이터패스(draw.io), `ntt_ctrl` control flow | `docs/diagrams/` | P3 해당 모듈 통과 후 |
 | V-4 | Opus | viewer 확장: RTL 시뮬레이션 trace, AXI 트랜잭션 | `docs/viewer/` | P3, P5 |

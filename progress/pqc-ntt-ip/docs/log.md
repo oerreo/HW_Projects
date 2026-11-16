@@ -1,5 +1,13 @@
 # 진행 로그: pqc-ntt-ip
 
+## 2026-11-16: V-1 NTT Schedule Player (interactive viewer)  [notion: pending]
+- 단계: 시각 자료
+- 한 일: `docs/viewer/ntt_player.html` (단일 HTML, 약 243 KB, 외부 의존성 없음). NTT/INTT/BASEMUL x 4 ALGO x 입력 2종의 golden model trace를 재생. player(재생, step, 속도, scrubber, 단축키), 2-bank 메모리 격자, bfu 데이터 경로와 수식, layer별 주소 패턴, basemul micro-op 표. 생성과 검사 스크립트는 `docs/viewer/tools/`.
+- 결과: 수퍼바이저가 `check_viewer.py` 재실행, 140,054건 불일치 0 (내장 데이터 == 원본 trace, 독립 Python 재생, viewer 상태 재구성 엔진, 마지막 bank == golden, 외부 참조 없음). 수퍼바이저가 소스 전체와 스크린샷 1장 확인. Artifact로 게시: https://claude.ai/artifact/5F5nzds9zbxzuMcZDcnGrr
+- agent 보고(수퍼바이저 미재현): headless Chrome 렌더 검사 8,573건 불일치 0, 390 px 폭과 라이트/다크 확인.
+- 한계: 1 step = bfu 호출 1회(cycle 단위 아님). Firefox, Safari, 실제 휴대폰은 미확인.
+- 개선 제안(반영 예정): golden trace에 bfu 내부값(t, s, d, m)과 basemul의 write 주소를 선택 필드로 추가하면 `ntt_ctrl` 검증과 viewer 양쪽에 쓰인다.
+
 ## 2026-11-16: P2-2 L0 `mod_red` 4종 RTL 통과, GitHub 연결, 시각 자료 규칙  [notion: pending]
 - 단계: P2
 - 한 일: `mod_red_barrett`, `mod_red_mont12`, `mod_red_shiftadd`, `mod_red_k2red`와 래퍼 `mod_red`(PIPE 0~2), 공용 TB `tb_mod_red`. `mlkem_pkg`에 ALGO/mode enum, DPI 패키지 갱신, `mod_half` TB를 golden DPI 대조로 교체.
