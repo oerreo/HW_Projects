@@ -17,7 +17,7 @@ scripts/    프로젝트 공용 스크립트 (env.sh)
 
 ## 프로젝트 디렉토리 (`progress/<name>/`)
 ```
-docs/     brief.md, plan.md(로드맵, 유일한 계획 원본), log.md(진행 로그), spec/, survey/
+docs/     brief.md, plan.md(로드맵, 유일한 계획 원본), log.md(진행 로그), spec/, survey/, diagrams/, viewer/
 model/    bit-accurate golden model (C++/Python)
 data/     test data와 README(출처, 라이선스, 생성 명령)
 rtl/      직접 작성 RTL (SystemVerilog)
@@ -37,7 +37,8 @@ paper/    논문 원고
 3. **머신 부하**: 동시 실행은 최대 2. Vivado 합성/구현은 이 머신에서 금지. DC는 사용자가 허락한 시점에만.
 4. **RTL vs HLS**: 컨트롤러, top wrapper, 버스 인터페이스 등 control 중심 모듈은 RTL 직접 작성. 알고리즘·데이터패스는 난이도에 따라 Catapult HLS 사용 가능.
 5. **기록**: 마일스톤마다 Notion Research 페이지에 정리. GitHub는 사용자가 연결해준 뒤부터 기록.
-6. **회사 자산 분리**: 회사 코드/IP(`~/work`의 다른 디렉토리)를 이 연구에 복사하거나 참조하지 않는다. 툴만 사용한다.
+6. **시각 자료** (`visual-docs.md`): 모듈이 검증을 통과하면 block diagram, data flow, control flow를 Mermaid(필요 시 draw.io)로 남기고, 프로젝트마다 실제 trace를 재생하는 interactive HTML viewer를 둔다.
+7. **회사 자산 분리**: 회사 코드/IP(`~/work`의 다른 디렉토리)를 이 연구에 복사하거나 참조하지 않는다. 툴만 사용한다.
 
 ## 환경
 - 툴 환경: `source /home/theo/work/research/scripts/env.sh <questa|nc|hls|dc|rise>` (스킬 `eda-tools`)

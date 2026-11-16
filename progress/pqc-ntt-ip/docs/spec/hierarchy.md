@@ -40,6 +40,6 @@ L0은 valid/ready 없이 `valid_i`와 고정 latency의 `valid_o`만 갖는다(b
 |---|---|---|---|
 | `mod_add` | `a_i[11:0]`, `b_i[11:0]`, `valid_i` | `sum_o[11:0]`, `valid_o` | 조건부 감산 1회 |
 | `mod_sub` | `a_i[11:0]`, `b_i[11:0]`, `valid_i` | `diff_o[11:0]`, `valid_o` | 조건부 가산 1회 |
-| `mod_red` | `x_i[23:0]`, `valid_i` | `r_o[11:0]`, `valid_o` | `parameter ALGO`. 변형별 허용 입력 범위는 golden model 주석과 일치시킨다. Montgomery는 출력에 R^-1 인자가 붙으므로 래퍼에서 보정 방식을 명시 |
+| `mod_red` | `x_i[23:0]`, `valid_i` | `r_o[11:0]`, `valid_o` | `parameter ALGO`. 변형별 허용 입력 범위는 golden model 주석과 일치시킨다. 출력은 x * S mod q (S = 1, 2^-12, 1, 169)이며 래퍼는 S를 제거하지 않는다. 보정은 `arch.md`의 ROM 사전 보정과 basemul K2 op이 담당. PIPE 0~2 지원 |
 | `mod_half` | `x_i[11:0]`, `valid_i` | `h_o[11:0]`, `valid_o` | 가산 1회, 2 * h_o mod Q == x_i |
 | `mod_mul` | `a_i[11:0]`, `b_i[11:0]`, `valid_i` | `p_o[11:0]`, `valid_o` | 곱셈기 1개 + `mod_red` |

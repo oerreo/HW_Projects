@@ -1,5 +1,16 @@
 # 진행 로그: pqc-ntt-ip
 
+## 2026-11-16: P2-2 L0 `mod_red` 4종 RTL 통과, GitHub 연결, 시각 자료 규칙  [notion: pending]
+- 단계: P2
+- 한 일: `mod_red_barrett`, `mod_red_mont12`, `mod_red_shiftadd`, `mod_red_k2red`와 래퍼 `mod_red`(PIPE 0~2), 공용 TB `tb_mod_red`. `mlkem_pkg`에 ALGO/mode enum, DPI 패키지 갱신, `mod_half` TB를 golden DPI 대조로 교체.
+- 결과: 수퍼바이저가 `./sim/run.sh all` 재실행, 8 cfg 32 run 실패 0. 변형별 정의역 전체 exhaustive: BARRETT, SHIFTADD, K2RED는 2^24 = 16,777,216 입력, MONT12는 q*2^12 = 13,635,584 입력, 각각 PIPE 0/1/2에서 mismatch 0 (golden DPI 대비, Questa 2024.2, 시드 1). `mod_half`는 q개 입력 golden DPI 대비 mismatch 0.
+- 구조(RTL, 측정값 아님): BARRETT만 넓은 상수 곱(x*5039, 24b x 13b)을 `*`로 두어 FPGA에서 DSP 사용 가능. 나머지 상수 곱은 shift-add. PIPE=2 절단 위치는 BARRETT qhat 뒤, MONT12 t 뒤, SHIFTADD fold 3 뒤, K2RED 두 단계 사이.
+- agent 보고(수퍼바이저 미재현): 변이 30여 종 중 4종이 통과했는데 모두 golden 선언 폭에 여유가 있는 경우(Barrett r/d, MONT12 d, SHIFTADD y5/d1/d2)로 전 정의역 실측과 일치.
+- 결정: 선언 폭 여유와 MONT12 축약은 QoR 측정 전에 golden, RTL, HLS에 동일하게 정리(P2-5). 래퍼는 스케일 S를 제거하지 않음(hierarchy.md 문구 정정).
+- 기타: GitHub 저장소 연결(개인용 SSH 키, noreply 작성자), 첫 push 430b4dc. 시각 자료 규칙(`visual-docs.md`) 추가, viewer 작업(V-1) 시작.
+- 미확인: irun 교차 확인, 합성 가능성, 면적과 타이밍.
+- 다음: P2-3 `mod_mul`, V-1 viewer, V-2 다이어그램.
+
 ## 2026-11-16: P2-0 golden model 확장, GS 정의 정정  [notion: pending]
 - 단계: P2
 - 한 일: golden model에 `mod_half`, `bfu`(4 ALGO x CT/GS), ALGO별 ROM, 하드웨어 스케줄 NTT/INTT(2-bank ping-pong, trace), basemul micro-op 시퀀스, DPI 함수 17개 추가. 기존 함수는 유지.
