@@ -1,0 +1,10 @@
+**/sim/*/
+**/hls/*/run/
+**/syn/**/work/
+*.wlf
+*.vcd
+*.fsdb
+*.log
+transcript
+INCA_libs/
+.claude/settings.local.json

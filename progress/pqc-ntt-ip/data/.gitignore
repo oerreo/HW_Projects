@@ -1,0 +1,6 @@
+# Downloaded originals (ACVP json, pq-crystals sources/tarball): not committed.
+# Re-fetch with scripts/fetch.sh; integrity is pinned by checksums.sha256.
+third_party/
+# Build products and raw int16 dumps (regenerate with scripts/gen_ext_vectors.sh).
+build/
+__pycache__/

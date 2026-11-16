@@ -1,0 +1,19 @@
+Origin
+  Repository : https://github.com/pq-crystals/kyber
+  Branch     : main
+  Commit     : 3edd5af5991927164edd4aacebfcbee00b8064e7
+  Fetched    : 2026-11-16 (raw.githubusercontent.com)
+  Files      : ref/ntt.c ref/ntt.h ref/reduce.c ref/reduce.h ref/params.h, LICENSE
+
+License
+  The upstream LICENSE file (copied verbatim as LICENSE) offers
+  Public Domain (CC0) or Apache 2.0. This workspace uses the files under CC0.
+
+Modifications
+  None. Files are byte-identical to upstream.
+
+Use in this project
+  Only for cross-checking the golden model (test/xcheck_pqcrystals.cpp).
+  The golden model itself does not include or link this code.
+  Build: gcc -std=c99 -DKYBER_K=3 (KYBER_K only selects the symbol namespace;
+  ntt/reduce are identical for all K).

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(vivado:*)",
+      "Bash(vivado_hls:*)",
+      "Bash(vitis_hls:*)"
+    ],
+    "ask": [
+      "Bash(dc_shell:*)",
+      "Bash(dcnxt_shell:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+id,date,type,module,level,model,rounds,tokens,tool_uses,duration_s,accept,sup_defects,human_interv,spec_issue,note
+P1-a,2026-11-16,survey,survey.md,,opus,1,206161,101,667,pass,0,0,0,58 refs (32 verified); supervisor checked structure only
+P1-b,2026-11-16,model,golden model,,opus,1,152240,41,721,pass,0,0,0,supervisor reran make test: 38 items mismatch 0
+P1-e,2026-11-16,doc,Notion pages 3-5,,sonnet,1,169031,22,236,pass,0,0,1,doc-writer found stale hierarchy.md and notation slip in arch.md (orchestrator spec defects); fixed
+P1-d,2026-11-16,data,ACVP + ref-derived ext vectors,,opus,1,159815,45,552,pass,0,0,0,supervisor reran independent python check and checksums; NTT full-range inputs only 90 of 855
+P2-1,2026-11-16,rtl,mod_add mod_sub mod_half + sim flow,L0,opus,1,144829,42,720,pass,0,0,0,agent self-found TB sampling flaw via mutation and fixed before report; supervisor reran regression 12 runs 0 fail
+NOTION-2,2026-11-16,doc,Notion pages 6-8,,sonnet,1,149327,24,147,pass,0,0,0,flagged plan.md P2 status gap and one slow oor run (15 s wall, cause unknown)
+P2-0,2026-11-16,model,hw-structure model (bfu sched basemul ROM DPI),,opus,1,211860,31,818,pass,0,0,1,agent found orchestrator spec error (GS subtract order) and reported instead of silently adapting; supervisor reran 66 items + L0 regression

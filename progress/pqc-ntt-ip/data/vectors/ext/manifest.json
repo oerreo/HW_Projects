@@ -1,0 +1,70 @@
+{
+  "description": "Polynomial vectors extracted from pq-crystals/kyber ref (commit 3edd5af59919) while running NIST ACVP ML-KEM vector sets (ACVP-Server commit 975de31eb83d). Canonical [0,q) coefficients, FIPS 203 Alg. 9/10/11.",
+  "format": "one 3-digit hex coefficient per line, 256 lines per polynomial, polynomial i at lines [256*i, 256*i+255], coefficient index 0 first",
+  "files": {
+    "ntt_in.hex": {
+      "polynomials": 855,
+      "unique_inputs": 855,
+      "by_param_set": {
+        "ML-KEM-512": 190,
+        "ML-KEM-768": 285,
+        "ML-KEM-1024": 380
+      }
+    },
+    "ntt_out.hex": {
+      "polynomials": 855,
+      "unique_inputs": 855,
+      "by_param_set": {
+        "ML-KEM-512": 190,
+        "ML-KEM-768": 285,
+        "ML-KEM-1024": 380
+      }
+    },
+    "intt_in.hex": {
+      "polynomials": 450,
+      "unique_inputs": 450,
+      "by_param_set": {
+        "ML-KEM-512": 115,
+        "ML-KEM-768": 150,
+        "ML-KEM-1024": 185
+      }
+    },
+    "intt_out.hex": {
+      "polynomials": 450,
+      "unique_inputs": 450,
+      "by_param_set": {
+        "ML-KEM-512": 115,
+        "ML-KEM-768": 150,
+        "ML-KEM-1024": 185
+      }
+    },
+    "basemul_a.hex": {
+      "polynomials": 2145,
+      "unique_inputs": 2145,
+      "by_param_set": {
+        "ML-KEM-512": 330,
+        "ML-KEM-768": 675,
+        "ML-KEM-1024": 1140
+      }
+    },
+    "basemul_b.hex": {
+      "polynomials": 2145,
+      "unique_inputs": 2145,
+      "by_param_set": {
+        "ML-KEM-512": 330,
+        "ML-KEM-768": 675,
+        "ML-KEM-1024": 1140
+      }
+    },
+    "basemul_out.hex": {
+      "polynomials": 2145,
+      "unique_inputs": 2145,
+      "by_param_set": {
+        "ML-KEM-512": 330,
+        "ML-KEM-768": 675,
+        "ML-KEM-1024": 1140
+      }
+    }
+  },
+  "dropped_from_failing_cases": 0
+}
