@@ -1,5 +1,14 @@
 # 진행 로그: pqc-ntt-ip
 
+## 2026-11-17: P3-2 L2 `zeta_rom`, `coef_ram`, `ntt_ctrl` 통과  [notion: pending]
+- 단계: P3
+- 한 일: `rtl/l2/`에 `zeta_rom`(생성된 상수 테이블), `coef_ram`(256 x 12b TDP wrapper, 포트별 en), `ntt_ctrl`(순수 control: 스케줄 FSM, 주소 생성, basemul micro-op 시퀀서, LOAD/UNLOAD 스트림 제어), 공용 패키지 `ntt_l2_pkg`. TB 3개와 cfg 3개.
+- 결과: 수퍼바이저가 세 cfg 재실행: `l2_zeta_rom` 9 run, `l2_coef_ram` 2 run, `l2_ntt_ctrl` 51 run(ALGO 4 x BFU_LATENCY 0..5 x ROM_LAT 0/1 + elab_fail 3), 실패 0, mismatch 0. `ntt_ctrl` run당: 스케줄(주소, zeta 주소, mode, bank) 516,240건이 golden `hw_sched`와 순서까지 일치, basemul program, 타이밍, hazard, 스트림 검사, 그리고 behavioral datapath로 계산한 최종 bank가 golden `hw_ntt`/`hw_intt`/`hw_basemul`과 일치(36 case). Questa 2024.2.
+- 실측 cycle(behavioral datapath, L = BFU_LATENCY): NTT/INTT 897 + 7(1 + L), BASEMUL 128 n (L + 1) + 3 (n = 5 또는 7), LOAD 257, UNLOAD 258.
+- agent 보고(수퍼바이저 미재현): 변이 17종. 2종은 일부 설정에서 원본과 동치라 통과(그 외 설정에서는 검출). 검증 중 UNLOAD가 포트 B도 읽던 RTL 결함 1건을 TB가 잡아 수정. `coef_ram` 충돌 assertion run은 수동 실행.
+- 결정: op 인코딩과 타이밍, cycle 식, RAM_LAT = 1 제약, UNLOAD의 read data hold 의존을 arch.md에 반영. 초안의 cycle 근사식과 layer 경계 대기 길이는 틀렸음(RAM read latency 누락).
+- 미확인: 실제 `bfu`, `coef_ram`, `zeta_rom` RTL과 결합한 검증(P3-3), BRAM/ROM 추론과 합성 가능성, irun.
+
 ## 2026-11-16: P2-4 L0 Catapult HLS판 통과  [notion: pending]
 - 단계: P2
 - 한 일: `hls/l0/`에 `mod_red` 4종과 `mod_mul` 4종의 Catapult C++(ac_int, golden과 단계와 폭 1:1), Tcl 흐름, 순차 실행 스크립트, hand RTL과 같은 모듈 이름과 포트를 가진 어댑터, 리포트 요약. 8 블록 x 라이브러리 2종(Zynq-7000 xc7z020, Nangate 45 nm) x 구성 3종(latency 0/1/2) = 48개 생성.

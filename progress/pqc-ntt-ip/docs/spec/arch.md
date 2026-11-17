@@ -115,5 +115,15 @@ c1 = CT(0,  w,  K2)        = a0*b1 + a1*b0
 | 타깃 | FPGA XC7Z020 (사용자 Vivado), ASIC (DC, 사용자 승인 시) |
 | 지표 | 면적(LUT/FF/DSP 또는 um^2), Fmax 또는 slack, latency(cycle), NTT/INTT/BASEMUL 총 cycle, 설계 노력(`agent-metrics.md`) |
 
+## L2 결과 반영 (2026-11-17, P3-2)
+- op 인코딩: `OP_LOAD`, `OP_NTT`, `OP_INTT`, `OP_BASEMUL`, `OP_UNLOAD` + `bank_i` (초안의 LOAD0/LOAD1 대신). 정의는 `rtl/l2/ntt_l2_pkg.sv`.
+- `ntt_ctrl`은 순수 control이다. operand 레지스터(A0, A1, B0, B1), 임시 레지스터(R0, R1), 데이터 mux는 `ntt_core`의 datapath glue에 둔다. 출력 신호와 타이밍 표는 `rtl/l2/ntt_ctrl.sv` 머리 주석이 원본이다.
+- 타이밍: issue cycle I, 실행 E = I + RAM_LAT, write W = E + BFU_LATENCY. layer 경계 대기는 초안의 "LATENCY"가 아니라 RAM_LAT + BFU_LATENCY이다.
+- 실측 cycle 수(behavioral datapath 시뮬레이션, start 수락에서 done까지, L = BFU_LATENCY): NTT/INTT = 897 + 7(1 + L). BASEMUL = 128 * n * (L + 1) + 3 (n = 5 또는 7). LOAD 257, UNLOAD 258(stall 없을 때). 위 "동작 모드" 표의 근사식은 이 값으로 대체한다.
+- BASEMUL은 다음 쌍의 operand read를 미리 내서(prefetch) 쌍 주기가 정확히 n(L + 1)이다. op 중첩은 없다.
+- 제약: `RAM_LAT`은 1만 지원(2이면 basemul prefetch read와 C0 write가 충돌). UNLOAD의 backpressure는 `coef_ram`이 read enable이 꺼진 동안 read data를 유지하는 것에 의존한다. ASIC 매크로가 이를 보장하지 않으면 wrapper에 레지스터가 필요하다. `m_ready`에서 RAM enable로 가는 조합 경로가 있다(필요하면 L4에서 register slice).
+- `coef_ram`: 포트별 `en` 추가(스펙에 없던 결정, 채택). read data는 그 포트가 read할 때만 바뀐다. 같은 주소의 write/read, write/write는 금지(assertion).
+- `zeta_rom`: `$readmemh` 대신 생성된 상수 테이블(`rtl/l2/rom/zeta_rom_pkg.sv`, 생성기 `gen_rom_pkg.py`). 기본 `OUT_REG = 1`(동기 read).
+
 ## v1에서 하지 않는 것
 다중 butterfly, lazy reduction, basemul op 중첩, Karatsuba basemul, side-channel 대응, ML-DSA modulus. 필요하면 `todo/`가 아니라 이 프로젝트의 P4에서 검토한다.
