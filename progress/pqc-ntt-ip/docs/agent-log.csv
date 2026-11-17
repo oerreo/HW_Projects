@@ -12,3 +12,4 @@ P2-3,2026-11-16,rtl,mod_mul,L0,opus,1,141466,29,998,pass,0,0,1,q^2 exhaustive x 
 V-2,2026-11-16,doc,Mermaid diagrams hierarchy + L0,,sonnet,1,124363,20,432,partial,0,0,0,signal names match RTL (38/38); mermaid render not verified by parser
 NOTION-3,2026-11-16,doc,Notion pages 9-12 + row 8 update,,sonnet,1,278985,38,457,pass,0,0,0,flagged stale Notion rows 5 and 7 and small doc inconsistencies; orchestrator added correction notes
 P3-1,2026-11-16,rtl,bfu,L1,opus,1,178746,30,3631,pass,0,0,1,found orchestrator spec error (add/sub sharing not unconditional); implemented both; supervisor reran mont12+k2red 68 runs 0 fail
+P2-4,2026-11-16,hls,mod_red x4 + mod_mul x4 Catapult,L0,opus,1,367446,138,6041,pass,0,0,0,48 builds; same TB as hand RTL; raised fairness issues (const mult handling; loose clock); wall time inflated by slot waiting; supervisor reran C test + 3 cfgs

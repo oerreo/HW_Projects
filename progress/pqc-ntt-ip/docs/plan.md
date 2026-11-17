@@ -52,8 +52,9 @@ bottom-up으로 진행한다. 모듈 트리, 진행 순서, L0 인터페이스�
 | P2-1 (완료) | Opus | `mod_add`, `mod_sub`, `mod_half` RTL + TB (DPI-C 또는 벡터) | `rtl/l0/`, `tb/` | Questa, 정의역 전체 exhaustive, mismatch 0 |
 | P2-2 (완료) | Opus | `mod_red` 4종 RTL + TB, `mlkem_dpi_pkg.sv` 갱신, `mod_half` TB를 DPI 대조로 교체 | `rtl/l0/` | 변형별 정의역 전체 exhaustive, mismatch 0 |
 | P2-3 (완료) | Opus | `mod_mul` RTL + TB | `rtl/l0/` | q^2 쌍 exhaustive x 4종, mismatch 0 |
-| P2-4 (진행 중) | Opus | `mod_red`, `mod_mul` Catapult HLS판 | `hls/` | 같은 TB와 벡터로 mismatch 0, Catapult 리포트 보관 |
+| P2-4 (완료) | Opus | `mod_red`, `mod_mul` Catapult HLS판 | `hls/` | 같은 TB와 벡터로 mismatch 0, Catapult 리포트 보관 |
 | P2-5 | Opus | QoR 측정 전 정리: golden 선언 폭을 실측 폭으로 조정(Barrett r/d 13b, MONT12 d s13, SHIFTADD y5 13b와 d1/d2), MONT12 `s` 하위 12b 생략 축약. golden과 RTL, HLS에 동일 적용 | `model/`, `rtl/l0/`, `hls/` | exhaustive 재통과, width 검사 위반 0 |
+P2-5 추가 항목(P2-4 결과): (a) Barrett 상수 곱 `x*5039`의 처리를 hand RTL과 HLS에서 같은 조건으로 맞춘다(둘 다 툴에 맡기는 구성과 둘 다 shift-add인 구성을 각각 측정). (b) HLS 클럭 sweep: 현재 FPGA 40 ns, ASIC 6 ns는 느슨해서 p2가 실제 중간 절단이 아닌 경우가 많다. 목표 클럭을 조여 hand RTL의 PIPE 구성과 대응되는 점을 찾는다. (c) HLS 어댑터와 TB 조합의 변이 테스트.
 P2-5는 비교의 공정성을 위한 것이다(hand RTL이 불필요하게 넓은 폭을 쓰면 RTL 쪽이 불리해진다). P6 측정 전에 반드시 끝낸다.
 각 sub job의 결과는 `docs/agent-log.csv`에 기록한다(`docs/spec/agent-metrics.md`).
 

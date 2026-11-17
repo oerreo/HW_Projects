@@ -1,5 +1,15 @@
 # 진행 로그: pqc-ntt-ip
 
+## 2026-11-16: P2-4 L0 Catapult HLS판 통과  [notion: pending]
+- 단계: P2
+- 한 일: `hls/l0/`에 `mod_red` 4종과 `mod_mul` 4종의 Catapult C++(ac_int, golden과 단계와 폭 1:1), Tcl 흐름, 순차 실행 스크립트, hand RTL과 같은 모듈 이름과 포트를 가진 어댑터, 리포트 요약. 8 블록 x 라이브러리 2종(Zynq-7000 xc7z020, Nangate 45 nm) x 구성 3종(latency 0/1/2) = 48개 생성.
+- 결과: 수퍼바이저가 C 수준 테스트 재실행, 8 항목 정의역 전체 mismatch 0. 수퍼바이저가 cfg 3개(`mod_mul` MONT12 asic, `mod_red` BARRETT fpga, `mod_mul` SHIFTADD asic) 시뮬레이션 재실행, 전 run 통과, 데이터 exhaustive mismatch 0. 나머지 13 cfg는 agent 보고(48개 전부 통과, 실제 latency == 요청 latency). TB는 hand RTL 것을 수정 없이 사용. Catapult 2026.3_1, Questa 2024.2.
+- Catapult 추정치(합성 결과 아님)는 `hls/l0/report/summary.md`. hand RTL 수치가 없어 비교 결론은 없음.
+- 공정성 쟁점: (1) HLS는 `OPT_CONST_MULTS full`이라 Barrett `x*5039`가 가산기 트리, hand RTL은 `*`. (2) 클럭이 느슨해(fpga 40 ns, asic 6 ns) p2가 출력 레지스터 추가에 그친 경우가 많음. (3) FPGA 면적 추정에 FF 미포함. P2-5에서 정리.
+- 어댑터가 추가하는 것: valid 지연 플롭 LATENCY개(hand RTL과 같은 수)뿐, 데이터패스 로직 없음.
+- 머신 부하: 다른 세션의 Catapult가 동시에 돌고 있어 계정 전체로는 3개가 겹친 구간이 있었음. 한도의 범위를 사용자에게 질의.
+- 미확인: SCVerify, irun, 다른 클럭에서의 결과, asic area score의 물리 단위.
+
 ## 2026-11-16: P3-1 L1 `bfu` RTL 통과, add/sub 공유 스펙 정정  [notion: pending]
 - 단계: P3
 - 한 일: `rtl/l1/bfu.sv`(L0 인스턴스 + mux, 지연선, 단 레지스터), `tb/l1/tb_bfu.sv`, cfg 4개. parameter `PRE_REG`, `MUL_REG`, `RED_PIPE`, `OUT_REG`, `SHARE_ADDSUB`.
