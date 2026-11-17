@@ -127,3 +127,12 @@ c1 = CT(0,  w,  K2)        = a0*b1 + a1*b0
 
 ## v1에서 하지 않는 것
 다중 butterfly, lazy reduction, basemul op 중첩, Karatsuba basemul, side-channel 대응, ML-DSA modulus. 필요하면 `todo/`가 아니라 이 프로젝트의 P4에서 검토한다.
+
+## L3 결과 반영 (2026-11-17, P3-3)
+- `ntt_core`의 glue: operand 레지스터 A0/A1/B0/B1(48b), 임시 R0(12b), R1(12b, basemul이 7 op인 MONT12/K2RED에서만 생성). bfu 입력 mux a 3:1, b 5:1, z 3:1. 표는 `rtl/l3/ntt_core.sv` 머리 주석이 원본이다.
+- `ntt_ctrl`에 넘기는 `BFU_LATENCY`, `ROM_LAT`, `RAM_LAT`은 하위 모듈의 `LATENCY`와 같은 식으로 계산한다. 시뮬레이션에서는 계층 참조로 대조해 불일치 시 elaboration 에러(합성에서는 검사 없음, `ifndef SYNTHESIS`).
+- 실측 cycle은 L2의 식과 모든 구성에서 일치했다(NTT/INTT 897 + 7(1 + L), BASEMUL 128 * n * (L + 1) + 3).
+- **다항식 곱 순서(결정)**: bank가 2개이고 NTT/INTT가 두 bank를 모두 쓰므로, 계수 도메인 피연산자 두 개를 IP 안에서 연달아 NTT할 수 없다(두 번째 NTT가 첫 결과를 덮어쓴다). v1은 bank를 늘리지 않는다.
+  - 한쪽 피연산자가 이미 NTT 도메인인 경우(ML-KEM의 일반적인 경우. 공개키와 비밀키는 NTT 도메인으로 보관): LOAD0 r, NTT0(결과 bank1), LOAD0 a^, BASEMUL, INTT0, UNLOAD1. 왕복 없음.
+  - 둘 다 계수 도메인인 경우: 첫 NTT 결과를 호스트로 꺼냈다가 다시 넣는다(UNLOAD 258 + LOAD 257 = 515 cycle 추가). BARRETT, L = 0에서 체인 전체 4642 cycle(실측).
+  - 세 번째 bank 또는 NTT 결과 bank 선택은 v2 후보로만 남긴다(면적 256 x 12b RAM 1개 대 515 cycle).
