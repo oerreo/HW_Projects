@@ -66,6 +66,13 @@ P2-5는 비교의 공정성을 위한 것이다(hand RTL이 불필요하게 넓�
 | P3-3 (진행 중) | Opus | `ntt_core` 통합 | `rtl/l3/` | 다항식 단위 벡터(외부 전부 + random + 경계) mismatch 0, stall random |
 | P3-4 (진행 중, P3-3과 함께) | Opus | `sim/run.sh` 정리: `quick`/`all`, `L[01]_RANGE` 집계 | `sim/` | 전체 회귀 통과 |
 
+## P5 sub job (L4와 FPGA)
+| ID | 담당 | 내용 | 산출물 | 상태 |
+|---|---|---|---|---|
+| P5-0 (완료) | Opus | 준비: Vivado/XSCT Tcl(미실행), PS 드라이버와 테스트 프로그램, 벡터 헤더, 호스트 테스트(레지스터 수준 모델) | `fpga/` | 호스트 테스트 통과. Tcl과 보드 동작은 미검증 |
+| P5-1 | Opus | `pqc_ntt_axi_top` RTL + AXI BFM TB, `fpga/sw` 헤더와 호스트 모델을 확정 스펙에 맞춤 | `rtl/l4/`, `tb/l4/` | P3-3 통과 후 |
+| P5-2 | 사용자 | Vivado 빌드와 보드 실행(1차: BARRETT, hand RTL, 100 MHz) | `fpga/results/` | P5-1 통과 후 요청 |
+
 ## 시각 자료 (`.claude/rules/visual-docs.md`)
 | ID | 담당 | 내용 | 산출물 | 상태 |
 |---|---|---|---|---|

@@ -1,5 +1,13 @@
 # 진행 로그: pqc-ntt-ip
 
+## 2026-11-17: P5-0 FPGA 검증 환경 준비, L4 레지스터 동작 확정  [notion: pending]
+- 단계: P5 (준비)
+- 한 일: `fpga/vivado/`(프로젝트 생성, 빌드, 리포트 저장 Tcl, module reference용 Verilog shell), `fpga/sw/`(레지스터 헤더, HAL, 드라이버, 테스트 프로그램, 벡터 헤더와 생성기, UART 로그 파서, XSCT 스크립트), 호스트 테스트(레지스터 수준 소프트웨어 모델 + golden model), `fpga/README.md`.
+- 결과: 수퍼바이저가 호스트 테스트 재실행, 전 항목 통과: 12 구성(ALGO 4 x BFU_LATENCY 0/2/5) 각각 100 케이스 mismatch 0과 cycle 일치(agent 보고), 결함 주입 4종 검출, 음성 테스트 26/26, Tcl 스텁 검사 20/20.
+- 한계: 호스트 테스트는 PS 소프트웨어와 스펙 문서의 일치만 보증한다. RTL도 보드도 아니다. Vivado/XSCT Tcl은 실행한 적이 없고 문법과 분기만 스텁으로 확인. ARM 크로스 컴파일도 하지 않음. README에 미검증 13항목.
+- 결정: agent가 정리한 가정 25개를 검토해 `docs/spec/l4_axi.md`에 레지스터 동작을 확정. ERR에 `bad_op`, `din_range` 추가, 빌드 구성을 구별하는 CONFIG 레지스터 추가, WSTRB 무시, CYCLES 정의 명시, v1에 abort 없음. v1은 AXI4-Lite만(hierarchy.md 갱신).
+- 다음: P3-3 통과 후 P5-1(L4 RTL과 AXI BFM 검증).
+
 ## 2026-11-17: P3-2 L2 `zeta_rom`, `coef_ram`, `ntt_ctrl` 통과  [notion: synced]
 - 단계: P3
 - 한 일: `rtl/l2/`에 `zeta_rom`(생성된 상수 테이블), `coef_ram`(256 x 12b TDP wrapper, 포트별 en), `ntt_ctrl`(순수 control: 스케줄 FSM, 주소 생성, basemul micro-op 시퀀서, LOAD/UNLOAD 스트림 제어), 공용 패키지 `ntt_l2_pkg`. TB 3개와 cfg 3개.

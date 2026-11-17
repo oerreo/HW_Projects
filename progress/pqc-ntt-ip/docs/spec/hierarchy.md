@@ -4,7 +4,7 @@
 
 ## 트리
 ```
-L4  pqc_ntt_axi_top            AXI4-Lite(CSR) + AXI4-Stream(in/out) wrapper          RTL
+L4  pqc_ntt_axi_top            AXI4-Lite(CSR, 계수 입출력 포함) wrapper, v1 (l4_axi.md)  RTL
       L3  ntt_core             NTT / INTT / basemul 모드, start/done, 계수 스트림    RTL (구조)
             L2  ntt_ctrl       layer/group/index 스케줄 FSM, 주소와 zeta 주소 생성   RTL
             L2  zeta_rom       zeta, gamma 테이블 (golden model에서 생성)            RTL

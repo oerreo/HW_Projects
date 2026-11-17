@@ -1,0 +1,5 @@
+# generated, not committed
+sw/build/
+sw/test/build/
+vivado/build/
+vivado/test/.stub_tmp/

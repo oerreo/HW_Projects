@@ -1,6 +1,6 @@
 # L4 스펙: pqc_ntt_axi_top와 FPGA 검증 환경
 
-상태: 초안 (2026-11-17). `ntt_core`(P3-3) 통과 후 확정한다. 표준 흐름의 G5, G6에 해당한다.
+상태: 레지스터 동작 확정 (2026-11-17, P5 준비 작업의 `fpga/sw/ASSUMPTIONS.md` A1~A25를 검토해 반영). RTL은 `ntt_core`(P3-3) 통과 후 작성한다. 표준 흐름의 G5, G6에 해당한다.
 
 ## 목적
 `ntt_core`를 Zynq PS(ARM Cortex-A9)에서 구동할 수 있게 감싼다. PS의 bare-metal 프로그램이 다항식을 넣고 결과를 읽어 golden과 비교한다.
@@ -25,10 +25,25 @@ PS (ARM)  --AXI4-Lite-->  pqc_ntt_axi_top
 | 0x0C | DOUT | R | bit[11:0] 계수. UNLOAD 중 `out_valid`일 때 읽으면 다음 계수로 넘어간다 |
 | 0x10 | CYCLES | R | 마지막 op의 start에서 done까지의 cycle 수(하드웨어 카운터) |
 | 0x14 | VERSION | R | bit[7:0] ALGO, bit[15:8] BFU_LATENCY, bit[31:16] 고정 ID |
-| 0x18 | ERR | R/W1C | bit0 busy 중 start, bit1 `in_ready` 아닐 때 DIN 쓰기, bit2 `out_valid` 아닐 때 DOUT 읽기 |
+| 0x18 | ERR | R/W1C | bit0 `start_busy` busy 중 start, bit1 `din_notready` `in_ready` 아닐 때 DIN 쓰기, bit2 `dout_notvalid` `out_valid` 아닐 때 DOUT 읽기, bit3 `bad_op` 정의되지 않은 op로 start, bit4 `din_range` DIN 값이 q 이상 |
+| 0x1C | CONFIG | R | 빌드 구성: bit0 `impl`(0 hand RTL, 1 HLS), bit1 `share_addsub`, bit2 `rom_out_reg`, bit3 `pre_reg`, bit4 `mul_reg`, bit[6:5] `red_pipe`, bit7 `out_reg`, bit[23:16] `fclk_mhz`(빌드 parameter) |
 
 - DIN 쓰기와 DOUT 읽기를 스트림 handshake로 바꾸는 방식(쓰기 채널을 `in_ready`까지 잡아 둘지, ERR만 세울지)은 구현 전에 확정한다. v1 기본은 "잡아 두지 않고 ERR". PS 프로그램이 STATUS를 보고 쓴다.
 - CYCLES는 시뮬레이션 실측값(`arch.md`의 식)과 보드에서 같아야 한다. 보드 검증 항목에 포함한다.
+
+## 확정한 동작 (ASSUMPTIONS 검토 결과)
+- 순서: CTRL에 start(op = LOAD)를 쓴 뒤 DIN을 쓴다. `in_ready`가 아닐 때의 DIN 쓰기는 버리고 `din_notready`를 세운다. DIN 쓰기 한 번이 스트림 handshake 한 번이다.
+- `in_ready`는 LOAD가 진행 중이고 코어가 받을 수 있는 동안 1, `out_valid`는 UNLOAD 중 읽을 계수가 있는 동안 1. `out_valid`가 아닐 때 DOUT 읽기는 0을 돌려주고 `dout_notvalid`를 세운다.
+- `done_sticky`는 op 완료 시 세워지고 CTRL 쓰기마다 clear된다. 완료 판정은 `busy`가 아니라 `done_sticky`로 한다. 완료와 CTRL 쓰기가 같은 cycle에 겹치면 CTRL 쓰기(clear)가 우선하고, 그 start는 `busy`가 내려간 cycle이므로 수락된다.
+- busy 중 start: 무시하고 `start_busy`. 정의되지 않은 op: 아무 동작 없이 `bad_op`(`busy`도 `done_sticky`도 변하지 않음).
+- DIN 값이 q 이상: 하위 12비트를 그대로 넣고 `din_range`를 세운다(하드웨어는 값을 고치지 않는다. 드라이버가 사전 검사).
+- WSTRB는 무시한다(AXI4-Lite slave는 strobe를 무시할 수 있다). 모든 쓰기는 32비트 전체로 취급.
+- 정의되지 않은 주소: 읽기 0, 쓰기 무시, 응답은 OKAY. 쓰기 전용 레지스터(CTRL, DIN) 읽기는 0.
+- CYCLES 정의: `ntt_core`가 `start_i`를 수락한 cycle부터 `done_o`가 1인 cycle까지의 clock 수. `arch.md` "L2 결과 반영"의 실측식과 같아야 한다. CSR이 start pulse를 레지스터로 한 번 거치더라도 카운터는 코어의 수락 시점에서 시작하므로 식과 차이가 없어야 하며, L4 TB가 이를 검사한다. LOAD와 UNLOAD의 CYCLES는 PS의 접근 속도에 의존하므로 비교 대상이 아니다.
+- abort와 soft reset은 v1에 없다. 모든 op는 유한 시간에 끝나고, 중단된 LOAD/UNLOAD는 드라이버가 남은 계수를 채우거나 읽어 끝낸다.
+- reset 값: 모든 레지스터 0(VERSION, CONFIG 제외), RAM 내용은 정의하지 않는다.
+- top 모듈: `pqc_ntt_axi_top`(SystemVerilog, 프로젝트 명명 규칙의 `_i`/`_o` 포트, int parameter). Vivado block design에는 표준 AXI 포트 이름을 가진 Verilog shell(`fpga/vivado/src/pqc_ntt_axi_bd.v`)로 넣는다.
+- 이 절과 `fpga/sw/pqc_ntt_regs.h`, `fpga/sw/ASSUMPTIONS.md`가 다르면 이 문서가 기준이다. L4 RTL 작업에서 헤더와 호스트 모델에 `bad_op`, `din_range`, CONFIG를 반영한다.
 
 ## 검증 (RTL sim, G4의 L4 부분)
 - AXI4-Lite BFM(TB 내 task)으로 PS 프로그램과 같은 순서를 수행: LOAD, op, UNLOAD. 벡터와 기대값은 `ntt_core` TB와 같은 세트의 부분집합(외부 벡터 포함).
