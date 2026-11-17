@@ -1,6 +1,6 @@
 # 진행 로그: pqc-ntt-ip
 
-## 2026-11-17: P3-2 L2 `zeta_rom`, `coef_ram`, `ntt_ctrl` 통과  [notion: pending]
+## 2026-11-17: P3-2 L2 `zeta_rom`, `coef_ram`, `ntt_ctrl` 통과  [notion: synced]
 - 단계: P3
 - 한 일: `rtl/l2/`에 `zeta_rom`(생성된 상수 테이블), `coef_ram`(256 x 12b TDP wrapper, 포트별 en), `ntt_ctrl`(순수 control: 스케줄 FSM, 주소 생성, basemul micro-op 시퀀서, LOAD/UNLOAD 스트림 제어), 공용 패키지 `ntt_l2_pkg`. TB 3개와 cfg 3개.
 - 결과: 수퍼바이저가 세 cfg 재실행: `l2_zeta_rom` 9 run, `l2_coef_ram` 2 run, `l2_ntt_ctrl` 51 run(ALGO 4 x BFU_LATENCY 0..5 x ROM_LAT 0/1 + elab_fail 3), 실패 0, mismatch 0. `ntt_ctrl` run당: 스케줄(주소, zeta 주소, mode, bank) 516,240건이 golden `hw_sched`와 순서까지 일치, basemul program, 타이밍, hazard, 스트림 검사, 그리고 behavioral datapath로 계산한 최종 bank가 golden `hw_ntt`/`hw_intt`/`hw_basemul`과 일치(36 case). Questa 2024.2.
@@ -9,7 +9,7 @@
 - 결정: op 인코딩과 타이밍, cycle 식, RAM_LAT = 1 제약, UNLOAD의 read data hold 의존을 arch.md에 반영. 초안의 cycle 근사식과 layer 경계 대기 길이는 틀렸음(RAM read latency 누락).
 - 미확인: 실제 `bfu`, `coef_ram`, `zeta_rom` RTL과 결합한 검증(P3-3), BRAM/ROM 추론과 합성 가능성, irun.
 
-## 2026-11-16: P2-4 L0 Catapult HLS판 통과  [notion: pending]
+## 2026-11-16: P2-4 L0 Catapult HLS판 통과  [notion: synced]
 - 단계: P2
 - 한 일: `hls/l0/`에 `mod_red` 4종과 `mod_mul` 4종의 Catapult C++(ac_int, golden과 단계와 폭 1:1), Tcl 흐름, 순차 실행 스크립트, hand RTL과 같은 모듈 이름과 포트를 가진 어댑터, 리포트 요약. 8 블록 x 라이브러리 2종(Zynq-7000 xc7z020, Nangate 45 nm) x 구성 3종(latency 0/1/2) = 48개 생성.
 - 결과: 수퍼바이저가 C 수준 테스트 재실행, 8 항목 정의역 전체 mismatch 0. 수퍼바이저가 cfg 3개(`mod_mul` MONT12 asic, `mod_red` BARRETT fpga, `mod_mul` SHIFTADD asic) 시뮬레이션 재실행, 전 run 통과, 데이터 exhaustive mismatch 0. 나머지 13 cfg는 agent 보고(48개 전부 통과, 실제 latency == 요청 latency). TB는 hand RTL 것을 수정 없이 사용. Catapult 2026.3_1, Questa 2024.2.
@@ -19,10 +19,10 @@
 - 머신 부하: 다른 세션의 Catapult가 동시에 돌고 있어 계정 전체로는 3개가 겹친 구간이 있었음. 한도의 범위를 사용자에게 질의.
 - 미확인: SCVerify, irun, 다른 클럭에서의 결과, asic area score의 물리 단위.
 
-## 2026-11-16: P3-1 L1 `bfu` RTL 통과, add/sub 공유 스펙 정정  [notion: pending]
+## 2026-11-16: P3-1 L1 `bfu` RTL 통과, add/sub 공유 스펙 정정  [notion: synced]
 - 단계: P3
 - 한 일: `rtl/l1/bfu.sv`(L0 인스턴스 + mux, 지연선, 단 레지스터), `tb/l1/tb_bfu.sv`, cfg 4개. parameter `PRE_REG`, `MUL_REG`, `RED_PIPE`, `OUT_REG`, `SHARE_ADDSUB`.
-- 결과: 수퍼바이저가 MONT12, K2RED의 전체 구성을 재실행, 각 34 run 실패 0. run당 경계 686, ROM z 1,028,000, random 4,000,000, mode 혼합 스트림 2,000,000, golden trace 재생 2,688(NTT 896 + INTT 896 + BASEMUL 896) 검사에서 mismatch 0 (golden DPI 대비, Questa 2024.2). BARRETT, SHIFTADD는 agent 보고로 각 34 run 통과(수퍼바이저 미재실행).
+- 결과: 수퍼바이저가 MONT12, K2RED의 전체 구성을 재실행, 각 34 run 실패 0. run당 경계 686, ROM z 1,028,000, random 4,000,000, mode 혼합 스트림 2,000,000, golden trace 재생 2,688(NTT 896 + INTT 896 + BASEMUL 896, 재실행한 두 변형 기준. BARRETT와 SHIFTADD는 BASEMUL 640이라 2,432) 검사에서 mismatch 0 (golden DPI 대비, Questa 2024.2). BARRETT, SHIFTADD는 agent 보고로 각 34 run 통과(수퍼바이저 미재실행).
 - 발견: 오케스트레이터 스펙의 "add/sub 한 쌍 공유"는 무조건 성립하지 않음. CT 입력 뒤 정확히 D cycle 후 GS 입력이 오면 충돌, D = 0이면 조합 루프. 기본을 분리 구현(`SHARE_ADDSUB = 0`)으로, 공유는 선택 옵션(op 경계에서 LATENCY 이상 대기 필요)으로 정정.
 - agent 보고(수퍼바이저 미재현): 변이 12종 모두 검출. 공유 구성에 mode 혼합 입력을 넣으면 `L1_SHARE` assertion 8,644회, mismatch 8,639건으로 FAIL. 범위 밖 입력 run은 `run.sh`의 집계가 `L0_RANGE`만 세어 cfg에 넣지 못하고 수동 실행(P3-4에서 정리).
 - 미확인: irun, 합성, 면적과 타이밍, 공유 구성의 나머지 파이프라인 조합.
