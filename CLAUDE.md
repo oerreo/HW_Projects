@@ -34,7 +34,8 @@ paper/    논문 원고
 0. **표준 흐름** (`project-flow.md`): golden model(Python/C++) -> test data 확보 -> RTL -> RTL sim과 golden 비교 mismatch 0 -> FPGA 검증 환경(Zynq PS/ARM 호스트) -> 보드 검증. gate를 건너뛰지 않는다. 프로젝트는 분야를 바꿔가며 다양한 HW 가속기를 다룬다.
 1. **계획 먼저**: 어떤 작업이든 계획을 세우고 `docs/plan.md`에 반영한 뒤 실행한다.
 2. **역할 분담**: Fable = 플래너·오케스트레이터·수퍼바이저 / Opus = sub job 실행(`hw-worker`) / Sonnet = 문서 작업(`doc-writer`). 기본 effort는 medium.
-3. **머신 부하**: 동시 실행은 최대 2. Vivado 합성/구현은 이 머신에서 금지. DC는 사용자가 허락한 시점에만.
+3. **머신 부하**: 동시 실행은 최대 2(연구 쪽 작업만 셈), 프로세스당 core 1개. Vivado 합성/구현은 이 머신에서 금지. DC는 사용자가 허락한 시점에만.
+3-1. **프로세스 노출 최소화** (`process-privacy.md`): 다른 사용자에게는 어떤 툴이 도는지만 보이게 한다. 작업 디렉토리는 700, 툴은 인자 파일로 실행, 명령행에 프로젝트/모듈/테스트 이름을 넣지 않는다.
 4. **RTL vs HLS**: 컨트롤러, top wrapper, 버스 인터페이스 등 control 중심 모듈은 RTL 직접 작성. 알고리즘·데이터패스는 난이도에 따라 Catapult HLS 사용 가능.
 5. **기록**: 마일스톤마다 Notion Research 페이지에 정리. GitHub는 사용자가 연결해준 뒤부터 기록.
 6. **시각 자료** (`visual-docs.md`): 모듈이 검증을 통과하면 block diagram, data flow, control flow를 Mermaid(필요 시 draw.io)로 남기고, 프로젝트마다 실제 trace를 재생하는 interactive HTML viewer를 둔다.

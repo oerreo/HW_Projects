@@ -10,3 +10,14 @@ case "$1" in
   *) echo "usage: source scripts/env.sh <questa|hls|nc|dc|rise>" >&2; return 1 2>/dev/null || exit 1 ;;
 esac
 unset _env_dir
+
+# Privacy on the shared server: files private to the owner, tool temp files in a
+# private directory instead of world-readable /tmp (simulator transcripts,
+# auto-compiled DPI objects).
+umask 077
+# Some tools chmod their TMPDIR to 777, so the private directory is the parent.
+_rt="/tmp/.rt-$(id -u)"
+mkdir -p "$_rt/t" 2>/dev/null
+chmod 700 "$_rt" 2>/dev/null
+export TMPDIR="$_rt/t" TMP="$_rt/t" TEMP="$_rt/t"
+unset _rt
