@@ -3,10 +3,10 @@
 `pqc_ntt_axi_top`(AXI4-Lite 로 감싼 `ntt_core`)을 Digilent Zybo Z7-20 (XC7Z020-1CLG400C) 에 올리고, Zynq PS(ARM Cortex-A9)의 bare-metal 프로그램이 내장 벡터를 넣어 기대값과 비교한다.
 이 디렉토리는 **사용자가 자기 환경에서 실행**하는 스크립트와 PS 소프트웨어다. 준비한 머신에서는 Vivado, Vitis, XSCT 를 실행하지 않았다.
 
-## 현재 상태 (2026-11-17)
-- 준비 단계. `rtl/l4`(`pqc_ntt_axi_top`)는 아직 없고 `rtl/l3/ntt_core.sv` 는 작성 중이다. 레지스터 맵의 기준 `docs/spec/l4_axi.md` 는 초안이다.
+## 현재 상태 (2026-11-18)
+- RTL 준비 완료. `rtl/l4`(`axil_slave`, `pqc_ntt_csr`, `pqc_ntt_axi_top`)가 AXI BFM 시뮬레이션을 통과했다(ALGO 4종, 외부 벡터 전부 mismatch 0, CYCLES가 식과 일치). 레지스터 맵의 기준 `docs/spec/l4_axi.md`는 확정이다. RTL의 접근 trace를 호스트 레지스터 모델로 재생해 값이 같음을 확인했다.
 - 확인한 것: PS 소프트웨어를 레지스터 수준 **소프트웨어 모델**에 대해 호스트(gcc)에서 돌린 결과(아래 "호스트 테스트"), 레지스터 맵 일치 검사(`check_regs.py`), Tcl 스크립트를 Vivado 명령 스텁으로 돌린 문법/변수 검사.
-- 확인하지 않은 것: Vivado/Vitis 에서의 실제 동작, 보드 동작, L4 RTL 과의 일치. 목록은 맨 아래 "미검증 사항".
+- 확인하지 않은 것: Vivado/Vitis 에서의 실제 동작, 보드 동작. 목록은 맨 아래 "미검증 사항".
 - 레지스터 모델은 RTL 이 아니다. 호스트 테스트 통과는 "드라이버, 테스트 프로그램, 벡터, 로그 형식이 **스펙 문서(l4_axi.md + `sw/ASSUMPTIONS.md`)와** 맞는다"는 것만 보증한다. 하드웨어가 스펙대로인지는 L4 RTL 시뮬레이션(AXI BFM)과 보드 실행으로 확인한다.
 
 ## 디렉토리
