@@ -31,8 +31,10 @@
 //   (rd_en_o): rd_data_i is stored in the R data register, RVALID rises in
 //   the next cycle, RDATA / RRESP are held until RREADY.
 // Latency (no backpressure): AW+W handshake cycle c -> write in c+1 -> BVALID
-// in c+2; AR handshake c -> read in c+1 -> RVALID in c+2. Throughput one
-// write and one read every 3 cycles; read and write paths are independent
+// in c+2; AR handshake c -> read in c+1 -> RVALID in c+2. Throughput: one
+// access every 3 cycles for a master that waits for each response, one every
+// 2 cycles for a master that keeps its request valid (the next request is
+// captured while the response is out); read and write paths are independent
 // and may perform an access in the same cycle (the register file defines
 // what a read sees in that case).
 //
