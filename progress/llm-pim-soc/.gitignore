@@ -1,0 +1,6 @@
+# third-party downloads (fetched by data/scripts/fetch.sh, never committed)
+data/third_party/
+# build products and large vectors
+model/build/
+# job file used to run long commands
+.job

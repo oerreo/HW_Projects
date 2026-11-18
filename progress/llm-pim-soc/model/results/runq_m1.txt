@@ -1,0 +1,7 @@
+# runq check: dim 64 hidden 172 GS 64 (runq global), hidden % GS = 44
+w2 matmul: inputs used by the group loop 128 of 172; max|y| 2.5112, max abs err runq vs float 1.5486
+w2 matmul: after setting x[128..171] to +-100, outputs changed: 0 of 64
+w2 scale index: 120 of 128 (row, group) steps start inside a flattened group
+model: prompts 32 positions 9219
+runq  vs F: logits max abs 22.3645 rms 2.8085 top1 42.02% diverged 32/32 mean div pos 0.7
+ours Qg vs F: logits max abs 0.6956 rms 0.1073 top1 98.26% diverged 30/32 mean div pos 57.8

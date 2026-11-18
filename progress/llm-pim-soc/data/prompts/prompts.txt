@@ -1,0 +1,34 @@
+# Verification prompt set (written for this project). One prompt per line.
+# <EMPTY> is the empty prompt. Lines starting with # are comments.
+<EMPTY>
+Once upon a time
+One day, a little girl named Lily
+Tom had a red ball.
+The cat sat on the mat and
+There was a big tree in the park.
+Sam and his mom went to the store
+The sun was hot, so
+A small dog found a bone
+Mia wanted to fly like a bird.
+The old man had a long beard.
+Every morning, Ben ate an apple.
+The boat sailed on the blue sea.
+Anna was sad because her toy broke.
+In the forest, there lived a wise owl.
+Max saw a shiny rock under the water.
+It was raining, and the children stayed inside.
+The princess looked out of the window.
+A little bunny hopped into the garden
+Grandma baked a cake with three candles.
+The robot said hello to the kids.
+Lucy and Tim played with blocks.
+The frog jumped over the log
+At night, the stars were very bright.
+"Can I have a cookie?" asked Jack.
+The bear was hungry and looked for honey.
+Once there was a boy who loved to draw.
+The bus was late, so they walked.
+She opened the box and saw a surprise
+The bird sang a happy song, and
+1, 2, 3, the race began!
+The café had a big window.

@@ -1,0 +1,12 @@
+# prof var=HB prompts=8 tokens=1629 (PC x86, not ARM)
+# kernel calls_per_token macs_per_token elems_per_token time_pct
+prof embed 1.00 0 288 0.01
+prof gemv 43.00 15187968 49856 94.56
+prof rmsnorm 13.00 7488 3744 0.37
+prof actq 114.00 0 6912 0.26
+prof rope 12.00 6912 3456 0.07
+prof attn 36.00 369919 3853 3.38
+prof swiglu 6.00 9216 4608 0.51
+prof add 12.00 0 3456 0.03
+prof argmax 1.00 0 32000 0.81
+# per token: H kernels 5.3424 ms (sum of hooks), H forward 5.3604 ms, F forward 8.4612 ms
