@@ -1,16 +1,16 @@
 # 진행 로그: pqc-ntt-ip
 
-## 2026-11-18: P5-1b L4 하위 모듈 단독 TB  [notion: pending]
+## 2026-11-18: P5-1b L4 하위 모듈 단독 TB  [notion: synced]
 - 한 일: `tb/l4/tb_axil_slave.sv`, `tb/l4/tb_pqc_ntt_csr.sv`, cfg 2개. `axil_slave` 머리 주석의 throughput 서술 수정(응답을 기다리는 master는 3 cycle당 1건, valid를 유지하는 master는 2 cycle당 1건. 로직 변경 없음).
 - 결과(수퍼바이저 재실행): 두 cfg 19 run 전부 PASS(elab_fail 10개 포함).
 - agent 보고(재실행 안 함): 해당 변이 23종(axil 6, csr 17) 전부 검출. 같은 cycle 충돌(done과 CTRL 쓰기, ERR set과 W1C 등)이 run마다 수백 회 이상 실제로 발생.
 - 한계: csr TB는 연산 길이를 줄여 흔든다(실제 길이는 run당 1~3회). CYCLES 포화는 force를 쓴 white-box 시험.
 
-## 2026-11-18: 범위 축소 결정  [notion: pending]
+## 2026-11-18: 범위 축소 결정  [notion: synced]
 - 결정(사용자): 이 프로젝트는 보드 검증까지만 하고 닫는다. 다음 프로젝트는 "LLM 추론 + PIM" 시스템 프로젝트.
 - 영향: P4, P6, P7, P2-5는 하지 않는다. 논문용 RTL 대 HLS 비교는 L0 Catapult 결과(`hls/l0/report/summary.md`)까지만 남는다. 남은 일은 P5-1b(단독 TB), P5-2(사용자 Vivado 빌드와 보드 실행), 정리와 `done/` 이동.
 
-## 2026-11-18: P5-1 L4 AXI wrapper 통과 (G4의 L4 부분)  [notion: pending]
+## 2026-11-18: P5-1 L4 AXI wrapper 통과 (G4의 L4 부분)  [notion: synced]
 - 단계: P5
 - 한 일: `rtl/l4/`(`axil_slave`, `pqc_ntt_csr`, `pqc_ntt_axi_top`), `tb/l4/`(AXI BFM, 매 cycle CSR 참조 모델, 프로토콜 검사), L4 cfg 4개. `fpga/sw` 헤더, 드라이버, 호스트 모델을 확정 스펙(`bad_op`, `din_range`, CONFIG)에 맞춤. RTL 접근 trace를 호스트 레지스터 모델로 재생하는 대조(`fpga/sw/test/replay.c`). HLS 실행 스크립트를 환경변수와 `catapult -shell -f run.tcl` 방식으로 변경.
 - 결과(수퍼바이저 재실행): L4 36 run(ALGO 4종 x 9) 전부 PASS. full run은 외부 벡터 NTT 855, INTT 450, basemul 2145 전부를 AXI 경유로 mismatch 0. 호스트 테스트 PASS, trace 재생 8개 mismatch 0.
