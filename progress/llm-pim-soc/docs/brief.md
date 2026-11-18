@@ -1,6 +1,6 @@
-# tiny-llm-inference-soc: 작은 LLM 추론 시스템의 kernel별 오프로드
+# llm-pim-soc: 작은 LLM 추론 시스템의 kernel별 오프로드와 PIM형 GEMV
 
-상태: 후보 (2026-11-18, 사용자 제안 "AI 반도체, 굵직한 시스템 프로젝트"). 기존 `transformer-attention-accel.md`를 포함하는 상위 프로젝트.
+상태: 진행 (2026-11-18 사용자 결정 "LLM 추론 + PIM"). 기존 후보 `transformer-attention-accel`을 흡수했다. 다음 프로젝트는 `todo/nand-ecc-subsystem.md`.
 
 ## 분야
 AI 가속기 (transformer 추론). 시스템 수준: C 참조 구현 전체 + kernel 단위 IP + HW/SW 분할.
@@ -16,6 +16,11 @@ AI 가속기 (transformer 추론). 시스템 수준: C 참조 구현 전체 + ke
 - 모델: 공개된 소형 transformer(TinyStories 계열 수백 K ~ 15 M parameter), int8 또는 고정소수점 양자화. 양자화 전후 출력 차이를 C에서 먼저 정량화.
 - 후보 IP: GEMV/matmul(가중치는 DDR, AXI HP로 읽음), attention score + softmax, RMSNorm/LayerNorm, 활성함수(SiLU/GELU 근사), sampling(top-k).
 - 비범위: 학습, 대형 모델, 성능 경쟁.
+
+## PIM (메모리 쪽)
+- GEMV를 두 구조로 구현해 비교한다: (1) 가속기형(가중치를 DDR에서 스트림으로 읽어 연산), (2) PIM형(가중치를 bank(BRAM)에 두고 bank 옆 MAC 연산기가 연산, 호스트는 명령만 보냄. HBM-PIM, GDDR6-AiM 계열의 축소 에뮬레이션).
+- 비교 지표: 데이터 이동량, 호스트 개입 횟수, kernel 가속비, 자원. 명령 컨트롤러와 bank wrapper는 RTL.
+- 흡수한 brief의 내용: 비선형 함수(softmax, GELU, 역제곱근)의 하드웨어 근사와 오차 해석, 양자화 오차 전파. 경쟁 연구가 많아 성능 경쟁은 하지 않는다.
 
 ## 가치
 - 실무: AI 반도체 직무의 핵심인 HW/SW 분할, 양자화 정밀도, 메모리 대역폭 병목을 숫자로 다룬다.

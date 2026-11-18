@@ -1,5 +1,9 @@
 # 진행 로그: pqc-ntt-ip
 
+## 2026-11-18: 범위 축소 결정  [notion: pending]
+- 결정(사용자): 이 프로젝트는 보드 검증까지만 하고 닫는다. 다음 프로젝트는 "LLM 추론 + PIM" 시스템 프로젝트.
+- 영향: P4, P6, P7, P2-5는 하지 않는다. 논문용 RTL 대 HLS 비교는 L0 Catapult 결과(`hls/l0/report/summary.md`)까지만 남는다. 남은 일은 P5-1b(단독 TB), P5-2(사용자 Vivado 빌드와 보드 실행), 정리와 `done/` 이동.
+
 ## 2026-11-18: P5-1 L4 AXI wrapper 통과 (G4의 L4 부분)  [notion: pending]
 - 단계: P5
 - 한 일: `rtl/l4/`(`axil_slave`, `pqc_ntt_csr`, `pqc_ntt_axi_top`), `tb/l4/`(AXI BFM, 매 cycle CSR 참조 모델, 프로토콜 검사), L4 cfg 4개. `fpga/sw` 헤더, 드라이버, 호스트 모델을 확정 스펙(`bad_op`, `din_range`, CONFIG)에 맞춤. RTL 접근 trace를 호스트 레지스터 모델로 재생하는 대조(`fpga/sw/test/replay.c`). HLS 실행 스크립트를 환경변수와 `catapult -shell -f run.tcl` 방식으로 변경.
