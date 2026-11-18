@@ -6,9 +6,10 @@
  *   BASEMUL            LOAD a -> bank0, b -> bank1, BASEMUL, UNLOAD bank0
  *   POLYMUL            pqc_ntt_polymul (NTT, NTT, BASEMUL, INTT, one PS
  *                      round trip for bank placement)
- * plus register-level checks (ERR bits, W1C, done_sticky clear, LOAD/UNLOAD
- * round trip, bank independence), and compares CYCLES with the value
- * expected for the ALGO / BFU_LATENCY read from VERSION.
+ * plus register-level checks (all five ERR bits, W1C, done_sticky clear and
+ * its exception for an illegal op, LOAD/UNLOAD round trip, bank
+ * independence, CONFIG consistent with VERSION), and compares CYCLES with
+ * the value expected for the ALGO / BFU_LATENCY read from VERSION.
  *
  * Output: one item per line, "KEY k=v k=v ...", parsed by
  * fpga/sw/tools/parse_uart_log.py. Format described in fpga/README.md.
@@ -170,7 +171,8 @@ static int test_polymul(const pqc_vec_t *vec, int count, uint32_t exp_cycles)
 }
 
 /* ------------------------------------------------------------------------
- * Register-level checks (l4_axi.md ERR bits, ASSUMPTIONS.md A4, A5, A8, A14)
+ * Register-level checks (l4_axi.md "decided behaviour"; ASSUMPTIONS.md A4,
+ * A5, A8, A9, A14, A15)
  * ------------------------------------------------------------------------ */
 static void check(const char *name, int ok, uint32_t val)
 {
@@ -250,6 +252,15 @@ static void register_checks(void)
   /* done_sticky is cleared by a CTRL write without start (A5). */
   s = pqc_ntt_status(&dev);
   check("done_sticky_set", (s & PQC_NTT_STATUS_DONE_STICKY) != 0u, s);
+  /* An illegal op changes neither busy nor done_sticky, sets ERR.bad_op
+   * (A9). The driver never writes one; written raw here. */
+  reg_write32(dev.base, PQC_NTT_REG_CTRL, PQC_NTT_CTRL_VALUE(1u, 7u, 0u));
+  s = pqc_ntt_status(&dev);
+  check("bad_op_keeps_status", (s & (PQC_NTT_STATUS_DONE_STICKY | PQC_NTT_STATUS_BUSY)) ==
+                                   PQC_NTT_STATUS_DONE_STICKY, s);
+  e = pqc_ntt_err_read(&dev);
+  check("err_bad_op", e == PQC_NTT_ERR_BAD_OP, e);
+  pqc_ntt_err_clear(&dev, PQC_NTT_ERR_ALL);
   reg_write32(dev.base, PQC_NTT_REG_CTRL, PQC_NTT_CTRL_VALUE(0u, PQC_NTT_OP_LOAD, 0u));
   s = pqc_ntt_status(&dev);
   check("done_sticky_clear_by_ctrl", (s & (PQC_NTT_STATUS_DONE_STICKY | PQC_NTT_STATUS_BUSY)) == 0u, s);
@@ -269,6 +280,40 @@ static void register_checks(void)
   check("bank1_roundtrip", rc == PQC_OK && compare("CHECK", 2, pat, got) == 0, (uint32_t)rc);
   if (rc != PQC_OK) after_error();
 
+  /* din_range: a word >= q written raw during LOAD is stored as its low 12
+   * bits and sets ERR.din_range (A15; the driver rejects such input). */
+  make_pattern(pat, 37u, 11u);
+  pat[9] = (uint16_t)PQC_NTT_Q;
+  pat[10] = 0xFFFu;
+  rc = pqc_ntt_start(&dev, PQC_NTT_OP_LOAD, 1u);
+  ok = (rc == PQC_OK);
+  for (i = 0; i < PQC_NTT_N && ok; i++) {
+    uint32_t n;
+    for (n = 0; n < dev.poll_limit; n++) {
+      if (pqc_ntt_status(&dev) & PQC_NTT_STATUS_IN_READY) break;
+    }
+    if (n == dev.poll_limit) ok = 0;
+    else reg_write32(dev.base, PQC_NTT_REG_DIN, pat[i]);
+  }
+  rc = ok ? pqc_ntt_wait_done(&dev) : PQC_ERR_TIMEOUT;
+  e = pqc_ntt_err_read(&dev);
+  check("err_din_range", rc == PQC_OK && e == PQC_NTT_ERR_DIN_RANGE, e);
+  if (rc != PQC_OK) after_error();
+  pqc_ntt_err_clear(&dev, PQC_NTT_ERR_ALL);
+  rc = pqc_ntt_unload(&dev, 1u, got);
+  check("din_range_stored_unchanged", rc == PQC_OK && compare("CHECK", 3, pat, got) == 0, (uint32_t)rc);
+  if (rc != PQC_OK) after_error();
+
+  /* CONFIG: pipeline fields add up to VERSION.BFU_LATENCY */
+  {
+    pqc_ntt_version_t vv;
+    pqc_ntt_config_t cc;
+    pqc_ntt_version(&dev, &vv);
+    pqc_ntt_config(&dev, &cc);
+    check("config_latency", cc.pre_reg + cc.mul_reg + cc.red_pipe + cc.out_reg == vv.bfu_latency &&
+                                cc.fclk_mhz != 0u, cc.raw);
+  }
+
   e = pqc_ntt_err_read(&dev);
   check("err_zero_after_checks", e == 0u, e);
   pqc_ntt_err_clear(&dev, PQC_NTT_ERR_ALL);
@@ -278,6 +323,7 @@ static void register_checks(void)
 int main(void)
 {
   pqc_ntt_version_t ver;
+  pqc_ntt_config_t cfg;
   uint32_t c_ntt, c_intt, c_bm, c_pm;
   int pass = 1;
   int version_ok;
@@ -294,6 +340,10 @@ int main(void)
   PQC_PRINTF("VERSION raw=0x%x id=0x%x id_ok=%d algo=%d algo_name=%s bfu_latency=%d\r\n",
              (unsigned)ver.raw, (unsigned)ver.id, ver.id == PQC_NTT_VERSION_ID_VALUE ? 1 : 0,
              (int)ver.algo, pqc_ntt_algo_name(ver.algo), (int)ver.bfu_latency);
+  pqc_ntt_config(&dev, &cfg);
+  PQC_PRINTF("CONFIG raw=0x%x impl=%d share_addsub=%d rom_out_reg=%d pre_reg=%d mul_reg=%d red_pipe=%d out_reg=%d fclk_mhz=%d\r\n",
+             (unsigned)cfg.raw, (int)cfg.impl, (int)cfg.share_addsub, (int)cfg.rom_out_reg, (int)cfg.pre_reg,
+             (int)cfg.mul_reg, (int)cfg.red_pipe, (int)cfg.out_reg, (int)cfg.fclk_mhz);
   if (!version_ok) {
     /* Wrong ID: wrong base address, no bitstream, or header / RTL out of
      * sync. Expected cycles are meaningless; stop here. */

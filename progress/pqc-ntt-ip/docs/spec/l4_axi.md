@@ -61,3 +61,14 @@ Claude가 준비하고 사용자가 실행한다(이 머신에서 Vivado 실행 
 ## 미정
 - FCLK 목표 주파수(`ntt_core` 파이프라인 구성과 함께 결정).
 - HLS판 `bfu`를 `ntt_core`에 끼우는 방식(P4에서 결정).
+
+## L4 구현 결과 반영 (2026-11-18, P5-1)
+- 모듈: `axil_slave`(AXI4-Lite 채널 처리, 레지스터 맵을 모름), `pqc_ntt_csr`(레지스터와 스트림 변환), `pqc_ntt_axi_top`(인스턴스와 배선). AXI 입력에서 코어로 가는 조합 경로는 없다.
+- 타이밍: handshake cycle c, 레지스터 접근 c+1, 응답 c+2. DOUT pop은 읽기 수행 cycle에 한 번만 일어나고 R 채널이 막혀도 반복되지 않는다. 같은 cycle의 읽기는 그 cycle의 쓰기 전 상태를 본다.
+- 구현 중 확정한 세부(위 "확정한 동작"의 보충):
+  - 정의되지 않은 op로 start한 CTRL 쓰기는 `done_sticky`를 지우지 않는다. busy 중이면 `start_busy`와 `bad_op`가 함께 선다.
+  - `din_range`는 받아들여진 DIN만 대상이다(bit[11:0] 기준). 버려진 쓰기는 `din_notready`만 세운다.
+  - 같은 cycle에 같은 ERR 비트의 set과 W1C가 겹치면 set이 남는다.
+  - `done_sticky`와 CYCLES는 done 다음 cycle부터, `result_bank`는 done cycle부터 보인다.
+  - 주소 bit[1:0]은 무시한다. CONFIG의 `fclk_mhz`는 정수(1..255).
+- 실측 CYCLES는 `arch.md`의 식과 모든 구성에서 일치(L = 0: NTT/INTT 904, BASEMUL 643 또는 899).

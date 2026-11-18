@@ -108,8 +108,8 @@ if {$impl eq "hls" && ($MUL_REG + $RED_PIPE) > 2} {
   error "IMPL=hls has no mod_mul build with MUL_REG + RED_PIPE = 3 (hls/l0/README.md)"
 }
 set fclk [dict get $A FCLK_MHZ]
-if {![string is double -strict $fclk] || $fclk <= 0 || $fclk > 250} {
-  error "FCLK_MHZ must be in (0, 250], got $fclk"
+if {![string is double -strict $fclk] || $fclk < 1 || $fclk > 250} {
+  error "FCLK_MHZ must be in \[1, 250\], got $fclk"
 }
 set intc [dict get $A INTC]
 if {$intc ni {smartconnect axi_interconnect}} { error "INTC must be smartconnect or axi_interconnect" }
@@ -277,8 +277,13 @@ connect_bd_net [get_bd_pins ps7/FCLK_RESET0_N] [get_bd_pins rst_ps7/ext_reset_in
 # UNVERIFIED: the referenced module must elaborate (rtl/l4 present). The
 # interface name s_axi is inferred from the s_axi_* ports; checked below.
 set pqc [create_bd_cell -type module -reference $ref_top pqc_ntt_0]
+# IMPL and FCLK_MHZ only set the CONFIG register (build information read by
+# the PS program); FCLK_MHZ is the requested value rounded to an integer.
+set impl_id   [expr {$impl eq "hls" ? 1 : 0}]
+set fclk_int  [expr {int(round($fclk))}]
 foreach {p v} [list ALGO $algo_id PRE_REG $PRE_REG MUL_REG $MUL_REG RED_PIPE $RED_PIPE \
-                    OUT_REG $OUT_REG SHARE_ADDSUB $SHARE_ADDSUB ROM_OUT_REG $ROM_OUT_REG] {
+                    OUT_REG $OUT_REG SHARE_ADDSUB $SHARE_ADDSUB ROM_OUT_REG $ROM_OUT_REG \
+                    IMPL $impl_id FCLK_MHZ $fclk_int] {
   if {![pqc_set_cfg $pqc $p $v]} {
     error "cannot set parameter $p of $ref_top (module reference parameters must be plain integers, ASSUMPTION A22)"
   }

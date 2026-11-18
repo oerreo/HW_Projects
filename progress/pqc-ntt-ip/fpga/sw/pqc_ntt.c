@@ -43,6 +43,20 @@ void pqc_ntt_version(pqc_ntt_dev_t *dev, pqc_ntt_version_t *v)
   v->id = PQC_NTT_FIELD_GET(raw, PQC_NTT_VERSION_ID_SHIFT, PQC_NTT_VERSION_ID_WIDTH);
 }
 
+void pqc_ntt_config(pqc_ntt_dev_t *dev, pqc_ntt_config_t *c)
+{
+  uint32_t raw = reg_read32(dev->base, PQC_NTT_REG_CONFIG);
+  c->raw = raw;
+  c->impl = PQC_NTT_FIELD_GET(raw, PQC_NTT_CONFIG_IMPL_BIT, 1u);
+  c->share_addsub = PQC_NTT_FIELD_GET(raw, PQC_NTT_CONFIG_SHARE_ADDSUB_BIT, 1u);
+  c->rom_out_reg = PQC_NTT_FIELD_GET(raw, PQC_NTT_CONFIG_ROM_OUT_REG_BIT, 1u);
+  c->pre_reg = PQC_NTT_FIELD_GET(raw, PQC_NTT_CONFIG_PRE_REG_BIT, 1u);
+  c->mul_reg = PQC_NTT_FIELD_GET(raw, PQC_NTT_CONFIG_MUL_REG_BIT, 1u);
+  c->red_pipe = PQC_NTT_FIELD_GET(raw, PQC_NTT_CONFIG_RED_PIPE_SHIFT, PQC_NTT_CONFIG_RED_PIPE_WIDTH);
+  c->out_reg = PQC_NTT_FIELD_GET(raw, PQC_NTT_CONFIG_OUT_REG_BIT, 1u);
+  c->fclk_mhz = PQC_NTT_FIELD_GET(raw, PQC_NTT_CONFIG_FCLK_MHZ_SHIFT, PQC_NTT_CONFIG_FCLK_MHZ_WIDTH);
+}
+
 uint32_t pqc_ntt_err_read(pqc_ntt_dev_t *dev)
 {
   return reg_read32(dev->base, PQC_NTT_REG_ERR);
@@ -96,7 +110,7 @@ unsigned pqc_ntt_result_bank(unsigned op, unsigned bank)
 int pqc_ntt_start(pqc_ntt_dev_t *dev, unsigned op, unsigned bank)
 {
   if (!op_valid(op) || bank > 1u) {
-    return PQC_ERR_ARG; /* A9: an illegal op is never written */
+    return PQC_ERR_ARG; /* A9: an illegal op is never written (the IP would only set ERR.bad_op) */
   }
   if (pqc_ntt_status(dev) & PQC_NTT_STATUS_BUSY) {
     return PQC_ERR_BUSY; /* A8: would only set ERR.start_busy */
@@ -135,8 +149,8 @@ int pqc_ntt_load(pqc_ntt_dev_t *dev, unsigned bank, const uint16_t coeffs[PQC_NT
   if (coeffs == NULL || bank > 1u) {
     return PQC_ERR_ARG;
   }
-  /* The IP does not range-check DIN (A15): reject before starting so that
-   * no LOAD is left half-finished. */
+  /* The IP stores a word >= q unchanged and only sets ERR.din_range (A15):
+   * reject before starting so that no LOAD is left half-finished. */
   for (i = 0; i < PQC_NTT_N; i++) {
     if (coeffs[i] >= PQC_NTT_Q) {
       return PQC_ERR_ARG;

@@ -5,6 +5,8 @@
 ## 트리
 ```
 L4  pqc_ntt_axi_top            AXI4-Lite(CSR, 계수 입출력 포함) wrapper, v1 (l4_axi.md)  RTL
+      L4  axil_slave           AXI4-Lite 5채널을 레지스터 write/read strobe로 변환 (맵을 모름)  RTL
+      L4  pqc_ntt_csr          레지스터 맵, done_sticky, ERR, CYCLES, DIN/DOUT의 스트림 변환     RTL
       L3  ntt_core             NTT / INTT / basemul 모드, start/done, 계수 스트림    RTL (구조)
             L2  ntt_ctrl       layer/group/index 스케줄 FSM, 주소와 zeta 주소 생성   RTL
             L2  zeta_rom       zeta, gamma 테이블 (golden model에서 생성)            RTL
@@ -27,7 +29,7 @@ L4  pqc_ntt_axi_top            AXI4-Lite(CSR, 계수 입출력 포함) wrapper, 
 | 5 | `bfu` | L1 | RTL, HLS | random + 경계, golden butterfly 덤프 대비 | mismatch 0 |
 | 6 | `zeta_rom`, `coef_ram`, `ntt_ctrl` | L2 | RTL | 주소 시퀀스를 golden의 접근 순서 덤프와 비교 | mismatch 0 |
 | 7 | `ntt_core` | L3 | RTL | 다항식 단위 벡터(외부 데이터 포함), stall random | mismatch 0 |
-| 8 | `pqc_ntt_axi_top` | L4 | RTL | AXI BFM, 다항식 단위 벡터 | mismatch 0 |
+| 8 | `axil_slave`, `pqc_ntt_csr`, `pqc_ntt_axi_top` | L4 | RTL | AXI BFM, 다항식 단위 벡터, 매 cycle CSR 참조 모델 대조. 하위 두 모듈은 top TB 안에서 양쪽 경계를 대조(단독 TB 없음, 2026-11-18 기준) | mismatch 0 |
 
 순서 1~4가 로드맵 P2, 5~7이 P3, 8이 P5에 해당한다.
 

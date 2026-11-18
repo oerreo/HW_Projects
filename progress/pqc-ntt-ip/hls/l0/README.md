@@ -22,12 +22,12 @@ Catapult 수치는 모두 Catapult 내부 라이브러리 기반 추정치이며
 ```
 source /home/theo/work/research/scripts/env.sh hls
 make -C hls/l0/test test                      # C 수준: 8 함수 x 정의역 전체, OVERALL: PASS
-hls/l0/tcl/run_all.sh                         # 48 구성 순차 (블록 8 x lib 2 x cfg 3), 약 15분
-hls/l0/tcl/run_all.sh '^mod_red_k2red$' asic p1   # 일부만 (block, lib, cfg 정규식)
+./hls/l0/tcl/run_all.sh                       # 48 구성 순차 (블록 8 x lib 2 x cfg 3), 약 15분
+export BLK_RE='^mod_red_k2red$' LIB_RE=asic CFG_RE=p1; ./hls/l0/tcl/run_all.sh   # 일부만 (환경변수 정규식)
 ./sim/run.sh hls_l0_mod_red_barrett_asic      # RTL sim (cfg 16개: hls_l0_<block>_<lib>)
 python3 hls/l0/report/hls_l0_report.py        # report/summary.{csv,md}
 ```
-`run_cfg.sh` 는 flock으로 Catapult를 하나씩만 돌리고, 이 사용자의 무거운 툴 프로세스(catapult, vsimk, vlog, dc_shell 등)가 2개 이상이면 빈 슬롯을 기다린다.
+선택과 구성은 인자가 아니라 환경변수로 넘긴다(`.claude/rules/process-privacy.md`). `run_cfg.sh` 는 실행 디렉토리(`run/<top>/`)에 `run.tcl` 을 만들어 `catapult -shell -f run.tcl` 로 실행하므로 명령행에 블록 이름이나 경로가 나오지 않는다. `run_cfg.sh` 는 flock으로 Catapult를 하나씩만 돌리고, 이 사용자의 무거운 툴 프로세스(catapult, vsimk, vlog, dc_shell 등)가 2개 이상이면 빈 슬롯을 기다린다.
 
 ## 구성
 | cfg | Catapult 설정 | latency | 생성 포트 |

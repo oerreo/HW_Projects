@@ -1,5 +1,14 @@
 # 진행 로그: pqc-ntt-ip
 
+## 2026-11-18: P5-1 L4 AXI wrapper 통과 (G4의 L4 부분)  [notion: pending]
+- 단계: P5
+- 한 일: `rtl/l4/`(`axil_slave`, `pqc_ntt_csr`, `pqc_ntt_axi_top`), `tb/l4/`(AXI BFM, 매 cycle CSR 참조 모델, 프로토콜 검사), L4 cfg 4개. `fpga/sw` 헤더, 드라이버, 호스트 모델을 확정 스펙(`bad_op`, `din_range`, CONFIG)에 맞춤. RTL 접근 trace를 호스트 레지스터 모델로 재생하는 대조(`fpga/sw/test/replay.c`). HLS 실행 스크립트를 환경변수와 `catapult -shell -f run.tcl` 방식으로 변경.
+- 결과(수퍼바이저 재실행): L4 36 run(ALGO 4종 x 9) 전부 PASS. full run은 외부 벡터 NTT 855, INTT 450, basemul 2145 전부를 AXI 경유로 mismatch 0. 호스트 테스트 PASS, trace 재생 8개 mismatch 0.
+- agent 보고(재실행 안 함): 변이 23종 전부 검출, quick 131 run fail 0, CYCLES가 L = 0, 3, 5에서 식과 일치, Catapult 구성 1개 재실행 결과가 기존과 같음.
+- 결정: 구현 중 확정한 세부 6건을 `l4_axi.md` "L4 구현 결과 반영"에 기록.
+- 한계: `axil_slave`, `pqc_ntt_csr`의 단독 TB 없음(top TB에서 양쪽 경계 대조). Vivado Tcl과 SV top의 module reference는 미실행. agent의 초기 실행에서 명령행에 TB 이름이 약 3분 노출(이후 job 파일 방식).
+- 다음: 사용자에게 1차 Vivado 빌드 요청(P5-2). 단독 TB 보강(P5-1b).
+
 ## 2026-11-17: P3-3 L3 `ntt_core` 통합 통과, P3-4 회귀 스크립트 정리  [notion: synced]
 - 단계: P3 (G3/G4의 코어 부분)
 - 한 일: `rtl/l3/ntt_core.sv`(L2/L1 인스턴스 + operand/임시 레지스터와 mux), `tb/l3/tb_ntt_core.sv`, L3 cfg 4개. `sim/run.sh`에 `quick`/`all` 등급, `assert:TAG=n` 기대 형식, 인자 파일 실행(`vlog -f c.f`, `vsim -f r.f`), 테스트 이름은 환경변수 `T`.

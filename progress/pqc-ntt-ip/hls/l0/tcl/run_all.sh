@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Run every L0 Catapult configuration sequentially and collect the outputs.
 #
-#   hls/l0/tcl/run_all.sh [block-regex] [lib-regex] [cfg-regex]
+#   [export BLK_RE=<regex> LIB_RE=<regex> CFG_RE=<regex>]   (default: all)
+#   ./hls/l0/tcl/run_all.sh
+#
+# Selection in the environment, not as arguments (process privacy rule);
+# run_cfg.sh is started from this directory with a relative path and gets
+# its configuration in HLS_BLOCK / HLS_LIB / HLS_CFG / HLS_CLK_NS.
 #
 # For each block x lib x cfg: hls/l0/tcl/run_cfg.sh, then copy the netlist and
 # the reports to hls/l0/out/<top>/ (committed):
@@ -21,9 +26,10 @@ set -u -o pipefail
 
 TCL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 HLS_DIR=$(cd "$TCL_DIR/.." && pwd)
-BLK_RE=${1:-.}
-LIB_RE=${2:-.}
-CFG_RE=${3:-.}
+[[ $# -eq 0 ]] || { echo "run_all.sh: selection goes in BLK_RE / LIB_RE / CFG_RE, not arguments"; exit 2; }
+BLK_RE=${BLK_RE:-.}
+LIB_RE=${LIB_RE:-.}
+CFG_RE=${CFG_RE:-.}
 CLK_FPGA=${CLK_FPGA:-40.0}
 CLK_ASIC=${CLK_ASIC:-6.0}
 
@@ -58,7 +64,8 @@ for b in $BLOCKS; do
     for c in $CFGS; do
       [[ $c =~ $CFG_RE ]] || continue
       top=${b}_${l}_${c}
-      if "$TCL_DIR/run_cfg.sh" "$b" "$l" "$c" "$clk" && collect "$top"; then
+      if (cd "$TCL_DIR" && HLS_BLOCK=$b HLS_LIB=$l HLS_CFG=$c HLS_CLK_NS=$clk ./run_cfg.sh) \
+         && collect "$top"; then
         :
       else
         n_fail=$((n_fail + 1))

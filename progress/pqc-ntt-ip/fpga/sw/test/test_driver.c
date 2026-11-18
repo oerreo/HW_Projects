@@ -3,11 +3,13 @@
  *   NEG name=<name> result=PASS|FAIL detail=...
  * and the program ends with "NEGTEST RESULT: PASS|FAIL".
  *
- * What is covered: every ERR bit, W1C, driver argument checks (no hardware
- * access on a rejected call), busy precondition, timeouts (hang, stall,
- * illegal op), recovery of half-finished LOAD / UNLOAD, result bank check,
- * done_sticky clear, LOAD/UNLOAD round trip, and that STATUS polling saw
- * not-ready states (so the poll loops were exercised).
+ * What is covered: every ERR bit (start_busy, din_notready, dout_notvalid,
+ * bad_op, din_range), W1C, driver argument checks (no hardware access on a
+ * rejected call), busy precondition, timeouts (hang, stall, illegal op),
+ * recovery of half-finished LOAD / UNLOAD, result bank check, done_sticky
+ * clear and its exception for an illegal op, CONFIG decode, LOAD/UNLOAD
+ * round trip, and that STATUS polling saw not-ready states (so the poll
+ * loops were exercised).
  */
 #include <stdio.h>
 #include <string.h>
@@ -55,11 +57,25 @@ int main(void)
   snprintf(msg, sizeof msg, "raw=0x%x", (unsigned)v.raw);
   report("version_decode", v.algo == 3u && v.bfu_latency == 3u && v.id == PQC_NTT_VERSION_ID_VALUE, msg);
 
+  /* CONFIG decode (model default for LATENCY 3: CFG preset l3, 100 MHz) */
+  {
+    pqc_ntt_config_t c;
+    pqc_ntt_config(&dev, &c);
+    snprintf(msg, sizeof msg, "raw=0x%x", (unsigned)c.raw);
+    report("config_decode", c.impl == 0u && c.share_addsub == 0u && c.rom_out_reg == 1u && c.pre_reg == 0u &&
+                                c.mul_reg == 1u && c.red_pipe == 1u && c.out_reg == 1u && c.fclk_mhz == 100u &&
+                                c.pre_reg + c.mul_reg + c.red_pipe + c.out_reg == v.bfu_latency, msg);
+  }
+
   /* ERR.din, W1C of a single bit */
   fresh(0, 0, RM_FAULT_NONE);
   reg_write32(dev.base, PQC_NTT_REG_DIN, 5u);
   e = pqc_ntt_err_read(&dev);
   report("err_din_idle", e == PQC_NTT_ERR_DIN, "");
+  pqc_ntt_err_clear(&dev, PQC_NTT_ERR_DIN);
+  reg_write32(dev.base, PQC_NTT_REG_DIN, 0xFFFu); /* dropped: no din_range */
+  e = pqc_ntt_err_read(&dev);
+  report("err_din_idle_ge_q_only_din", e == PQC_NTT_ERR_DIN, "");
   reg_read32(dev.base, PQC_NTT_REG_DOUT);
   e = pqc_ntt_err_read(&dev);
   report("err_dout_idle", e == (PQC_NTT_ERR_DIN | PQC_NTT_ERR_DOUT), "");
@@ -130,12 +146,51 @@ int main(void)
   reg_model_get_stats(&st1);
   report("arg_no_access", st1.accesses == st0.accesses, "");
 
-  /* illegal op written raw: no busy, no done (A9) -> timeout, ERR 0 */
+  /* illegal op written raw: no busy, no done (A9) -> timeout, ERR.bad_op */
   dev.poll_limit = 1000u;
   reg_write32(dev.base, PQC_NTT_REG_CTRL, PQC_NTT_CTRL_VALUE(1u, 5u, 0u));
   rc = pqc_ntt_wait_done(&dev);
-  report("illegal_op_raw_timeout", rc == PQC_ERR_TIMEOUT && pqc_ntt_err_read(&dev) == 0u,
+  report("illegal_op_raw_timeout", rc == PQC_ERR_TIMEOUT && pqc_ntt_err_read(&dev) == PQC_NTT_ERR_BAD_OP,
          pqc_ntt_rc_name(rc));
+  pqc_ntt_err_clear(&dev, PQC_NTT_ERR_ALL);
+  dev.poll_limit = PQC_NTT_POLL_LIMIT_DEFAULT;
+
+  /* illegal op after an op: done_sticky and busy unchanged, ERR.bad_op */
+  pattern(a, 5u, 9u);
+  rc = pqc_ntt_load(&dev, 0u, a);
+  reg_write32(dev.base, PQC_NTT_REG_CTRL, PQC_NTT_CTRL_VALUE(1u, 7u, 1u));
+  s = pqc_ntt_status(&dev);
+  e = pqc_ntt_err_read(&dev);
+  snprintf(msg, sizeof msg, "status=0x%x err=0x%x", (unsigned)s, (unsigned)e);
+  report("bad_op_keeps_done_sticky", rc == PQC_OK && (s & PQC_NTT_STATUS_DONE_STICKY) &&
+                                         !(s & PQC_NTT_STATUS_BUSY) && e == PQC_NTT_ERR_BAD_OP, msg);
+  pqc_ntt_err_clear(&dev, PQC_NTT_ERR_ALL);
+
+  /* illegal op while busy: start_busy and bad_op */
+  rc = pqc_ntt_start(&dev, PQC_NTT_OP_LOAD, 1u);
+  reg_write32(dev.base, PQC_NTT_REG_CTRL, PQC_NTT_CTRL_VALUE(1u, 6u, 0u));
+  e = pqc_ntt_err_read(&dev);
+  report("bad_op_while_busy", rc == PQC_OK && e == (PQC_NTT_ERR_START_BUSY | PQC_NTT_ERR_BAD_OP), "");
+  pqc_ntt_err_clear(&dev, PQC_NTT_ERR_ALL);
+
+  /* din_range: words >= q written raw during that LOAD are stored as their
+   * low 12 bits and set ERR.din_range */
+  pattern(b, 7u, 2u);
+  b[5] = (uint16_t)PQC_NTT_Q;
+  b[6] = 0xFFFu;
+  for (i = 0; i < PQC_NTT_N; i++) {
+    while (!(pqc_ntt_status(&dev) & PQC_NTT_STATUS_IN_READY)) {}
+    reg_write32(dev.base, PQC_NTT_REG_DIN, (i == 6) ? 0xFFFFFFFFu : b[i]);
+  }
+  rc = pqc_ntt_wait_done(&dev);
+  e = pqc_ntt_err_read(&dev);
+  report("err_din_range", rc == PQC_OK && e == PQC_NTT_ERR_DIN_RANGE, pqc_ntt_rc_name(rc));
+  pqc_ntt_err_clear(&dev, PQC_NTT_ERR_ALL);
+  {
+    uint16_t r1[PQC_NTT_N];
+    rc = pqc_ntt_unload(&dev, 1u, r1);
+    report("din_range_word_stored_unchanged", rc == PQC_OK && !memcmp(b, r1, sizeof b), pqc_ntt_rc_name(rc));
+  }
 
   /* hang: compute op never completes -> timeout, then busy blocks ops */
   fresh(1, 2, RM_FAULT_HANG);

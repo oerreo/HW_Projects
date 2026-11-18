@@ -2,7 +2,7 @@
 # against the register-level model reg_model.c. Shared server: -j2 at most.
 #
 #   make test        build and run everything (run.sh), exit 0 only if all pass
-#   make bins        only build the two host binaries
+#   make bins        only build the host binaries (t_main, t_drv, t_replay)
 #   make vectors-h   regenerate ../vectors.h from data/vectors/ext and the
 #                    golden model generator (model/ `make vectors`, output in
 #                    ../build/model_vec; model/ sources are not modified)
@@ -41,7 +41,7 @@ VEC_ARGS  ?=
 
 all: bins
 
-bins: $(BUILD)/t_main $(BUILD)/t_drv
+bins: $(BUILD)/t_main $(BUILD)/t_drv $(BUILD)/t_replay
 
 $(BUILD):
 	mkdir -p $@ $@/logs
@@ -60,6 +60,12 @@ $(BUILD)/main.o: $(SW)/main.c $(SW_HDR) | $(BUILD)
 
 $(BUILD)/test_driver.o: test_driver.c $(SW_HDR) | $(BUILD)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(BUILD)/replay.o: replay.c $(SW_HDR) | $(BUILD)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+$(BUILD)/t_replay: $(BUILD)/replay.o $(BUILD)/reg_model.o $(MODEL_OBJ)
+	$(CXX) $(LDFLAGS) $^ -o $@
 
 $(BUILD)/t_main: $(BUILD)/main.o $(DRV_OBJ) $(MODEL_OBJ)
 	$(CXX) $(LDFLAGS) $^ -o $@

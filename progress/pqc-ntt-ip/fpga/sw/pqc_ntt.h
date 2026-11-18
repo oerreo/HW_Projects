@@ -1,8 +1,9 @@
 /* pqc_ntt.h: bare-metal driver of pqc_ntt_axi_top (AXI4-Lite CSR, v1).
  *
  * Register map: pqc_ntt_regs.h. Hardware access: pqc_ntt_hal.h only.
- * Behaviour assumed where docs/spec/l4_axi.md (draft) is silent:
- * fpga/sw/ASSUMPTIONS.md (numbers An in the comments below).
+ * Register behaviour: docs/spec/l4_axi.md "decided behaviour" (RTL
+ * rtl/l4/pqc_ntt_csr.sv). fpga/sw/ASSUMPTIONS.md lists every driver
+ * assumption (numbers An below) as confirmed by the spec or still open.
  *
  * v1 stream access: the IP does not stall AXI on DIN / DOUT; an access while
  * in_ready / out_valid = 0 is dropped and sets an ERR bit (l4_axi.md v1
@@ -52,6 +53,19 @@ typedef struct {
   uint32_t bfu_latency;
 } pqc_ntt_version_t;
 
+/* CONFIG register: build parameters of the bitstream. */
+typedef struct {
+  uint32_t raw;
+  uint32_t impl;          /* 0 hand RTL, 1 HLS                          */
+  uint32_t share_addsub;
+  uint32_t rom_out_reg;
+  uint32_t pre_reg;
+  uint32_t mul_reg;
+  uint32_t red_pipe;
+  uint32_t out_reg;
+  uint32_t fclk_mhz;      /* build parameter, not a measured frequency  */
+} pqc_ntt_config_t;
+
 /* Setup. Does not touch the hardware. */
 void pqc_ntt_init(pqc_ntt_dev_t *dev, uintptr_t base);
 
@@ -60,6 +74,7 @@ uint32_t pqc_ntt_status(pqc_ntt_dev_t *dev);
 uint32_t pqc_ntt_cycles(pqc_ntt_dev_t *dev);
 uint32_t pqc_ntt_version_raw(pqc_ntt_dev_t *dev);
 void pqc_ntt_version(pqc_ntt_dev_t *dev, pqc_ntt_version_t *v);
+void pqc_ntt_config(pqc_ntt_dev_t *dev, pqc_ntt_config_t *c);
 uint32_t pqc_ntt_err_read(pqc_ntt_dev_t *dev);
 void pqc_ntt_err_clear(pqc_ntt_dev_t *dev, uint32_t mask); /* W1C */
 

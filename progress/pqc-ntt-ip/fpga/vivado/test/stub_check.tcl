@@ -27,15 +27,20 @@ set stub_code {
   if {![info exists ::board_parts]} { set ::board_parts {} }
   if {![info exists ::fail_props]} { set ::fail_props {} }
   if {![info exists ::fake_l4]} { set ::fake_l4 0 }
+  if {![info exists ::hide_l4]} { set ::hide_l4 0 }
   if {![info exists ::tmp]} { error "tmp not set" }
 
   proc unknown {args} { error "UNSTUBBED COMMAND: [lindex $args 0]" }
   proc rec {args} { lappend ::calls $args }
   proc after {args} { rec after {*}$args }
 
-  # glob: optionally pretend that rtl/l4 has a source file
+  # glob: optionally pretend that rtl/l4 has a source file (fake_l4) or
+  # that it has none (hide_l4, the state before the L4 RTL existed)
   rename glob _glob
   proc glob {args} {
+    if {$::hide_l4 && [string match "*rtl/l4*" $args]} {
+      return {}
+    }
     set r [_glob {*}$args]
     if {$::fake_l4 && [string match "*rtl/l4*" $args]} {
       lappend r "/fake/rtl/l4/pqc_ntt_axi_top.sv"
@@ -225,7 +230,7 @@ set has_call {
 }
 
 # create_project.tcl ---------------------------------------------------------
-scenario cp_sources_only $cp [list DIR=$tmp_root/cp_sources_only/p] ok {} {
+scenario cp_sources_only $cp [list DIR=$tmp_root/cp_sources_only/p] ok {set ::hide_l4 1} {
   set fp [open $::tmp/p/pqc_build_config.txt]; set t [read $fp]; close $fp
   expr {[string match "*sources_only*" $t] && ![info exists ::props(/pqc_ntt_0|CONFIG.ALGO)]}
 }
@@ -234,6 +239,7 @@ scenario cp_board_mont12_l2 $cp [list ALGO=MONT12 CFG=l2 FCLK_MHZ=125 DIR=$tmp_r
   [string cat $has_call {
     expr {$::props(/pqc_ntt_0|CONFIG.ALGO) == 1 && $::props(/pqc_ntt_0|CONFIG.MUL_REG) == 1
           && $::props(/pqc_ntt_0|CONFIG.RED_PIPE) == 1 && $::props(/pqc_ntt_0|CONFIG.OUT_REG) == 0
+          && $::props(/pqc_ntt_0|CONFIG.IMPL) == 0 && $::props(/pqc_ntt_0|CONFIG.FCLK_MHZ) == 125
           && $::props(/ps7/Data/SEG_pqc_ntt_0_reg0|offset) eq "0x43C00000"
           && $::props(/ps7/Data/SEG_pqc_ntt_0_reg0|range) eq "0x1000"
           && $::props(/ps7|CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ) == 125
@@ -249,6 +255,7 @@ scenario cp_noboard_k2red_hls_axi $cp \
   [string cat $has_call {
     expr {$::props(/pqc_ntt_0|CONFIG.ALGO) == 3 && $::props(/pqc_ntt_0|CONFIG.PRE_REG) == 1
           && $::props(/pqc_ntt_0|CONFIG.SHARE_ADDSUB) == 1
+          && $::props(/pqc_ntt_0|CONFIG.IMPL) == 1 && $::props(/pqc_ntt_0|CONFIG.FCLK_MHZ) == 100
           && $::props(/ps7|CONFIG.PCW_UIPARAM_DDR_PARTNO) eq "MT41K256M16 RE-125"
           && [has_call "create_bd_cell -type module -reference pqc_ntt_axi_top pqc_ntt_0"]
           && [has_call "*axi_interconnect*"]

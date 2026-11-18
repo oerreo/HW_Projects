@@ -4,21 +4,22 @@
  * positions and the op / ALGO encodings live ONLY in this file. Everything
  * else (driver, test program, register model) uses these macros.
  *
- * Sources (draft, not final):
+ * Sources (register behaviour fixed 2026-11-17, l4_axi.md "decided behaviour";
+ * RTL: rtl/l4/pqc_ntt_csr.sv):
  *   docs/spec/l4_axi.md   "register map" table      offsets, fields
  *   rtl/l2/ntt_l2_pkg.sv  op_e                      op encoding
  *   rtl/pkg/mlkem_pkg.sv  algo_e                    ALGO encoding
  * fpga/sw/tools/check_regs.py parses the three files above and this header
  * and fails on any difference. Run it after every spec or RTL change.
  *
- * Values marked "ASSUMPTION An" are not fixed by l4_axi.md; see
- * fpga/sw/ASSUMPTIONS.md.
+ * "An" numbers refer to fpga/sw/ASSUMPTIONS.md (each item marked there as
+ * confirmed by l4_axi.md or still open).
  */
 #ifndef PQC_NTT_REGS_H
 #define PQC_NTT_REGS_H
 
 /* ------------------------------------------------------------------------
- * Address map (ASSUMPTION A17). The Vivado block design script
+ * Address map (A17, open: chosen here, not part of l4_axi.md). The Vivado block design script
  * (fpga/vivado/create_project.tcl, PQC_BASEADDR / PQC_RANGE) uses the same
  * values; check_regs.py compares them.
  * ------------------------------------------------------------------------ */
@@ -35,6 +36,7 @@
 #define PQC_NTT_REG_CYCLES  0x10u /* R    */
 #define PQC_NTT_REG_VERSION 0x14u /* R    */
 #define PQC_NTT_REG_ERR     0x18u /* R/W1C */
+#define PQC_NTT_REG_CONFIG  0x1Cu /* R, build parameters */
 
 /* ------------------------------------------------------------------------
  * CTRL
@@ -81,20 +83,39 @@
 #define PQC_NTT_VERSION_BFU_LATENCY_WIDTH 8
 #define PQC_NTT_VERSION_ID_SHIFT          16
 #define PQC_NTT_VERSION_ID_WIDTH          16
-/* Fixed ID value: not given by l4_axi.md (ASSUMPTION A13). Provisional. */
+/* Fixed ID value (A13, confirmed: rtl/l4/pqc_ntt_csr.sv VERSION_ID). */
 #define PQC_NTT_VERSION_ID_VALUE          0x4E54u
 
 /* ------------------------------------------------------------------------
  * ERR (sticky, write 1 to clear)
  * ------------------------------------------------------------------------ */
-#define PQC_NTT_ERR_START_BUSY_BIT 0 /* start written while busy          */
-#define PQC_NTT_ERR_DIN_BIT        1 /* DIN written while in_ready = 0    */
-#define PQC_NTT_ERR_DOUT_BIT       2 /* DOUT read while out_valid = 0     */
+#define PQC_NTT_ERR_START_BUSY_BIT 0 /* start written while busy (ignored)        */
+#define PQC_NTT_ERR_DIN_BIT        1 /* DIN written while in_ready = 0 (dropped)  */
+#define PQC_NTT_ERR_DOUT_BIT       2 /* DOUT read while out_valid = 0 (reads 0)   */
+#define PQC_NTT_ERR_BAD_OP_BIT     3 /* start with an op outside enum pqc_ntt_op  */
+#define PQC_NTT_ERR_DIN_RANGE_BIT  4 /* accepted DIN word with bits [11:0] >= q   */
 
 #define PQC_NTT_ERR_START_BUSY (1u << PQC_NTT_ERR_START_BUSY_BIT)
 #define PQC_NTT_ERR_DIN        (1u << PQC_NTT_ERR_DIN_BIT)
 #define PQC_NTT_ERR_DOUT       (1u << PQC_NTT_ERR_DOUT_BIT)
-#define PQC_NTT_ERR_ALL        (PQC_NTT_ERR_START_BUSY | PQC_NTT_ERR_DIN | PQC_NTT_ERR_DOUT)
+#define PQC_NTT_ERR_BAD_OP     (1u << PQC_NTT_ERR_BAD_OP_BIT)
+#define PQC_NTT_ERR_DIN_RANGE  (1u << PQC_NTT_ERR_DIN_RANGE_BIT)
+#define PQC_NTT_ERR_ALL        (PQC_NTT_ERR_START_BUSY | PQC_NTT_ERR_DIN | PQC_NTT_ERR_DOUT | \
+                                PQC_NTT_ERR_BAD_OP | PQC_NTT_ERR_DIN_RANGE)
+
+/* ------------------------------------------------------------------------
+ * CONFIG (build parameters of the bitstream, constant)
+ * ------------------------------------------------------------------------ */
+#define PQC_NTT_CONFIG_IMPL_BIT          0 /* 0 hand RTL, 1 HLS L0 datapath   */
+#define PQC_NTT_CONFIG_SHARE_ADDSUB_BIT  1
+#define PQC_NTT_CONFIG_ROM_OUT_REG_BIT   2
+#define PQC_NTT_CONFIG_PRE_REG_BIT       3
+#define PQC_NTT_CONFIG_MUL_REG_BIT       4
+#define PQC_NTT_CONFIG_RED_PIPE_SHIFT    5
+#define PQC_NTT_CONFIG_RED_PIPE_WIDTH    2
+#define PQC_NTT_CONFIG_OUT_REG_BIT       7
+#define PQC_NTT_CONFIG_FCLK_MHZ_SHIFT    16
+#define PQC_NTT_CONFIG_FCLK_MHZ_WIDTH    8
 
 /* ------------------------------------------------------------------------
  * op encoding (CTRL.op) = ntt_l2_pkg::op_e

@@ -7,18 +7,25 @@
  * ("L2 results"); in_ready and out_valid rise after a random delay so that
  * the driver's STATUS polling is exercised.
  *
- * Register behaviour (l4_axi.md + ASSUMPTIONS.md):
- *   CTRL write     clears done_sticky (A5). start = 1: ignored with
- *                  ERR.start_busy while busy (A8), ignored silently for an
- *                  illegal op (A9), else the op starts.
+ * Register behaviour (l4_axi.md "decided behaviour", same as
+ * rtl/l4/pqc_ntt_csr.sv):
+ *   CTRL write     clears done_sticky (A5), except a start with an illegal
+ *                  op, which changes nothing but sets ERR.bad_op (A9).
+ *                  start = 1 while busy: ignored, ERR.start_busy (A8); an
+ *                  illegal op while busy sets both bits. Else the op starts.
  *   STATUS read    busy, done_sticky, result_bank, in_ready, out_valid.
  *   DIN write      accepted only during LOAD with in_ready, else ERR.din and
- *                  dropped (A1, A3). Bits [11:0] stored unchecked (A15).
+ *                  dropped (A1, A3). Bits [11:0] stored unchanged; an
+ *                  accepted word >= q sets ERR.din_range (A15).
  *   DOUT read      during UNLOAD with out_valid returns the next word and
  *                  pops it; else ERR.dout and returns 0 (A4).
- *   CYCLES         latched at done: start to done in model cycles (A12).
- *   VERSION        ALGO | BFU_LATENCY << 8 | ID << 16.
- *   ERR            W1C (A14).
+ *   CYCLES         start to done in model cycles (A12).
+ *   VERSION        ALGO | BFU_LATENCY << 8 | ID << 16.  CONFIG constant.
+ *   ERR            W1C (A14); a set wins over a clear of the same access.
+ * Op completion at model time t_end (the RTL done_o cycle): from t_end on
+ * busy = 0 and result_bank is the new value; done_sticky and CYCLES become
+ * visible from t_end + 1 (RTL registers). A CTRL write at exactly t_end
+ * cancels the done_sticky set (clear wins), CYCLES is still updated.
  * NTT / INTT write the result to the other bank and leave random values in
  * the input bank (A19). BASEMUL: bank0 = bank0 x bank1, bank1 unchanged.
  */
@@ -56,6 +63,15 @@ static struct {
   int result_bank;
   uint32_t cycles;
   uint32_t err;
+  uint32_t config;
+  int config_set;     /* config given explicitly (not derived)         */
+  int replay;         /* replay mode: time from reg_model_set_time      */
+  uint64_t t_set;     /* replay time of the next access                 */
+  int pend;           /* op ended at pend_at, done_sticky not yet set   */
+  uint64_t pend_at;
+  uint32_t pend_cycles;
+  uint64_t err_set_t;  /* model time of the last ERR set                 */
+  uint32_t err_set_bits; /* bits set at err_set_t (survive a W1C then)  */
   uint32_t n_compute;
   reg_model_stats_t st;
 } m;
@@ -96,11 +112,28 @@ void reg_model_reset(void)
   m.result_bank = 0;
   m.cycles = 0;
   m.err = 0;
+  m.pend = 0;
+  m.pend_at = 0;
+  m.pend_cycles = 0;
+  m.err_set_t = NEVER;
+  m.err_set_bits = 0;
   m.n_compute = 0;
   memset(&m.st, 0, sizeof(m.st));
   /* RAM contents after configuration are unknown: random */
   for (b = 0; b < 2; b++)
     for (i = 0; i < N; i++) m.bank[b][i] = (uint16_t)rnd(Q);
+}
+
+/* CONFIG derived from the bfu LATENCY: FCLK 100 MHz, ROM_OUT_REG 1 and
+ * the pipeline split of the Vivado CFG presets (create_project.tcl l0..l5). */
+static uint32_t default_config(int lat)
+{
+  static const unsigned preset[6][4] = { /* PRE MUL RED OUT */
+    {0, 0, 0, 0}, {0, 1, 0, 0}, {0, 1, 1, 0}, {0, 1, 1, 1}, {1, 1, 1, 1}, {1, 1, 2, 1}};
+  const unsigned *p = preset[(lat >= 0 && lat <= 5) ? lat : 0];
+  return (100u << PQC_NTT_CONFIG_FCLK_MHZ_SHIFT) | (p[3] << PQC_NTT_CONFIG_OUT_REG_BIT) |
+         (p[2] << PQC_NTT_CONFIG_RED_PIPE_SHIFT) | (p[1] << PQC_NTT_CONFIG_MUL_REG_BIT) |
+         (p[0] << PQC_NTT_CONFIG_PRE_REG_BIT) | (1u << PQC_NTT_CONFIG_ROM_OUT_REG_BIT);
 }
 
 void reg_model_config(int algo, int bfu_lat, int fault, uint32_t seed)
@@ -110,7 +143,24 @@ void reg_model_config(int algo, int bfu_lat, int fault, uint32_t seed)
   m.fault = fault;
   m.seed = seed;
   m.configured = 1;
+  if (!m.config_set) m.config = default_config(bfu_lat);
   reg_model_reset();
+}
+
+void reg_model_set_config_reg(uint32_t config)
+{
+  m.config = config;
+  m.config_set = 1;
+}
+
+void reg_model_set_replay(int on)
+{
+  m.replay = on;
+}
+
+void reg_model_set_time(uint64_t t)
+{
+  m.t_set = t;
 }
 
 static int env_int(const char *name, int def)
@@ -124,6 +174,8 @@ static void lazy_init(void)
   const char *f;
   int fault = RM_FAULT_NONE;
   if (m.configured) return;
+  f = getenv("PQC_CONFIG");
+  if (f && *f) reg_model_set_config_reg((uint32_t)strtoul(f, NULL, 16));
   f = getenv("PQC_MODEL_FAULT");
   if (f && *f && strcmp(f, "none") != 0) {
     if (!strcmp(f, "data")) fault = RM_FAULT_DATA;
@@ -165,16 +217,39 @@ static uint64_t model_cycles(int op)
 /* ------------------------------------------------------------------------ */
 static void advance(void)
 {
-  m.now += 1u + rnd(10);
+  if (m.replay) {
+    if (m.t_set < m.now) fatal("replay time goes backwards", (uint32_t)m.t_set);
+    m.now = m.t_set;
+  } else {
+    m.now += 1u + rnd(10);
+  }
   m.st.accesses++;
   if (m.op != OP_IDLE && m.t_end != NEVER && m.now >= m.t_end) {
-    m.done_sticky = 1;
+    /* done_o cycle t_end: busy 0 and result_bank from here on */
     m.result_bank = m.op_rbank;
-    m.cycles = (uint32_t)(m.t_end - m.t_start);
+    m.pend = 1;
+    m.pend_at = m.t_end;
+    m.pend_cycles = (uint32_t)(m.t_end - m.t_start);
     m.op = OP_IDLE;
     m.t_end = NEVER;
     m.t_ready = NEVER;
   }
+  if (m.pend && m.now > m.pend_at) {
+    /* registers written in the done_o cycle are visible one cycle later */
+    m.done_sticky = 1;
+    m.cycles = m.pend_cycles;
+    m.pend = 0;
+  }
+}
+
+/* CTRL write while an op end is pending (write in the done_o cycle):
+ * CYCLES is latched anyway, done_sticky is not set when clear is true. */
+static void resolve_pend(int clear)
+{
+  if (!m.pend) return;
+  m.cycles = m.pend_cycles;
+  if (!clear) m.done_sticky = 1;
+  m.pend = 0;
 }
 
 static void compute(int op, int bank)
@@ -217,10 +292,10 @@ static void start_op(int op, int bank)
   m.st.ops_started++;
   switch (op) {
   case PQC_NTT_OP_LOAD:
-    if (m.fault != RM_FAULT_STALL) m.t_ready = m.now + 1u + rnd(20);
+    if (m.fault != RM_FAULT_STALL) m.t_ready = m.replay ? m.now : m.now + 1u + rnd(20);
     break;
   case PQC_NTT_OP_UNLOAD:
-    if (m.fault != RM_FAULT_STALL) m.t_ready = m.now + 2u + rnd(20);
+    if (m.fault != RM_FAULT_STALL) m.t_ready = m.replay ? m.now : m.now + 2u + rnd(20);
     break;
   default: /* NTT, INTT, BASEMUL */
     compute(op, bank);
@@ -230,6 +305,19 @@ static void start_op(int op, int bank)
     }
     break;
   }
+}
+
+/* ERR set: a W1C in the same model cycle does not clear these bits (RTL:
+ * set wins). Only reachable in replay mode, where two accesses can share a
+ * cycle. */
+static void set_err(uint32_t bits)
+{
+  if (m.err_set_t != m.now) {
+    m.err_set_t = m.now;
+    m.err_set_bits = 0;
+  }
+  m.err_set_bits |= bits;
+  m.err |= bits;
 }
 
 static void check_addr(uintptr_t base, uint32_t off)
@@ -269,9 +357,9 @@ uint32_t reg_read32(uintptr_t base, uint32_t off)
     if (out_valid()) {
       v = m.bank[m.op_bank][m.count++];
       if (m.count == N) m.t_end = m.now + 1u;
-      else m.t_ready = m.now + 1u + rnd(20);
+      else m.t_ready = m.replay ? m.now + 1u : m.now + 1u + rnd(20);
     } else {
-      m.err |= PQC_NTT_ERR_DOUT;
+      set_err(PQC_NTT_ERR_DOUT);
       v = 0;
     }
     break;
@@ -286,6 +374,9 @@ uint32_t reg_read32(uintptr_t base, uint32_t off)
     break;
   case PQC_NTT_REG_ERR:
     v = m.err;
+    break;
+  case PQC_NTT_REG_CONFIG:
+    v = m.config;
     break;
   default: /* CTRL, DIN (write only) and unmapped offsets read 0 (A17, A20) */
     v = 0;
@@ -303,23 +394,30 @@ void reg_write32(uintptr_t base, uint32_t off, uint32_t val)
   case PQC_NTT_REG_CTRL: {
     int op = (int)((val & PQC_NTT_CTRL_OP_MASK) >> PQC_NTT_CTRL_OP_SHIFT);
     int bank = (val & PQC_NTT_CTRL_BANK_MASK) ? 1 : 0;
-    m.done_sticky = 0; /* A5 */
-    if (val & PQC_NTT_CTRL_START_MASK) {
-      if (m.op != OP_IDLE) m.err |= PQC_NTT_ERR_START_BUSY; /* A8 */
-      else if (op < PQC_NTT_OP_COUNT) start_op(op, bank);  /* illegal op ignored, A9 */
+    int start = (val & PQC_NTT_CTRL_START_MASK) != 0u;
+    int legal = op < PQC_NTT_OP_COUNT;
+    if (!(start && !legal)) { /* A5; an illegal op start changes nothing (A9) */
+      resolve_pend(1);
+      m.done_sticky = 0;
+    }
+    if (start) {
+      if (m.op != OP_IDLE) set_err(PQC_NTT_ERR_START_BUSY); /* A8 */
+      if (!legal) set_err(PQC_NTT_ERR_BAD_OP);              /* A9 */
+      if (m.op == OP_IDLE && legal) start_op(op, bank);
     }
     break;
   }
   case PQC_NTT_REG_DIN:
     if (in_ready()) {
       m.bank[m.op_bank][m.count++] = (uint16_t)(val & PQC_NTT_COEF_MASK);
+      if ((val & PQC_NTT_COEF_MASK) >= Q) set_err(PQC_NTT_ERR_DIN_RANGE); /* A15 */
       if (m.count == N) m.t_end = m.now + 1u;
     } else {
-      m.err |= PQC_NTT_ERR_DIN;
+      set_err(PQC_NTT_ERR_DIN);
     }
     break;
   case PQC_NTT_REG_ERR:
-    m.err &= ~val;
+    m.err &= ~(val & ~(m.err_set_t == m.now ? m.err_set_bits : 0u));
     break;
   default: /* read-only and unmapped offsets: ignored */
     break;

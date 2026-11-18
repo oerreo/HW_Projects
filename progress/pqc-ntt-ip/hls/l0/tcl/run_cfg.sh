@@ -1,19 +1,29 @@
 #!/usr/bin/env bash
 # Run one Catapult configuration of one L0 block.
 #
-#   hls/l0/tcl/run_cfg.sh <block> <lib> <cfg> <clk_ns>
-#     block : mod_red_{barrett,mont12,shiftadd,k2red} | mod_mul_{...}
-#     lib   : fpga | asic
-#     cfg   : c0 | p1 | p2
+#   export HLS_BLOCK=<block> HLS_LIB=<lib> HLS_CFG=<cfg> HLS_CLK_NS=<ns>
+#   ./hls/l0/tcl/run_cfg.sh
+#     HLS_BLOCK  : mod_red_{barrett,mont12,shiftadd,k2red} | mod_mul_{...}
+#     HLS_LIB    : fpga | asic
+#     HLS_CFG    : c0 | p1 | p2
+#     HLS_CLK_NS : clock period in ns
 #
 # Work directory: hls/l0/run/<top>/ with <top> = <block>_<lib>_<cfg> (also
 # the generated top-level module name). Transcript: hls/l0/run/<top>/catapult.log.
 # Only one Catapult runs at a time: concurrent invocations are serialized
 # with flock on hls/l0/run/.catapult.lock.
+#
+# Process privacy (.claude/rules/process-privacy.md): the configuration comes
+# in the environment, never as arguments; Catapult is started inside the work
+# directory as "catapult -shell -f run.tcl", where run.tcl (written there)
+# sources tcl/hls_l0.tcl. No block, algorithm or project path appears on any
+# command line of this script or its children. Start it with a relative path
+# from the project directory.
 set -u -o pipefail
 
-[[ $# -eq 4 ]] || { sed -n '2,11p' "$0"; exit 2; }
-BLOCK=$1 LIB=$2 CFG=$3 CLK=$4
+[[ $# -eq 0 ]] || { sed -n '2,20p' "$0"; exit 2; }
+BLOCK=${HLS_BLOCK:-} LIB=${HLS_LIB:-} CFG=${HLS_CFG:-} CLK=${HLS_CLK_NS:-}
+[[ -n $BLOCK && -n $LIB && -n $CFG && -n $CLK ]] || { echo "run_cfg.sh: set HLS_BLOCK, HLS_LIB, HLS_CFG, HLS_CLK_NS"; exit 2; }
 
 TCL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 HLS_DIR=$(cd "$TCL_DIR/.." && pwd)
@@ -52,8 +62,10 @@ mkdir -p "$RUN"
 cd "$RUN" || exit 2
 
 export HLS_BLOCK=$BLOCK HLS_LIB=$LIB HLS_CFG=$CFG HLS_CLK_NS=$CLK HLS_TOP=$TOP
+# argument file: the flow script path stays off the command line
+printf 'source {%s}\n' "$TCL_DIR/hls_l0.tcl" > run.tcl
 t0=$SECONDS
-catapult -shell -file "$TCL_DIR/hls_l0.tcl" >catapult.log 2>&1
+catapult -shell -f run.tcl >catapult.log 2>&1
 rc=$?
 dt=$((SECONDS - t0))
 n_err=$(grep -c '^# Error' catapult.log)

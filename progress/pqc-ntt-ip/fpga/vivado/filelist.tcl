@@ -3,10 +3,10 @@
 #   source filelist.tcl
 #   set files [pqc_filelist <project_root> <impl>]     ;# impl: rtl | hls
 #
-# Returns absolute paths in a safe compile order (packages first). The
-# levels that do not exist yet (rtl/l3 while ntt_core is being written,
-# rtl/l4 for pqc_ntt_axi_top) are globbed; an empty level only prints a
-# WARNING so that the project can still be created and filled in later.
+# Returns absolute paths in a safe compile order (packages first). rtl/l3
+# (ntt_core) and rtl/l4 (axil_slave, pqc_ntt_csr, pqc_ntt_axi_top; no
+# package) are globbed; an empty level only prints a WARNING so that the
+# project can still be created from a partial tree.
 #
 # impl = hls (provisional, see fpga/README.md): the hand RTL L0 mod_mul and
 # mod_red are replaced by the Catapult adapters of hls/l0/wrap and the

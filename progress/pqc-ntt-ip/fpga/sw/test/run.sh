@@ -8,6 +8,11 @@
 #   4. parser on a truncated log: expect INCOMPLETE (exit 2)
 #   5. t_drv negative tests
 #   6. Tcl stub check of the Vivado / XSCT scripts (if tclsh exists)
+#   7. RTL trace replay: every access trace of the L4 testbench
+#      (sim/l4_axi_top_<algo>/*.trc, written by the runs with +TRACE; mutant
+#      run directories are not read) replayed on
+#      the register model, read values compared (t_replay). Skipped with a
+#      note when no trace exists yet (simulation not run).
 # Logs: build/logs/. Prints "HOSTTEST RESULT: PASS|FAIL" at the end.
 set -u
 cd "$(dirname "$0")"
@@ -80,6 +85,22 @@ if command -v tclsh > /dev/null 2>&1; then
 else
   note "tclsh not found: Tcl stub check skipped"
 fi
+
+note "== RTL trace replay"
+ntr=0
+for tr in ../../../sim/l4_axi_top_barrett/*.trc ../../../sim/l4_axi_top_mont12/*.trc \
+          ../../../sim/l4_axi_top_shiftadd/*.trc ../../../sim/l4_axi_top_k2red/*.trc; do
+  [ -f "$tr" ] || continue
+  ntr=$((ntr + 1))
+  d=${tr%/*}
+  lg=$LOG/replay_${d##*/}_$(basename "$tr" .trc).log
+  if PQC_TRACE=$tr ./build/t_replay > "$lg" 2>&1; then
+    note "replay ${d##*/}/$(basename "$tr"): $(grep '^REPLAY lines' "$lg" | sed 's/^REPLAY //') PASS"
+  else
+    bad "replay ${d##*/}/$(basename "$tr")"; grep 'MISMATCH\|RESULT' "$lg" | head -5
+  fi
+done
+[ $ntr -eq 0 ] && note "no RTL trace found (run the L4 simulation first): replay skipped"
 
 if [ $fail -eq 0 ]; then echo "HOSTTEST RESULT: PASS"; else echo "HOSTTEST RESULT: FAIL"; fi
 exit $fail

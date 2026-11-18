@@ -9,10 +9,10 @@
 // AXI4-Lite slave interface, the clock and the reset.
 // create_project.tcl REF_TOP=direct skips this shell.
 //
-// ASSUMPTION A22 (fpga/sw/ASSUMPTIONS.md): pqc_ntt_axi_top (rtl/l4, not
-// written yet) has int parameters with the names below and the port names
-// used in the instance (project convention: clk, rst_n, _i / _o). When the
-// L4 RTL lands, this instance is the only thing to adapt.
+// The instance matches rtl/l4/pqc_ntt_axi_top.sv (int parameters, ports
+// clk, rst_n, s_axi_*_i / _o; A22 in fpga/sw/ASSUMPTIONS.md, confirmed).
+// IMPL and FCLK_MHZ only set the CONFIG register (build information);
+// create_project.tcl sets them from IMPL= and FCLK_MHZ=.
 module pqc_ntt_axi_bd #(
   parameter integer ALGO               = 0,  // 0 BARRETT, 1 MONT12, 2 SHIFTADD, 3 K2RED
   parameter integer PRE_REG            = 0,
@@ -21,6 +21,8 @@ module pqc_ntt_axi_bd #(
   parameter integer OUT_REG            = 0,
   parameter integer SHARE_ADDSUB       = 0,
   parameter integer ROM_OUT_REG        = 1,
+  parameter integer IMPL               = 0,  // CONFIG.impl: 0 hand RTL, 1 HLS
+  parameter integer FCLK_MHZ           = 100,// CONFIG.fclk_mhz, 1..255
   parameter integer C_S_AXI_ADDR_WIDTH = 12  // 4 KB window (PQC_NTT_ADDR_RANGE)
 ) (
   (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 aclk CLK" *)
@@ -58,6 +60,8 @@ module pqc_ntt_axi_bd #(
     .OUT_REG            (OUT_REG),
     .SHARE_ADDSUB       (SHARE_ADDSUB),
     .ROM_OUT_REG        (ROM_OUT_REG),
+    .IMPL               (IMPL),
+    .FCLK_MHZ           (FCLK_MHZ),
     .C_S_AXI_ADDR_WIDTH (C_S_AXI_ADDR_WIDTH)
   ) u_top (
     .clk             (aclk),
