@@ -1,6 +1,6 @@
 # 진행 로그: pqc-ntt-ip
 
-## 2026-11-17: P3-3 L3 `ntt_core` 통합 통과, P3-4 회귀 스크립트 정리  [notion: pending]
+## 2026-11-17: P3-3 L3 `ntt_core` 통합 통과, P3-4 회귀 스크립트 정리  [notion: synced]
 - 단계: P3 (G3/G4의 코어 부분)
 - 한 일: `rtl/l3/ntt_core.sv`(L2/L1 인스턴스 + operand/임시 레지스터와 mux), `tb/l3/tb_ntt_core.sv`, L3 cfg 4개. `sim/run.sh`에 `quick`/`all` 등급, `assert:TAG=n` 기대 형식, 인자 파일 실행(`vlog -f c.f`, `vsim -f r.f`), 테스트 이름은 환경변수 `T`.
 - 결과(수퍼바이저 재실행): `./sim/run.sh all` 443 run, fail 0, wall 6739 s(Questa 라이선스 대기 포함). L3는 59 run. full run 하나는 외부 벡터 NTT 855, INTT 450, basemul 2145 전부 + random 연산당 1000 + 방향성 + round trip + 다항식 곱 체인 138, 계수 mismatch 0. cycle은 식(NTT/INTT 897 + 7(1 + L), BASEMUL 128 * n * (L + 1) + 3)과 전 구성 일치. quick은 107 run, fail 0, 약 6분(agent 실행).
@@ -10,7 +10,7 @@
 - 한계: latency 대조 검사는 시뮬레이션 전용. bfu 공유 충돌(`L1_SHARE`) run은 TB에 기대 모드가 없어 회귀에 없음. irun 교차 확인, 면적과 타이밍은 미측정.
 - 다음: P5-1 L4 AXI wrapper(진행 중), 다이어그램(L3), Notion 정리.
 
-## 2026-11-17: P5-0 FPGA 검증 환경 준비, L4 레지스터 동작 확정  [notion: pending]
+## 2026-11-17: P5-0 FPGA 검증 환경 준비, L4 레지스터 동작 확정  [notion: synced]
 - 단계: P5 (준비)
 - 한 일: `fpga/vivado/`(프로젝트 생성, 빌드, 리포트 저장 Tcl, module reference용 Verilog shell), `fpga/sw/`(레지스터 헤더, HAL, 드라이버, 테스트 프로그램, 벡터 헤더와 생성기, UART 로그 파서, XSCT 스크립트), 호스트 테스트(레지스터 수준 소프트웨어 모델 + golden model), `fpga/README.md`.
 - 결과: 수퍼바이저가 호스트 테스트 재실행, 전 항목 통과: 12 구성(ALGO 4 x BFU_LATENCY 0/2/5) 각각 100 케이스 mismatch 0과 cycle 일치(agent 보고), 결함 주입 4종 검출, 음성 테스트 26/26, Tcl 스텁 검사 20/20.

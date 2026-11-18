@@ -17,3 +17,4 @@ P3-2,2026-11-17,rtl,zeta_rom coef_ram ntt_ctrl,L2,opus,1,293654,41,1682,pass,0,0
 NOTION-4,2026-11-17,doc,Notion pages 13-16 + l2_ntt_ctrl diagram,,sonnet,1,303248,46,586,pass,0,0,0,FSM states in diagram match RTL (supervisor check); mermaid render unverified
 P5-0,2026-11-17,integ,fpga Tcl + PS driver/test + host model,,opus,1,299000,73,1476,partial,0,0,1,host test passes; Tcl and board behaviour unverifiable here; surfaced 25 spec assumptions (spec was underspecified)
 P3-3,2026-11-17,rtl+tb,ntt_core + run.sh tiers/privacy,L3,opus,1,395198,190,15890,pass,0,0,1,all regression 443 runs 0 fails (supervisor rerun); duration dominated by simulator license waits; 14 mutants detected (agent); spec issue: 2-bank polymul order
+NOTION-5,2026-11-17,doc,Notion pages 17-18 + l3_ntt_core diagram,,sonnet,1,198051,32,285,pass,0,0,0,flagged stale plan row and P3 random-count criterion (supervisor confirmed 132000); mermaid render unverified

@@ -30,7 +30,7 @@ bottom-up으로 진행한다. 모듈 트리, 진행 순서, L0 인터페이스�
 | P0 | 워크스페이스 세팅(CLAUDE.md, rules, skills, agents), 툴 확인 | 툴 버전 확인 | 완료 (2026-11-16) |
 | P1 | 서베이 + golden model + test data + 스펙 (G0, G1, G2) | 아래 참조 | 완료 (2026-11-16) |
 | P2 | 모듈러 연산기: reduction 후보(Barrett, Montgomery, K-RED, 시프트-가산) RTL/HLS | q^2 전 입력 exhaustive, mismatch 0 | 진행 중 |
-| P3 | NTT 코어: butterfly + RTL 컨트롤러 + 메모리, NTT/INTT/basemul 모드 | golden model 대비 random 다항식 10^4개 이상 mismatch 0, backpressure random | 진행 중 |
+| P3 | NTT 코어: butterfly + RTL 컨트롤러 + 메모리, NTT/INTT/basemul 모드 | golden model 대비 random 다항식 10^4개 이상 mismatch 0, backpressure random | 완료 (2026-11-17. random 다항식은 full run 44개 x 3000 = 132,000) |
 | P4 | 범위 확장 결정과 구현(Keccak 포함 전체 KEM 또는 ML-DSA 통합) | 공인 벡터 통과 | 대기 |
 | P5 | AXI wrapper, PS 드라이버, Vivado Tcl 준비. 합성과 보드 실행은 사용자 | 보드에서 SW 참조 결과와 일치 | 대기 |
 | P6 | DC 합성(사용자 승인 시), RTL vs HLS QoR 표 | 리포트 확보 | 대기 |

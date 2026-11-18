@@ -1,8 +1,10 @@
 # 계층 block diagram (L4 에서 L0)
 
-- 원본 파일과 확인일: 확인일 2026-11-16.
+- 원본 파일과 확인일: 확인일 2026-11-16. L3 `ntt_core` 항목만 2026-11-17에 RTL과 대조해 갱신했다.
   - L0 (구현 완료): `rtl/l0/mod_add.sv`, `mod_sub.sv`, `mod_half.sv`, `mod_red.sv`, `mod_red_barrett.sv`, `mod_red_mont12.sv`, `mod_red_shiftadd.sv`, `mod_red_k2red.sv`, `mod_mul.sv`, `rtl/pkg/mlkem_pkg.sv`
-  - L1 이상 (계획): RTL 파일이 아직 없다. `docs/spec/hierarchy.md`(트리, L0 포트)와 `docs/spec/arch.md`(L1 이상 구조)가 원본이다.
+  - L3 (구현 완료, 2026-11-17 추가): `rtl/l3/ntt_core.sv`. 그림과 RTL 대조는 [l3_ntt_core.md](l3_ntt_core.md).
+  - L1 `bfu`와 L2 3개 모듈은 통과 상태로 표시했다(2026-11-17). L2 `ntt_ctrl`은 [l2_ntt_ctrl.md](l2_ntt_ctrl.md)에 있다. L4는 계획 표시 유지(검증 전).
+  - 아래 "계획" 서술 중 L1 이상: `docs/spec/hierarchy.md`(트리, L0 포트)와 `docs/spec/arch.md`(L1 이상 구조)가 원본이다.
 - 구분 표기:
   - 구현 및 검증 완료 = 실선 테두리, 초록 계열 (L0 의 `mod_add`, `mod_sub`, `mod_half`, `mod_red` 4종, `mod_mul`).
   - 계획 = 점선 테두리, 회색 계열. 스펙(`arch.md`) 기준이며 RTL로 확인하지 않은 구조다.
@@ -13,11 +15,11 @@
 ```mermaid
 flowchart TD
     top["L4 pqc_ntt_axi_top<br/>RTL, 계획"]:::plan
-    core["L3 ntt_core<br/>RTL 구조, 계획"]:::plan
-    ctrl["L2 ntt_ctrl<br/>RTL, 계획"]:::plan
-    zrom["L2 zeta_rom<br/>RTL, 계획"]:::plan
-    cram["L2 coef_ram<br/>RTL, 계획<br/>bank0, bank1 각 256 x 12b"]:::plan
-    bfu["L1 bfu<br/>RTL + HLS, 계획"]:::plan
+    core["L3 ntt_core<br/>RTL 구조, 구현 및 검증 완료"]:::done
+    ctrl["L2 ntt_ctrl<br/>RTL, 구현 및 검증 완료"]:::done
+    zrom["L2 zeta_rom<br/>RTL, 구현 및 검증 완료"]:::done
+    cram["L2 coef_ram<br/>RTL, 구현 및 검증 완료<br/>bank0, bank1 각 256 x 12b"]:::done
+    bfu["L1 bfu<br/>RTL 구현 및 검증 완료, HLS판은 계획"]:::done
     madd["L0 mod_add<br/>RTL, 구현 및 검증 완료"]:::done
     msub["L0 mod_sub<br/>RTL, 구현 및 검증 완료"]:::done
     mhalf["L0 mod_half<br/>RTL, 구현 및 검증 완료"]:::done
@@ -50,9 +52,9 @@ flowchart TD
 | 블록 | 계층 | 구현 방식 | 상태 | 근거 |
 |---|---|---|---|---|
 | `pqc_ntt_axi_top` | L4 | RTL | 계획 | hierarchy.md |
-| `ntt_core` | L3 | RTL (구조) | 계획 | hierarchy.md |
-| `ntt_ctrl`, `zeta_rom`, `coef_ram` | L2 | RTL | 계획 | hierarchy.md |
-| `bfu` | L1 | RTL + HLS | 계획 | hierarchy.md, arch.md |
+| `ntt_core` | L3 | RTL (구조) | 구현 및 검증 완료 (P3-3, 2026-11-17) | `rtl/l3/ntt_core.sv` 존재, 검증 결과는 `docs/log.md` P3-3. 구조와 data flow는 [l3_ntt_core.md](l3_ntt_core.md) |
+| `ntt_ctrl`, `zeta_rom`, `coef_ram` | L2 | RTL | 구현 및 검증 완료 | hierarchy.md |
+| `bfu` | L1 | RTL + HLS | RTL 구현 및 검증 완료, HLS판은 계획 | hierarchy.md, arch.md |
 | `mod_add`, `mod_sub`, `mod_half` | L0 | RTL | 구현 및 검증 완료 | `rtl/l0/*.sv` 존재, 검증 완료는 오케스트레이터 지시 |
 | `mod_red` 4종 변형 및 래퍼 | L0 | RTL (HLS판 계획) | 구현 및 검증 완료 | 위와 같음 |
 | `mod_mul` | L0 | RTL (HLS판 계획) | 구현 및 검증 완료 | 위와 같음 |
@@ -71,7 +73,7 @@ flowchart LR
         sin["AXI4-Stream slave<br/>계수 입력"]:::plan
         sout["AXI4-Stream master<br/>계수 출력"]:::plan
     end
-    subgraph COREG["L3 ntt_core, 계획"]
+    subgraph COREG["L3 ntt_core, 초기 계획 스케치"]
         ctrl["ntt_ctrl"]:::plan
         zrom["zeta_rom"]:::plan
         cram["coef_ram<br/>bank0, bank1"]:::plan
@@ -97,13 +99,15 @@ flowchart LR
     classDef plan fill:#eeeeee,stroke:#777777,stroke-width:2px,stroke-dasharray:5 5,color:#000
 ```
 
+> 갱신 메모 (2026-11-17): 위 그림은 P1 시점의 계획 스케치이며 L3 구현 뒤에도 그대로 둔다. RTL과 다른 점: (1) `bfu` 의 `valid_o` 는 `ntt_ctrl` 에 연결되지 않는다(시뮬레이션 assertion 에만 쓴다). (2) RAM 과 `bfu` 사이에 operand 레지스터, 임시 레지스터, mux 로 된 datapath glue 가 있다. (3) zeta ROM 주소는 7b(`ROM_AW`)다. RTL 기준의 연결은 [l3_ntt_core.md](l3_ntt_core.md) 1절이 기준이다.
+
 | 인터페이스 | 폭 | 출처 |
 |---|---|---|
 | 계수 | 12b (`COEF_W`), canonical [0, 3329) | mlkem_pkg.sv, arch.md |
 | `coef_ram` 구성 | TDP RAM 2개, 각 256 x 12b | arch.md |
 | `bfu` 입력 `a_i`, `b_i`, `z_i` | 각 12b, `valid_i`, `mode_i`(CT=0, GS=1) | arch.md, mlkem_pkg.sv |
 | `bfu` 출력 `x_o`, `y_o` | 각 12b, `valid_o` | arch.md |
-| `ntt_core` 로컬 | `start_i`, `op_i`(LOAD0, LOAD1, NTT, INTT, BASEMUL, UNLOAD), `bank_i`, `busy_o`, `done_o`, `result_bank_o` | arch.md |
+| `ntt_core` 로컬 (RTL 확인, 2026-11-17) | `start_i`, `op_i`(`OP_LOAD`, `OP_NTT`, `OP_INTT`, `OP_BASEMUL`, `OP_UNLOAD`, `ntt_l2_pkg.sv`), `bank_i`, `busy_o`, `done_o`, `result_bank_o` | arch.md |
 | RAM 주소 폭, zeta ROM 깊이와 주소 폭, ROM 데이터 폭 | 스펙에 없음 (미정) | 확인 필요: 구현 시 확정 |
 | AXI4-Lite 레지스터 맵, AXI4-Stream 데이터 폭 | 스펙에 없음 (P5 에서 확정) | arch.md |
 
