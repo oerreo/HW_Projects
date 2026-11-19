@@ -36,7 +36,7 @@
 - 사용자 실행 순서: (1) `sh data/scripts/fetch.sh` (2) `make -C fpga/sw/test data` (3) `xsct fpga/sw/xsct_build.tcl XSA=<file.xsa>` (4) 같은 명령에 `RUN=1` (5) `RUN=1 RUNOPT=O3`. 돌려받을 것: `fpga/results/<date>_<o2|o3>/uart.log`(원본)와 `notes.txt`(Vitis 버전, XSA, CPU 클럭, 경고).
 - 다음: 사용자 보드 실행 결과 분석(kernel 우선순위, Amdahl 추정 입력), 그동안 S4 kernel IP 계획 준비.
 
-## 2026-11-19: S4-0 kernel IP 계층과 구조 스펙  [notion: pending]
+## 2026-11-19: S4-0 kernel IP 계층과 구조 스펙  [notion: synced]
 - 한 일(hw-worker): `spec/hierarchy.md`(계층, 진행 순서, 모듈 인터페이스, golden 대응), `spec/arch.md`(GEMV 가속기형과 PIM형, attention, vec, HW/SW 인터페이스, 자원 예산), `spec/s4calc.py`([계산] 값 재현), plan의 S4-1~S4-8.
 - 구조 요약 [계산, 측정 아님]: 가속기형 GEMV는 HP 포트당 8 lane(포트 하나의 대역폭이 한도), 15M token당 1,950,260 cycle(P = 1, 대역폭 효율 1 가정의 하한). PIM형은 bank 4 x 16 lane, 가중치 BRAM36 64개, 260K token당 MAC 4,072 cycle(가속기형 P = 1의 36,446 대비 8.95배). attention은 3 pass + 나눗셈 1회, 260K KV는 BRAM36 60개. vec IP 하나가 rmsnorm, swiglu, actq, argmax를 맡는다.
 - 자원 [계산, LUT는 추정]: 260K PIM형 시스템 DSP 147/220, BRAM36 126/140. 15M 가속기형 DSP 58, BRAM36 약 3.
@@ -44,7 +44,7 @@
 - 미확인: HP 실측 대역폭, 100 MHz 타이밍, LUT 수, Vivado의 parity bit 추론, 지수와 shift 범위. ARM baseline이 없어 가속비는 추정하지 않음.
 - 다음: S4-1 검증 기반(model 덤프 보강, DPI-C golden, 회귀 스크립트, AXI memory model).
 
-## 2026-11-19: S4-1 kernel IP 검증 기반  [notion: pending]
+## 2026-11-19: S4-1 kernel IP 검증 기반  [notion: synced]
 - 한 일(hw-worker): model에 leaf 경계 stage 함수(`k_sat32`, `k_dot8`, `k_gemv_row`, `k_gemv_out`, `k_aq_*`)와 trace 판, PIM bank image(`bimg_*`)와 가속기형 행 레코드(`rrec_*`) 생성기, K12V8 덤프와 위치 필터(`cfg/d3`, `d4`), 벡터 도구 `tools/vt.c`. DPI-C wrapper(`tb/dpi/`), AXI4 slave memory model(`tb/common/axi_mem_slave.sv`), 회귀 스크립트(`sim/run.sh`).
 - 결과 [측정, 수퍼바이저 재실행]: `make test` TOTAL 16,669,793 항목, mismatch 0. `sim/run.sh all` 18 run, fails 0(DPI smoke 2, AXI memory model 정상 4, negative 10, 잘못된 parameter 2). negative run은 각각 기대한 assertion 태그 1개.
 - agent 보고(재실행 안 함): 기존 형식 덤프 4종이 변경 전과 `cmp` 동일. 벡터: 260K 2,388 레코드(12 위치, T 최대 512), 15M 1,428 레코드(6 위치, T 최대 256). PIM bank image 4,072/4,096 word.

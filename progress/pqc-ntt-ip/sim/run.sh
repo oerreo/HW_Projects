@@ -150,21 +150,39 @@ run_test() {
     [[ $label =~ $ONLY ]] || continue
     [[ -n $tier && ${rtier:-} != "$tier" ]] && continue
     echo "### $name/$label: vsim $TOP $args (expect $expect)" | tee -a run.log
-    # run argument file
+    # elaboration (generics) and run (plusargs) argument files. vopt is run
+    # explicitly into the generic design name "opt": a vopt started by vsim
+    # shows the top module name on its command line (process-privacy.md).
+    local a
+    {
+      echo "-work work"
+      echo "-j 1"
+      echo "work.$TOP"
+      echo "-o opt"
+      for a in $args; do [[ $a == -[gG]* ]] && echo "$a"; done
+    } > o.f
     {
       echo "-c"
       echo "-l r.log"
       echo "-onfinish exit"
-      echo "work.$TOP"
-      local a
-      for a in $args; do echo "$a"; done
+      echo "opt"
+      for a in $args; do [[ $a == -[gG]* ]] || echo "$a"; done
       echo "-do \"../common/batch.do\""
     } > r.f
-    rm -f r.log
+    rm -f r.log o.log
     t0=$SECONDS
-    vsim -f r.f >/dev/null 2>&1
-    local rc=$? dt=$((SECONDS - t0))
-    [[ -f r.log ]] || : > r.log
+    local rc
+    vopt -f o.f >o.log 2>&1
+    rc=$?
+    if [[ $rc == 0 ]]; then
+      vsim -f r.f >/dev/null 2>&1
+      rc=$?
+      [[ -f r.log ]] || : > r.log
+      { sed 's/^/# /' o.log; cat r.log; } > r.tmp && mv r.tmp r.log
+    else
+      sed 's/^/# /' o.log > r.log
+    fi
+    local dt=$((SECONDS - t0))
     cat r.log >>run.log
     cat r.log >"$label.log"
 
