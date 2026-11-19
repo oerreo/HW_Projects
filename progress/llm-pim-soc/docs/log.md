@@ -54,7 +54,7 @@
 - 한계: AXI memory model TB의 데이터 오류 검출 mutation 시험 안 함. DPI smoke 15M은 kernel 파일마다 첫 50 레코드. attention, rmsnorm, swiglu, actq의 DPI trace는 S4-6, S4-7 직전으로 미룸.
 - 다음: S4-2(GEMV leaf와 `gemv_core`).
 
-## 2026-11-19: S4-2 GEMV leaf와 gemv_core  [notion: pending]
+## 2026-11-19: S4-2 GEMV leaf와 gemv_core  [notion: synced]
 - 한 일(hw-worker): `rtl/pkg/llm_pkg.sv`, L0 `rshr_sat`, `dotp`, `sync_fifo`, `ram_sdp`, L1 `mac_row`, `gemv_scale`, L2 `gemv_core`(직접 작성 RTL, 813줄)와 모듈별 TB, 회귀 cfg 7개.
 - 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 97 run, fails 0. `gemv_core`는 260K K_GEMV 레코드 432개(42,144행)와 15M 258개(299,136행, 분류기 32000 x 288 포함)에서 y mismatch 0, stall 있는 run과 없는 run 모두.
 - agent 보고(재실행 안 함): 모듈별 CHECKS 합계(rshr_sat 16.6M, dotp 20.4M, gemv_scale 16.4M 등), mutation 18개 전부 FAIL로 검출, `vlog`/`vopt -lint=full` 경고 0, `make test` 16,669,793 항목 mismatch 0.
