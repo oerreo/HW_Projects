@@ -65,7 +65,7 @@
 - 프로세스 노출: 작업 초반 몇 번 job 파일 수정과 실행을 한 명령으로 묶어 모듈 이름이 최대 약 90초 보였다(agent 보고). 이후 분리.
 - 다음: S4-3(`axi_rd_eng`, `axi_wr_eng`, HP 대역폭 측정 top).
 
-## 2026-11-19: S4-3 AXI engine과 HP 대역폭 측정 빌드  [notion: pending]
+## 2026-11-19: S4-3 AXI engine과 HP 대역폭 측정 빌드  [notion: synced]
 - 한 일(hw-worker): `rtl/l1/axi_rd_eng.sv`, `axi_wr_eng.sv`, `axil_slave.sv`(pqc-ntt-ip에서 복사), `rtl/l3/bw_top.sv`(측정 top)와 TB, AXI-Lite BFM(`tb/common/axil_bfm.sv`), memory model에 SLVERR/DECERR 주입. `docs/spec/bwtest.md`(레지스터 맵), `fpga/bw/`(Vivado Tcl, bare-metal 측정 프로그램, README).
 - 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 164 run, fails 0(기존 97 + axi_mem 2, rd 23, wr 25, axil 7, bw_top 10).
 - agent 보고(재실행 안 함): mutation 31개 중 30개 검출, 1개는 동치(engine의 RREADY가 RVALID 때 항상 1). lint 경고 0. 호스트 검사 HOSTTEST 11/11, Tcl stub 17/17.
