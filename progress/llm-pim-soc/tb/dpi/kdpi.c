@@ -242,3 +242,51 @@ int kd_dot8(const svOpenArrayHandle a, const svOpenArrayHandle b, int n) {
   free(pb);
   return r;
 }
+
+/* ---- S4-2 bulk accessors (copies only; values come from the record or model/src) ---- */
+
+/* copies n int8 elements of buffer b starting at element off into the byte open array v
+   (element v[low + i]); returns the number copied, -1 if b is not an int8 buffer or the
+   range is outside the buffer */
+int kd_rec_bytes(int b, int off, const svOpenArrayHandle v, int n) {
+  const int8_t *p;
+  int i;
+  if (b < 0 || b >= RC.nb || RC.b[b].esz != 1 || off < 0 || n < 0 || off + n > RC.b[b].n) return -1;
+  p = (const int8_t *)bufp(b);
+  for (i = 0; i < n; i++) *(int8_t *)svGetArrElemPtr1(v, svLow(v, 1) + i) = p[off + i];
+  return n;
+}
+
+/* all beats of the row record of row r of the current K_GEMV record (rrec_pack, one row:
+   beat 0 = header, beats 1..ceil(n/8) = weights) into the longint open array beats;
+   returns the number of beats, -1 if not a row-wise K_GEMV record */
+int kd_rec_rrec_row(int r, const svOpenArrayHandle beats) {
+  int n = RC.prm[1], gs = RC.prm[2], nb, j, k;
+  uint8_t *buf;
+  if (!is_gemv() || gs != n || r < 0 || r >= RC.prm[0]) return -1;
+  nb = kd_rec_rrec_nbeat();
+  buf = malloc((size_t)rrec_bytes(1, n));
+  rrec_pack(buf, (const int8_t *)RC.b[0].p + (size_t)r * n, (const uint16_t *)RC.b[1].p + r, 1, n);
+  for (j = 0; j < nb; j++) {
+    uint64_t w = 0;
+    for (k = 7; k >= 0; k--) w = (w << 8) | buf[(size_t)j * 8 + k];
+    *(uint64_t *)svGetArrElemPtr1(beats, svLow(beats, 1) + j) = w;
+  }
+  free(buf);
+  return nb;
+}
+
+/* y of one synthetic gemv row (gs = n): k_gemv_out(k_gemv_row(w, wm, x, n, n), xm, sh) */
+int kd_gemv1(const svOpenArrayHandle w, const svOpenArrayHandle x, int n, int wm, int xm, int sh) {
+  int8_t *pw = malloc((size_t)n + 1), *px = malloc((size_t)n + 1);
+  uint16_t m = (uint16_t)wm;
+  int i, r;
+  for (i = 0; i < n; i++) {
+    pw[i] = *(int8_t *)svGetArrElemPtr1(w, svLow(w, 1) + i);
+    px[i] = *(int8_t *)svGetArrElemPtr1(x, svLow(x, 1) + i);
+  }
+  r = k_gemv_out(k_gemv_row(pw, &m, px, n, n), xm, sh);
+  free(pw);
+  free(px);
+  return r;
+}

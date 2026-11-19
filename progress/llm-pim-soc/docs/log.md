@@ -53,3 +53,14 @@
 - 발견(프로세스 노출): vsim이 자동으로 띄우는 vopt가 top 이름을, vlog의 DPI 자동 컴파일이 gcc에 work 라이브러리 절대 경로를 명령행에 드러낸다. 이 프로젝트의 `run.sh`는 명시적 `vopt -f o.f`(-j 1)와 `gcc @g.f`로 막았다(실행 중 cmdline 샘플 4,138건에서 이름 0건, agent 보고). `pqc-ntt-ip`의 `run.sh`에도 vopt 쪽 문제가 있을 수 있어 확인 필요.
 - 한계: AXI memory model TB의 데이터 오류 검출 mutation 시험 안 함. DPI smoke 15M은 kernel 파일마다 첫 50 레코드. attention, rmsnorm, swiglu, actq의 DPI trace는 S4-6, S4-7 직전으로 미룸.
 - 다음: S4-2(GEMV leaf와 `gemv_core`).
+
+## 2026-11-19: S4-2 GEMV leaf와 gemv_core  [notion: pending]
+- 한 일(hw-worker): `rtl/pkg/llm_pkg.sv`, L0 `rshr_sat`, `dotp`, `sync_fifo`, `ram_sdp`, L1 `mac_row`, `gemv_scale`, L2 `gemv_core`(직접 작성 RTL, 813줄)와 모듈별 TB, 회귀 cfg 7개.
+- 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 97 run, fails 0. `gemv_core`는 260K K_GEMV 레코드 432개(42,144행)와 15M 258개(299,136행, 분류기 32000 x 288 포함)에서 y mismatch 0, stall 있는 run과 없는 run 모두.
+- agent 보고(재실행 안 함): 모듈별 CHECKS 합계(rshr_sat 16.6M, dotp 20.4M, gemv_scale 16.4M 등), mutation 18개 전부 FAIL로 검출, `vlog`/`vopt -lint=full` 경고 0, `make test` 16,669,793 항목 mismatch 0.
+- cycle 식 확정 [측정으로 확인]: `C = ceil(n/8) + rows x (1 + ceil(n/8)) + L_PIPE`, `L_PIPE = 4 + DOT_PIPE + SCALE_PIPE`(기본 9). stall 없는 run의 모든 호출에서 일치. token 단위 합(L_PIPE 제외)은 260K 36,446, 15M 1,950,260 cycle로 arch.md 2.4와 같다.
+- 검증 공백 발견과 수정: 첫 mutation 회차에서 `gemv_core` mutant 3개가 살아남았다. 2개는 실제 레코드에서 결과가 같은 mutant(가중치 padding 0, 동시 처리 행 2개)라 합성 호출 run으로 잡았고, 1개(credit 초과)는 y stall이 짧아 FIFO가 차지 않던 실제 공백이라 긴 y 차단 구간(`+YBLK`)과 credit 한도 도달 검사를 TB에 넣었다.
+- 스펙 대비 변경(hierarchy.md 3.5): `gemv_core`의 LANES는 8 고정(64비트 beat), `mac_row` 누산 25비트는 |x| <= 127 전제(위반은 `L1_RANGE`), `ram_sdp`는 read-first, y backpressure는 header credit.
+- 한계: 합성과 타이밍 미확인(41 x 17 곱의 DSP 분할 포함). irun 교차는 S4-8. 15M credit 경로 coverage는 약함(주 coverage는 260K와 합성 호출 run).
+- 프로세스 노출: 작업 초반 몇 번 job 파일 수정과 실행을 한 명령으로 묶어 모듈 이름이 최대 약 90초 보였다(agent 보고). 이후 분리.
+- 다음: S4-3(`axi_rd_eng`, `axi_wr_eng`, HP 대역폭 측정 top).

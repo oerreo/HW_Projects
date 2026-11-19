@@ -44,4 +44,13 @@ package kdpi_pkg;
   import "DPI-C" function int kd_rsqrt(input longint u, output int re);
   import "DPI-C" function int kd_dot8(input byte a[], input byte b[], input int n);
 
+  // ---- S4-2 bulk accessors ----
+  // n int8 elements of buffer b from element off into v (-1 if not int8 / out of range)
+  import "DPI-C" function int kd_rec_bytes(input int b, input int off, inout byte v[], input int n);
+  // all row record beats of row r (rrec_pack), returns 1 + ceil(n/8) or -1
+  import "DPI-C" function int kd_rec_rrec_row(input int r, inout longint beats[]);
+  // y of one synthetic row: k_gemv_out(k_gemv_row(w, wm, x, n, n), xm, sh)
+  import "DPI-C" function int kd_gemv1(input byte w[], input byte x[], input int n, input int wm,
+                                       input int xm, input int sh);
+
 endpackage

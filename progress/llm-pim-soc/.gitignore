@@ -14,3 +14,8 @@ sim/*/
 !sim/common/
 sim/.run.lock
 sim/regression_*.log
+# scratch outputs of job files
+sim/.out
+sim/.mut/
+sim/.lint/
+sim/*_mut/

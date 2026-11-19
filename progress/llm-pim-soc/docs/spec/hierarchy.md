@@ -98,8 +98,8 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 ### 3.1 공통 (`rtl/pkg/llm_pkg.sv`)
 | 이름 | 값 | 의미 |
 |---|---|---|
-| `E_W` | 8 (signed) | 지수(`we`, 활성 `e`, `fo`, `qe`, `ke`, `ve`). S4-1 집계(K12V8 두 모델 덤프, `model/results/range_k12v8.txt`): 0..33 [측정, PC], signed 7비트면 충분. 8은 1비트 여유 (확정 대기) |
-| `SH_W` | 10 (signed) | 지수 합으로 만든 shift(`sh = we + xe - fo` 등). S4-1 집계: -1..40 [측정, PC] (음수는 attention V 정렬 `ve - emin - G`만), signed 7비트. 10은 E_W 8비트 값 세 개의 합/차가 넘치지 않는 폭 (확정 대기) |
+| `E_W` | 8 (signed) | 지수(`we`, 활성 `e`, `fo`, `qe`, `ke`, `ve`). S4-1 집계(K12V8 두 모델 덤프, `model/results/range_k12v8.txt`): 0..33 [측정, PC], signed 7비트면 충분. 8은 1비트 여유 (확정 2026-11-19, `rtl/pkg/llm_pkg.sv`) |
+| `SH_W` | 10 (signed) | 지수 합으로 만든 shift(`sh = we + xe - fo` 등). S4-1 집계: -1..40 [측정, PC] (음수는 attention V 정렬 `ve - emin - G`만), signed 7비트. 10은 E_W 8비트 값 세 개의 합/차가 넘치지 않는 폭 (확정 2026-11-19, `rtl/pkg/llm_pkg.sv`) |
 | `AM_W` | 17 | 활성 scale 가수 `m` (`m < 2^17`) |
 | `WM_W` | 16 | 가중치 행 가수 `wm` |
 | `N_MAX` | 1024 | gemv 행 길이, 벡터 길이 상한(두 모델 최대 768). golden `K_NMAX`(16384)보다 작다. 넘는 descriptor는 ERR |
@@ -155,6 +155,21 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 | `vec_core` | `N_MAX` | op + cfg, 입력 stream(들) | q stream + scale, 또는 idx | RMSNORM `4n + C`, SWIGLU `2n + C`, ACTQ `2n + C`, ARGMAX `n` | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX |
 
 L3의 레지스터 맵과 kernel 호출 순서는 `arch.md` 7절.
+
+### 3.5 S4-2 구현에서 고정한 세부 (2026-11-19, 위 표의 보완)
+위 표에 없던 것을 구현하면서 정했다. 표와 충돌하는 변경은 없고, parameter 이름 하나(`gemv_core`의 `NMAX`)만 다르다.
+
+| 모듈 | 보완 |
+|---|---|
+| 공통 | 모든 모듈에 `clk`, `rst_n`(`ram_sdp` 포함). `LATENCY`는 `localparam`. 시뮬레이션 전용 검사(`ifndef SYNTHESIS`)의 메시지는 tag로 시작한다: `VR_X`/`VR_HOLD`/`VR_STABLE`(valid/ready 입력 규칙), `RAM_X`/`RAM_ADDR`, `L1_RANGE`, `L2_RANGE`/`L2_START`/`L2_OVF` |
+| `rshr_sat` | `IN_W` 2..62(golden 전제 `|x| < 2^61`), `SH_W` = 10. 우shift는 `sh >= IN_W`이면 0. `SAT_MODE 0`: `OUT_W` 2..63, OUT_W 범위로 포화(OUT_W 32 = `sat32(k_rshr)`). `SAT_MODE 1`: `OUT_W` = 64 필수, `k_rshr` 그대로(대칭 `+-I64MAX`, `sh <= -62`이면 0이 아닌 x는 모두 포화). `PIPE` 0..2: 1 = 출력 레지스터, 2 = shift 단 뒤에도 레지스터 |
+| `dotp` | lane i = `[i*AW +: AW]`. `sum_o` 폭 `AW+BW+log2(LANES)`(전부 최소값 곱의 합까지 정확). `PIPE` 0..log2(LANES)+1: 1 = 출력, 2 = 곱 뒤 추가, j+2 = adder 단 j 뒤 추가. `LANES`는 2 이상의 2의 거듭제곱 |
+| `sync_fifo` | first-word fall-through. `in_ready_o = level != DEPTH`(`out_ready_i`와 조합 경로 없음, full에서 같은 cycle pop이 있어도 push는 기다린다). `DEPTH` >= 1이면 2의 거듭제곱이 아니어도 된다. `level_o` 폭 `clog2(DEPTH+1)` |
+| `ram_sdp` | 같은 cycle 같은 주소의 read/write는 이전 값(read-first). `RD_LAT` 1 또는 2. `DEPTH` >= 2, 주소 폭 `clog2(DEPTH)`. 내용 초기화 없음 |
+| `mac_row` | parameter 추가: `N_MAX`(누산 폭 검사용), `DOT_PIPE`(dotp의 PIPE). 검사 `ACC_W >= AW+BW-1+clog2(N_MAX)`(gemv 25): 한쪽 피연산자가 최소값(-128)이 아니라는 전제(활성 x는 actq 출력 `|x| <= 127`). -128 x -128이 N_MAX개면 1비트 넘치며 시뮬레이션에서 `L1_RANGE`로 보고한다. `acc_o`는 `acc_valid_o` cycle에만 유효 |
+| `gemv_scale` | `PIPE` 0..4(`LATENCY = PIPE`): 1 = rshr_sat 출력, 2 = `acc*wm` 뒤, 3 = `S*xm` 뒤, 4 = rshr_sat 중간. 내부 폭 S 41비트, P 58비트(ACC_W 25). `ACC_W` <= 29 |
+| `gemv_core` | parameter: `LANES`(8 고정, 다른 값은 elaboration 실패: 64비트 beat = int8 8개), `NMAX`(= `llm_pkg::N_MAX`, 8의 배수), `ROWS_W`(16), `DOT_PIPE`, `SCALE_PIPE`, `Y_DEPTH`(16). 포트: `start_i`, `rows_i[ROWS_W]`, `n_i[clog2(NMAX+1)]`, `we_i`/`xe_i`/`fo_i[E_W]` signed, `xm_i[AM_W]`, `busy_o`, `done_o`(마지막 y 수락 다음 cycle의 1 cycle pulse), x stream(`x_valid_i/x_ready_o/x_data_i[64]`, LOADX 단계에서만 수락, 마지막 beat의 lane >= n은 무시하고 0으로 마스크), 행 레코드 stream(`w_valid_i/w_ready_o/w_data_i[64]`, header beat는 `[15:0]`만 사용, x를 다 받은 뒤 수락), y stream(`y_valid_o/y_ready_i/y_data_o[32]`). y 쪽 backpressure는 credit으로 처리: header 수락부터 y 수락까지의 행 수가 `Y_DEPTH` 미만일 때만 header를 받는다. `Y_DEPTH >= (L_PIPE+3)/2 + 1`을 elaboration에서 검사 |
+| `gemv_core` cycle 식 | `start_i`가 1인 cycle을 0, `done_o`가 1인 cycle을 C라 하면, 모든 입력 beat가 바로 오고 `y_ready_i`가 1일 때 `C = ceil(n/8) + rows x (1 + ceil(n/8)) + L_PIPE`, `L_PIPE = 3 + mac_row.LATENCY + gemv_scale.LATENCY = 4 + DOT_PIPE + SCALE_PIPE`(기본 2, 3이면 9). 3 = x buffer read 단 1 + y FIFO 1 + done 레지스터 1. `arch.md` 2.4의 식에서 `L_dram`을 뺀 것과 같다(S4-2 시뮬레이션으로 확인, `sim/tests/gemv_core.cfg`) |
 
 ## 4. golden에 경계가 없어 `model/`에 추가해야 하는 것
 
