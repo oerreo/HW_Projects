@@ -14,6 +14,9 @@ L0 = 하위 모듈이 없는 leaf, L1 = L0 조합, L2 = kernel core(로컬 인�
 L4  sys_p_top        (S5) 260K PIM형 시스템: pim_top + attn(KV는 BRAM) + vec_top              RTL
 L4  sys_a_top        (S5) 15M 가속기형 시스템: gemv_acc_top + attn_top(KV는 DDR) + vec_top     RTL
 
+L3  bw_top           HP 대역폭 측정 top (S4-3, 측정 도구). axil_slave + CSR + axi_rd_eng/axi_wr_eng x P   RTL
+      L1  axil_slave, axi_rd_eng, axi_wr_eng, L0 sync_fifo (아래와 같은 모듈)
+
 L3  gemv_acc_top     GEMV 가속기형 IP. AXI-Lite CSR + HP read/write master + gemv_core x P       RTL
       L1  axil_slave       AXI4-Lite 5채널 -> 레지스터 strobe (pqc-ntt-ip에서 복사)                RTL
       L3  gemv_acc_csr     레지스터 맵, done_sticky, ERR, CYCLES/STALL 카운터                       RTL
@@ -170,6 +173,49 @@ L3의 레지스터 맵과 kernel 호출 순서는 `arch.md` 7절.
 | `gemv_scale` | `PIPE` 0..4(`LATENCY = PIPE`): 1 = rshr_sat 출력, 2 = `acc*wm` 뒤, 3 = `S*xm` 뒤, 4 = rshr_sat 중간. 내부 폭 S 41비트, P 58비트(ACC_W 25). `ACC_W` <= 29 |
 | `gemv_core` | parameter: `LANES`(8 고정, 다른 값은 elaboration 실패: 64비트 beat = int8 8개), `NMAX`(= `llm_pkg::N_MAX`, 8의 배수), `ROWS_W`(16), `DOT_PIPE`, `SCALE_PIPE`, `Y_DEPTH`(16). 포트: `start_i`, `rows_i[ROWS_W]`, `n_i[clog2(NMAX+1)]`, `we_i`/`xe_i`/`fo_i[E_W]` signed, `xm_i[AM_W]`, `busy_o`, `done_o`(마지막 y 수락 다음 cycle의 1 cycle pulse), x stream(`x_valid_i/x_ready_o/x_data_i[64]`, LOADX 단계에서만 수락, 마지막 beat의 lane >= n은 무시하고 0으로 마스크), 행 레코드 stream(`w_valid_i/w_ready_o/w_data_i[64]`, header beat는 `[15:0]`만 사용, x를 다 받은 뒤 수락), y stream(`y_valid_o/y_ready_i/y_data_o[32]`). y 쪽 backpressure는 credit으로 처리: header 수락부터 y 수락까지의 행 수가 `Y_DEPTH` 미만일 때만 header를 받는다. `Y_DEPTH >= (L_PIPE+3)/2 + 1`을 elaboration에서 검사 |
 | `gemv_core` cycle 식 | `start_i`가 1인 cycle을 0, `done_o`가 1인 cycle을 C라 하면, 모든 입력 beat가 바로 오고 `y_ready_i`가 1일 때 `C = ceil(n/8) + rows x (1 + ceil(n/8)) + L_PIPE`, `L_PIPE = 3 + mac_row.LATENCY + gemv_scale.LATENCY = 4 + DOT_PIPE + SCALE_PIPE`(기본 2, 3이면 9). 3 = x buffer read 단 1 + y FIFO 1 + done 레지스터 1. `arch.md` 2.4의 식에서 `L_dram`을 뺀 것과 같다(S4-2 시뮬레이션으로 확인, `sim/tests/gemv_core.cfg`) |
+
+### 3.6 S4-3 구현에서 고정한 세부 (2026-11-19, 3.3 표의 보완)
+3.3 표의 `axi_rd_eng`/`axi_wr_eng` 행과 충돌하는 변경은 없다. parameter와 포트가 늘었다(`IDW`, `LEN_W`, `FIFO_DEPTH`, `AXCACHE`, 런타임 한도 `cfg_burst_i`/`cfg_outs_i`, 상태 출력). 검증: `sim/tests/axi_rd_eng.cfg`, `axi_wr_eng.cfg`, `axil_slave.cfg`, `bw_top.cfg`.
+
+공통 규칙 (두 engine):
+
+| 항목 | 규칙 |
+|---|---|
+| parameter | `DW` = 64 고정(다른 값은 elaboration 실패), `AW` 12..64, `IDW` 1..16, `LEN_W` 4..40(`cmd_bytes_i` 폭), `MAX_BURST` 1..256(16 = AXI3/HP 한도), `OUTS` 1..64, `FIFO_DEPTH` >= `MAX_BURST`(rd 기본 `MAX_BURST x OUTS`, wr 기본 `2 x MAX_BURST`), `AXCACHE` 기본 4'b0011 |
+| 명령 | `cmd_valid_i/cmd_ready_o`, `cmd_addr_i[AW]`, `cmd_bytes_i[LEN_W]`. beat 수 = `ceil(bytes/8)` |
+| 비정렬 | **지원하지 않는다.** `addr[2:0] != 0`, `bytes == 0`, `addr + bytes > 2^AW`인 명령은 거절: engine이 idle(`busy_o` = 0)일 때만 수락되고(busy 중에는 `cmd_ready_o` = 0으로 기다림), AXI 트래픽과 데이터 없이 `err_cmd_o`(sticky)를 세우고 handshake cycle에 `done_o` 1 cycle. 시뮬레이션 메시지 `ENG_CMD`. 길이는 8의 배수가 아니어도 된다(아래 마지막 beat 규칙) |
+| burst 분할 | INCR, SIZE 8 B, ID 0, beat 수 = `min(남은 beat, burst 한도, 다음 4 KiB 경계까지 beat)`. 시작 주소를 burst 크기에 정렬하지 않는다(첫 burst만 4 KiB 경계에서 짧아질 수 있음) |
+| 런타임 한도 | `cfg_burst_i[8:0]`(1..`MAX_BURST`, 0 또는 초과 값은 `MAX_BURST`), `cfg_outs_i[6:0]`(1..`OUTS`, 0 또는 초과는 `OUTS`). 명령 handshake에서 latch |
+| outstanding | 제시한 burst(AxVALID를 올린 것) - 완료(RLAST 또는 B) <= 한도 |
+| 오류 응답 | `err_resp_o` = RRESP[1] 또는 BRESP[1](SLVERR, DECERR)를 본 뒤 sticky. 데이터는 그대로 전달/기록. `err_clr_i`로 `err_resp_o`, `err_cmd_o`를 지운다. 같은 cycle의 새 오류가 이긴다 |
+| control reset | 명령/AR/AW 상태, 카운터, FIFO 포인터, sticky 오류만 `rst_n`. 주소, 길이, 데이터 레지스터는 reset 없음 |
+
+| 모듈 | 보완 |
+|---|---|
+| `axi_rd_eng` | 출력 스트림 `d_valid_o/d_ready_i/d_data_o[64]/d_last_o`(명령의 마지막 beat). 마지막 beat의 길이 밖 byte는 메모리 내용 그대로(소비자가 무시). R 버퍼 = `sync_fifo`(`FIFO_DEPTH` x 65). **AR은 버퍼 여유가 burst 전체를 덮을 때만 제시**(space 카운터 = `FIFO_DEPTH` - 버퍼 beat - 요청했지만 아직 안 온 beat). 그래서 `RREADY`(= 버퍼 not full)는 RVALID가 올 때 항상 1이고 R 채널은 하류 backpressure와 무관하게 멈추지 않는다(위반 시 `ENG_RSTALL`). burst 경계는 RLAST로 정한다(burst 정보 FIFO `OUTS` 깊이; RLAST 위치가 길이와 다르면 `ENG_RLAST`, 요청 없는 R은 `ENG_RUNEXP`). `busy_o` = 수락된 명령의 마지막 beat가 아직 안 나감, `done_o` = 마지막 beat handshake(또는 거절 명령), `stall_o` = `busy_o && d_ready_i && !d_valid_o`(소비자가 데이터를 기다린 cycle, CSR `RD_STALL`의 원천). latency: 명령 handshake c -> ARVALID c+1. 처리율: stall 없는 메모리(latency 1)에서 burst 16 x outstanding 2 이상이면 1 beat/cycle(측정, 아래) |
+| `axi_wr_eng` | 입력 스트림 `in_valid_i/in_ready_o/in_data_i[64]`, 명령마다 `ceil(bytes/8)` beat, 명령 순서대로(byte i는 beat i/8의 lane i mod 8). 데이터가 명령보다 먼저 와도 된다(버퍼에서 기다림). 거절된 명령의 데이터는 보내지 않는다(호출자 책임). **32비트 y 스트림은 호출자가 두 개씩 64비트 beat로 묶는다**(S4-4 `gemv_acc_top`). WSTRB = 8'hFF, 단 길이가 8의 배수가 아닌 명령의 마지막 beat는 `(1 << (bytes mod 8)) - 1`. **burst 단위 store-and-forward**: burst의 모든 beat가 버퍼에 있을 때만 AW를 제시하고(uncommitted-beat 카운터), W는 그 burst의 AW handshake 뒤에 시작해 burst 안에서 WVALID가 끊기지 않는다. `FIFO_DEPTH >= 2 x MAX_BURST`면 다음 burst가 채워지는 동안 현재 burst가 나가 1 beat/cycle(`FIFO_DEPTH` = `MAX_BURST`면 0.842 beat/cycle 측정). BREADY = 1 고정(요청 없는 B는 `ENG_BUNEXP`). `busy_o` = 마지막 B 전, `done_o` = 명령의 마지막 burst의 B handshake(또는 거절 명령), `stall_o` = `in_valid_i && !in_ready_o` |
+| `axil_slave` | pqc-ntt-ip `rtl/l4/axil_slave.sv`를 그대로 복사(헤더 주석만 다름, 시뮬레이션 tag `L4_AXI_*` 유지). TB도 복사(`tb/axil_slave/`), 같은 7 run |
+| `bw_top` | 레지스터 맵과 동작은 `spec/bwtest.md`. parameter `P`(1, 2), `MAX_BURST`, `OUTS`, `RD_FIFO`, `WR_FIFO`, `IDW`, `FCLK_MHZ`, `ADDR_W`(8..32). AXI master 포트는 `[P-1:0][...]` packed 배열(포트 p = HP0, HP2). engine 명령이 거절될 조건(정렬, 2^32 넘김)을 descriptor 검사에서 먼저 막는다(`BAD_DESC`): 거절된 쓰기 명령은 pattern 생성기가 이미 넣은 beat를 engine 버퍼에 남겨 다음 op의 데이터를 밀기 때문이다(S4-3 TB에서 발견, 수정) |
+
+처리율 측정 [측정, Questa, `axi_mem_slave` 모델, 보드 아님]: 64 KiB(8,192 beat) 명령 하나, 메모리 stall 없음. 첫 beat부터 마지막 beat까지 cycle.
+
+| engine | burst | outs | 메모리 latency (rd: AR->R, wr: 마지막 W->B) | cycle | beat/cycle |
+|---|---|---|---|---|---|
+| rd | 16 | 1 | 1 | 9,725 | 0.842 |
+| rd | 16 | 2, 4 | 1 | 8,192 | 1.000 |
+| rd | 16 | 2 | 33 | 13,037 | 0.628 |
+| rd | 16 | 4 | 33 | 8,192 | 1.000 |
+| rd | 256 | 1 | 1 / 33 | 8,285 / 9,277 | 0.989 / 0.883 |
+| rd | 256 | 2 | 33 | 8,192 | 1.000 |
+| rd | 1 | 1 / 4 | 1 | 40,956 / 10,239 | 0.200 / 0.800 |
+| wr | 16 | 1 | 1 | 10,236 | 0.800 |
+| wr | 16 | 2, 4 | 1 | 8,192 | 1.000 |
+| wr | 16 | 4 | 33 | 8,192 | 1.000 |
+| wr | 16 (FIFO 16) | 4 | 1 | 9,725 | 0.842 |
+| wr | 1 | 4 | 1 | 16,382 | 0.500 |
+
+- outstanding 1에서 burst 사이 빈 cycle은 왕복 지연(AR 제시 1 + 모델 latency + 버퍼 1 + 다음 AR 판단)이다. 실제 HP 포트의 latency는 보드 측정(`spec/bwtest.md`) 전까지 모른다.
+- `bw_top`(P = 1, 2) 64 KiB RD op의 CYCLES는 8,197(P = 1과 2 모두, stall 없는 모델), 즉 8,192 beat + 5 cycle의 시작/종료 지연이다.
 
 ## 4. golden에 경계가 없어 `model/`에 추가해야 하는 것
 

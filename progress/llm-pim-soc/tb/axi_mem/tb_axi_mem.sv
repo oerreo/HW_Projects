@@ -16,9 +16,12 @@
 // file round trips), uninit (model count == TB count), cnt (beats and bursts).
 // +NEG=<n> injects one protocol violation (see neg_* tasks); sim/tests/axi_mem.cfg expects
 // exactly one message of the matching tag and TB_RESULT PASS.
+// +ERRINJ=1 adds read and write error windows (SLVERR and DECERR, inj_rd_err / inj_wr_err) in
+// both regions; the expected RRESP per beat and BRESP per burst come from the TB's own copy of
+// the windows (checker err: injected responses seen by both sides, counts equal and > 0).
 //
 // Plusargs: +SEED=<n> +PROF=<0|1|2> (stall/latency profile) +N_ROUND +N_BURST +MAXL=<len>
-// +NEG=<n>.
+// +NEG=<n> +ERRINJ=<0|1>.
 `timescale 1ns / 1ps
 module tb_axi_mem #(
   parameter int DW      = 64,
@@ -60,7 +63,7 @@ module tb_axi_mem #(
 
   tb_checker c_rdata = new("rdata"), c_rid = new("rid_rlast"), c_bid = new("bid"),
              c_slv = new("slv"), c_file = new("file"), c_uninit = new("uninit"),
-             c_cnt = new("cnt");
+             c_cnt = new("cnt"), c_err = new("err");
 
   // ---------------- shadow memory ----------------
   byte unsigned shadow[longint unsigned];
@@ -96,6 +99,25 @@ module tb_axi_mem #(
 
   burst_t ar_todo[$], aw_todo[$], r_exp[$];
   logic [IDW-1:0] b_exp[$];
+  logic [1:0] b_exp_resp[$];
+
+  // TB copy of the injected error windows (same rule as the model: word address in [lo, hi))
+  typedef struct {
+    longint unsigned lo, hi;
+    logic [1:0] resp;
+  } ewin_t;
+  ewin_t rd_ew[$], wr_ew[$];
+  longint unsigned tb_rd_err = 0, tb_wr_err = 0;
+  function automatic logic [1:0] ew_resp(ref ewin_t q[$], input longint unsigned a);
+    foreach (q[i]) if ((a & ~64'h7) >= q[i].lo && (a & ~64'h7) < q[i].hi) return q[i].resp;
+    return 2'b00;
+  endfunction
+  task automatic add_ew(bit wr, longint unsigned lo, longint unsigned hi, logic [1:0] resp);
+    ewin_t w;
+    w.lo = lo; w.hi = hi; w.resp = resp;
+    if (wr) begin wr_ew.push_back(w); u_mem.inj_wr_err(lo, hi, resp); end
+    else begin rd_ew.push_back(w); u_mem.inj_rd_err(lo, hi, resp); end
+  endtask
   wb_t w_todo[$];
   int gap_pct = 0, rr_pct = 100, br_pct = 100;  // VALID gap %, RREADY / BREADY high %
   longint unsigned n_rbeat = 0, n_bresp = 0, n_rburst = 0, exp_rbeat = 0, exp_bresp = 0;
@@ -210,10 +232,11 @@ module tb_axi_mem #(
         if (u) tb_uninit++;
         if (rdata !== e) c_rdata.fail($sformatf("addr 0x%0h beat %0d got %h exp %h", ba, rk, rdata, e));
         else c_rdata.pass();
-        if (rid !== q.id || rlast !== (rk == q.len) || rresp !== 2'b00)
-          c_rid.fail($sformatf("burst 0x%0h beat %0d/%0d rid %0d exp %0d rlast %b rresp %0d",
-                               q.addr, rk, q.len, rid, q.id, rlast, rresp));
+        if (rid !== q.id || rlast !== (rk == q.len) || rresp !== ew_resp(rd_ew, ba))
+          c_rid.fail($sformatf("burst 0x%0h beat %0d/%0d rid %0d exp %0d rlast %b rresp %0d exp %0d",
+                               q.addr, rk, q.len, rid, q.id, rlast, rresp, ew_resp(rd_ew, ba)));
         else c_rid.pass();
+        if (rresp !== 2'b00) tb_rd_err++;
         if (rk == q.len) begin
           void'(r_exp.pop_front());
           rk = 0;
@@ -226,9 +249,13 @@ module tb_axi_mem #(
       if (b_exp.size() == 0) c_bid.fail("B without a write");
       else begin
         logic [IDW-1:0] e;
+        logic [1:0] er;
         e = b_exp.pop_front();
-        if (bid !== e || bresp !== 2'b00) c_bid.fail($sformatf("bid %0d exp %0d bresp %0d", bid, e, bresp));
+        er = b_exp_resp.pop_front();
+        if (bid !== e || bresp !== er)
+          c_bid.fail($sformatf("bid %0d exp %0d bresp %0d exp %0d", bid, e, bresp, er));
         else c_bid.pass();
+        if (bresp !== 2'b00) tb_wr_err++;
       end
     end
   end
@@ -259,12 +286,14 @@ module tb_axi_mem #(
   // write data into the shadow when queued (reads never overlap a region being written)
   task automatic issue_write(burst_t q, bit partial = 1'b1, bit update = 1'b1);
     longint unsigned a0 = q.addr & ~64'h7;
+    logic [1:0] er = 2'b00;
     aw_todo.push_back(q);
     b_exp.push_back(q.id);
     exp_bresp++;
     for (int k = 0; k <= q.len; k++) begin
       wb_t b;
       longint unsigned ba = k == 0 ? q.addr : a0 + 8 * k;
+      if (er == 2'b00) er = ew_resp(wr_ew, ba);
       b.d = {$urandom, $urandom};
       b.s = (partial && coin(20)) ? 8'($urandom) : 8'hFF;
       b.l = q.wlast_at < 0 ? (k == q.len) : (k == q.wlast_at);
@@ -272,6 +301,7 @@ module tb_axi_mem #(
         if (b.s[i] && update) shadow[(ba & ~64'h7) + i] = b.d[8*i +: 8];
       w_todo.push_back(b);
     end
+    b_exp_resp.push_back(er);
   endtask
 
   task automatic wait_done(int max_cyc = 2000000);
@@ -321,6 +351,7 @@ module tb_axi_mem #(
         q.id = 2; q.addr = NBASE + 8; q.len = 0;
         // W beat and B only (the AW was driven by hand)
         b_exp.push_back(2);
+        b_exp_resp.push_back(2'b00);
         exp_bresp++;
         begin
           wb_t b;
@@ -415,20 +446,30 @@ module tb_axi_mem #(
   // ---------------- main ----------------
   initial begin
     int unsigned seed;
-    int prof, n_round, n_burst, neg;
+    int prof, n_round, n_burst, neg, errinj;
     prof = 1;
     n_round = 6;
     n_burst = 200;
     neg = 0;
+    errinj = 0;
     seed = tb_seed_from_plusarg();
     void'($value$plusargs("PROF=%d", prof));
     void'($value$plusargs("N_ROUND=%d", n_round));
     void'($value$plusargs("N_BURST=%d", n_burst));
     void'($value$plusargs("MAXL=%d", maxl));
     void'($value$plusargs("NEG=%d", neg));
+    void'($value$plusargs("ERRINJ=%d", errinj));
     if (maxl > MAX_LEN) maxl = MAX_LEN;
-    $display("tb_axi_mem: SEED %0d PROF %0d N_ROUND %0d N_BURST %0d MAXL %0d MAX_LEN %0d NEG %0d",
-             seed, prof, n_round, n_burst, maxl, MAX_LEN, neg);
+    $display("tb_axi_mem: SEED %0d PROF %0d N_ROUND %0d N_BURST %0d MAXL %0d MAX_LEN %0d NEG %0d ERRINJ %0d",
+             seed, prof, n_round, n_burst, maxl, MAX_LEN, neg, errinj);
+    if (errinj != 0) begin  // windows inside both regions, both response codes, both directions
+      add_ew(1'b0, REG0 + 1024, REG0 + 1024 + 256, 2'b10);
+      add_ew(1'b0, REG1 + 8192, REG1 + 8192 + 64, 2'b11);
+      add_ew(1'b0, REG1 + 8192 + 32, REG1 + 8192 + 512, 2'b10);  // overlaps: first window wins
+      add_ew(1'b1, REG1 + 2048, REG1 + 2048 + 128, 2'b10);
+      add_ew(1'b1, REG0 + 12288, REG0 + 12288 + 8, 2'b11);
+      add_ew(1'b1, REG0 + 4096 - 8, REG0 + 4096 + 8, 2'b10);
+    end
     case (prof)
       0: begin u_mem.cfg_stall(0, 0, 0, 0, 0); u_mem.cfg_lat(1, 1, 1, 1); gap_pct = 0; rr_pct = 100; br_pct = 100; end
       1: begin u_mem.cfg_stall(30, 30, 30, 30, 30); u_mem.cfg_lat(1, 20, 1, 10); gap_pct = 20; rr_pct = 70; br_pct = 70; end
@@ -471,11 +512,17 @@ module tb_axi_mem #(
       c_cnt.fail($sformatf("rbeat %0d/%0d (model %0d) bresp %0d/%0d", n_rbeat, exp_rbeat,
                            u_mem.n_rd_beat, n_bresp, exp_bresp));
     else c_cnt.pass();
+    if (u_mem.n_rd_err != tb_rd_err || u_mem.n_wr_err != tb_wr_err ||
+        (errinj != 0 && (tb_rd_err == 0 || tb_wr_err == 0)) || (errinj == 0 && tb_rd_err + tb_wr_err != 0))
+      c_err.fail($sformatf("error responses: rd beats model %0d tb %0d, wr bursts model %0d tb %0d",
+                           u_mem.n_rd_err, tb_rd_err, u_mem.n_wr_err, tb_wr_err));
+    else c_err.pass();
     u_mem.check_idle();
     u_mem.report();
     $display("tb_axi_mem: read beats %0d bursts %0d, write responses %0d, uninit words %0d",
              n_rbeat, n_rburst, n_bresp, tb_uninit);
-    void'(tb_final_report('{c_rdata, c_rid, c_bid, c_slv, c_file, c_uninit, c_cnt}));
+    $display("tb_axi_mem: injected error responses: rd beats %0d, wr bursts %0d", tb_rd_err, tb_wr_err);
+    void'(tb_final_report('{c_rdata, c_rid, c_bid, c_slv, c_file, c_uninit, c_cnt, c_err}));
     $finish;
   end
 

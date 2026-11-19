@@ -19,3 +19,8 @@ sim/.out
 sim/.mut/
 sim/.lint/
 sim/*_mut/
+sim/.job*
+sim/.mut*/
+sim/.lint*/
+fpga/bw/build/
+fpga/bw/test/build/

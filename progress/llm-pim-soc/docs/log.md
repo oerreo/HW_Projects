@@ -64,3 +64,14 @@
 - 한계: 합성과 타이밍 미확인(41 x 17 곱의 DSP 분할 포함). irun 교차는 S4-8. 15M credit 경로 coverage는 약함(주 coverage는 260K와 합성 호출 run).
 - 프로세스 노출: 작업 초반 몇 번 job 파일 수정과 실행을 한 명령으로 묶어 모듈 이름이 최대 약 90초 보였다(agent 보고). 이후 분리.
 - 다음: S4-3(`axi_rd_eng`, `axi_wr_eng`, HP 대역폭 측정 top).
+
+## 2026-11-19: S4-3 AXI engine과 HP 대역폭 측정 빌드  [notion: pending]
+- 한 일(hw-worker): `rtl/l1/axi_rd_eng.sv`, `axi_wr_eng.sv`, `axil_slave.sv`(pqc-ntt-ip에서 복사), `rtl/l3/bw_top.sv`(측정 top)와 TB, AXI-Lite BFM(`tb/common/axil_bfm.sv`), memory model에 SLVERR/DECERR 주입. `docs/spec/bwtest.md`(레지스터 맵), `fpga/bw/`(Vivado Tcl, bare-metal 측정 프로그램, README).
+- 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 164 run, fails 0(기존 97 + axi_mem 2, rd 23, wr 25, axil 7, bw_top 10).
+- agent 보고(재실행 안 함): mutation 31개 중 30개 검출, 1개는 동치(engine의 RREADY가 RVALID 때 항상 1). lint 경고 0. 호스트 검사 HOSTTEST 11/11, Tcl stub 17/17.
+- 처리율 [측정, 시뮬레이션 모델, 64 KiB, stall 없음]: rd는 burst 16, outstanding 2 이상에서 1 beat/cycle, outstanding 1에서 0.842. wr는 burst 16, outstanding 2 이상, FIFO 32에서 1.000, FIFO 16에서 0.842(burst 단위로 모은 뒤 보내므로 버퍼가 burst의 2배 필요). 보드의 HP latency와는 무관한 값이다.
+- 정한 규칙(hierarchy.md 3.6): 시작 주소는 8 B 정렬만 지원(위반 명령은 거절, sticky 오류), 길이는 임의 byte. burst = min(남은 beat, burst 한도, 4 KiB 경계까지). rd는 buffer 여유가 burst 전체를 덮을 때만 AR을 내 R이 멈추지 않는다. wr는 burst 데이터를 모두 받은 뒤 AW. 응답 오류는 sticky, 같은 cycle의 clear보다 새 오류가 우선.
+- 검증 공백 발견과 수정: 오류와 clear가 같은 cycle에 겹치는 경우를 TB가 만들지 않아 우선순위 mutant 2개가 살아남았다. 겹침 구간과 coverage 검사를 추가해 검출. `bw_top`에서 실제 버그 1건(engine이 쓰기 명령을 거절하면 pattern beat가 남아 다음 op를 오염)을 찾아 descriptor 검사로 막았다.
+- UNVERIFIED: `fpga/bw/`의 Vivado Tcl(PS7 속성 이름, module reference, HP DDR segment), XSCT 스크립트, Xilinx BSP 호출, 100 MHz timing. PS 프로그램의 checksum은 스펙 문서로 쓴 C 호스트 모델로만 확인(RTL trace 대조 안 함).
+- 프로세스 노출: agent가 프로젝트 경로가 든 `cd` 명령으로 job을 실행해 경로가 job마다 수 초에서 약 5분 보였다. 발견 후 비공개 포인터 파일 방식으로 바꿨고 `process-privacy.md`에 규칙으로 추가.
+- 다음: 사용자 보드 실행 요청(대역폭 측정), S4-4(GEMV 가속기형 IP top).

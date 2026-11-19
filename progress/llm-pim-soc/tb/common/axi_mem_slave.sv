@@ -13,6 +13,13 @@
 //     cycles after the last beat was written.
 //   - Random backpressure: ARREADY, AWREADY, WREADY low, RVALID / BVALID gap with the
 //     percentages set by cfg_stall (default 0: always ready, no gaps).
+//   - Error injection (S4-3): inj_rd_err(lo, hi, resp) / inj_wr_err(lo, hi, resp) add an
+//     address window [lo, hi) (byte addresses, compared with the 8-byte-aligned word address
+//     of each beat). A read beat whose word lies in a read window gets RRESP = resp
+//     (2 SLVERR, 3 DECERR; data is still returned from memory). A write burst with at least
+//     one beat in a write window gets BRESP = resp of the first such beat (the data is still
+//     written). The first matching window wins. inj_clear() removes all windows. Counters
+//     n_rd_err (beats) and n_wr_err (bursts).
 //   - Backdoor: bd_write8/bd_read8/bd_write64/bd_read64, load_hex/dump_hex (one 64-bit
 //     word per line, word i at base + 8 i), load_bin/dump_bin (raw little-endian bytes),
 //     clear(). A testbench loads golden data from a file or from DPI-C (tb/dpi/kdpi_pkg.sv)
@@ -235,6 +242,34 @@ module axi_mem_slave #(
     return pct > 0 && $urandom_range(99) < pct;
   endfunction
 
+  // ---------------- error injection ----------------
+  typedef struct {
+    longint unsigned lo, hi;
+    logic [1:0] resp;
+  } errwin_t;
+  errwin_t rd_errw[$], wr_errw[$];
+  longint unsigned n_rd_err = 0, n_wr_err = 0;
+
+  function automatic void inj_rd_err(longint unsigned lo, longint unsigned hi, logic [1:0] resp);
+    errwin_t w;
+    w.lo = lo; w.hi = hi; w.resp = resp;
+    rd_errw.push_back(w);
+  endfunction
+  function automatic void inj_wr_err(longint unsigned lo, longint unsigned hi, logic [1:0] resp);
+    errwin_t w;
+    w.lo = lo; w.hi = hi; w.resp = resp;
+    wr_errw.push_back(w);
+  endfunction
+  function automatic void inj_clear();
+    rd_errw.delete();
+    wr_errw.delete();
+  endfunction
+  function automatic logic [1:0] win_resp(ref errwin_t q[$], input longint unsigned a);
+    longint unsigned w0 = a & ~longint'(NBY - 1);
+    foreach (q[i]) if (w0 >= q[i].lo && w0 < q[i].hi) return q[i].resp;
+    return 2'b00;
+  endfunction
+
   // ---------------- statistics ----------------
   longint unsigned n_rd_burst = 0, n_rd_beat = 0, n_wr_burst = 0, n_wr_beat = 0;
   int max_rd_outs = 0, max_wr_outs = 0;
@@ -261,6 +296,7 @@ module axi_mem_slave #(
   typedef struct {
     logic [IDW-1:0] id;
     longint unsigned t;
+    logic [1:0] resp;
   } bresp_t;
 
   req_t   arq[$], awq[$];
@@ -269,6 +305,7 @@ module axi_mem_slave #(
   longint unsigned cyc = 0;
   int rbeat = 0, wbeat = 0;
   bit wlast_bad = 1'b0;
+  logic [1:0] wresp_acc = 2'b00;  // BRESP of the burst being written (first error beat)
 
   // address of beat k of a burst (always INCR from the size-aligned start)
   function automatic longint unsigned beat_addr(req_t q, int k);
@@ -336,6 +373,7 @@ module axi_mem_slave #(
       rbeat = 0;
       wbeat = 0;
       wlast_bad = 1'b0;
+      wresp_acc = 2'b00;
       ar_pend = 1'b0;
       aw_pend = 1'b0;
       w_pend = 1'b0;
@@ -387,10 +425,13 @@ module axi_mem_slave #(
           end else rbeat++;
         end
         if (arq.size() > 0 && cyc >= arq[0].t && !stall(st_r)) begin
+          logic [1:0] rr;
+          rr = win_resp(rd_errw, beat_addr(arq[0], rbeat));
+          if (rr != 2'b00) n_rd_err++;
           rvalid_o <= 1'b1;
           rid_o    <= arq[0].id;
           rdata_o  <= rd_word(beat_addr(arq[0], rbeat));
-          rresp_o  <= 2'b00;
+          rresp_o  <= rr;
           rlast_o  <= (rbeat == arq[0].len);
         end else begin
           rvalid_o <= 1'b0;
@@ -420,6 +461,7 @@ module axi_mem_slave #(
         bit last;
         b = wq.pop_front();
         last = (wbeat == awq[0].len);
+        if (wresp_acc == 2'b00) wresp_acc = win_resp(wr_errw, beat_addr(awq[0], wbeat));
         wr_word(beat_addr(awq[0], wbeat), b.d, b.s);
         n_wr_beat++;
         if (b.l !== last && !wlast_bad) begin
@@ -431,6 +473,9 @@ module axi_mem_slave #(
           bresp_t r;
           r.id = awq[0].id;
           r.t = cyc + $urandom_range(lat_bmax, lat_bmin);
+          r.resp = wresp_acc;
+          if (wresp_acc != 2'b00) n_wr_err++;
+          wresp_acc = 2'b00;
           bq.push_back(r);
           void'(awq.pop_front());
           wbeat = 0;
@@ -446,7 +491,7 @@ module axi_mem_slave #(
         if (bq.size() > 0 && cyc >= bq[0].t && !stall(st_b)) begin
           bvalid_o <= 1'b1;
           bid_o    <= bq[0].id;
-          bresp_o  <= 2'b00;
+          bresp_o  <= bq[0].resp;
         end else bvalid_o <= 1'b0;
       end
     end
@@ -460,9 +505,9 @@ module axi_mem_slave #(
   endfunction
 
   function automatic void report();
-    $display("AXI_MEM %s: rd bursts %0d beats %0d max outstanding %0d | wr bursts %0d beats %0d max outstanding %0d | uninit reads %0d | violations %0d",
+    $display("AXI_MEM %s: rd bursts %0d beats %0d max outstanding %0d | wr bursts %0d beats %0d max outstanding %0d | uninit reads %0d | injected rd err beats %0d wr err bursts %0d | violations %0d",
              NAME, n_rd_burst, n_rd_beat, max_rd_outs, n_wr_burst, n_wr_beat, max_wr_outs,
-             n_uninit, n_viol);
+             n_uninit, n_rd_err, n_wr_err, n_viol);
   endfunction
 
 endmodule
