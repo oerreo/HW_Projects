@@ -1,0 +1,152 @@
+# A10 range of exponents (class E) and shifts (class SH) over K12V8 dump records
+# every record is replayed with stage traces (k_exec_st) and must reproduce its output
+## range m1_260K
+# metric class min max count signed_bits
+embed.we                 E  22 22 12 6
+embed.fo                 E  16 16 12 6
+embed.sh=we-fo           SH 6 6 12 4
+rms.n                    -  64 64 132 8
+rms.ge                   E  9 12 132 5
+rms.fy                   E  16 16 132 6
+rms.k                    SH 0 5 132 4
+rms.2k(epsc shift)       SH 0 10 132 5
+rms.re                   E  31 32 132 7
+rms.sh=ge+re-fy          SH 24 28 132 6
+rms.ss                   -  1272236313 17083118648 132 35
+rms.u                    -  1272279263 17083805843 132 35
+rms.rm                   -  32859 65451 132 17
+rms.aq.e                 E  3 6 132 4
+rms.aq.sh=40-e           SH 34 37 132 7
+rms.aq.R                 -  16814675 33247003 132 26
+rms.out.m                -  33071 65390 132 17
+rms.out.e                E  19 22 132 6
+gemv.rows                -  32 512 432 11
+gemv.n                   -  64 172 432 9
+gemv.gs==n               -  1 1 432 2
+gemv.we                  E  22 25 432 6
+gemv.xm                  -  33071 65669 432 18
+gemv.xe                  E  19 24 432 6
+gemv.fo                  E  16 16 432 6
+gemv.sh=we+xe-fo         SH 25 32 432 7
+gemv.wm                  -  2037 64927 42144 17
+gemv.S                   -  -5646622266 7453100184 42144 34
+gemv.S*xm                -  -305680293975096 348670932807888 42144 50
+gemv.acc                 -  -133694 134232 42144 19
+actq.n                   -  8 64 1020 8
+actq.f                   E  16 16 1020 6
+actq.q2047.calls         -  8 8 720 5
+actq.aq.e                E  5 12 1020 5
+actq.aq.sh=40-e          SH 28 35 1020 7
+actq.aq.R                -  16664064 33528852 1020 26
+actq.out.m               -  32793 65981 1020 18
+actq.q2047.out.e         E  22 28 720 6
+actq.q127.calls          -  8 64 300 8
+actq.q127.out.e          E  21 25 300 6
+attn.T                   -  1 512 480 11
+attn.hs                  -  8 8 480 5
+attn.kb                  -  12 12 480 5
+attn.vb                  -  8 8 480 5
+attn.qm                  -  32793 65484 480 17
+attn.qe                  E  23 28 480 6
+attn.d0                  -  7 7 480 4
+attn.km                  -  32791 65565 39840 18
+attn.ke                  E  22 27 39840 6
+attn.vm                  -  33029 66034 39840 18
+attn.ve                  E  21 25 39840 6
+attn.dot                 -  -11854156 7780778 39840 25
+attn.s.sh=qe+ke-d0-16    SH 22 31 39840 6
+attn.s                   -  -8884534 1216609 39840 25
+attn.s-mx                -  -9023592 0 39840 25
+attn.e                   -  0 65536 39840 18
+attn.v.sh=ve-emin-G      SH -1 4 39840 4
+attn.w                   -  0 8415346688 39840 34
+attn.sum                 -  65536 1936252 480 22
+attn.R                   -  145371045 4294967296 480 34
+attn.emin                E  21 24 480 6
+attn.G                   -  0 1 480 2
+attn.mmax                -  36773 66034 480 18
+attn.o.sh=emin+G         SH 21 25 480 6
+attn.acc                 -  -1051266908160 1068749029376 3840 41
+swiglu.n                 -  172 172 60 9
+swiglu.aq.e              E  4 8 60 5
+swiglu.aq.sh=40-e        SH 32 36 60 7
+swiglu.out.e             E  20 24 60 6
+argmax.n                 -  512 512 12 11
+summary m1_260K E min 3 max 32 signed_bits 7
+summary m1_260K SH min -1 max 37 signed_bits 7
+records m1_260K 2388 replay_mismatch 0 exec_errors 0 read ok
+## range m2_15M
+# metric class min max count signed_bits
+embed.we                 E  24 24 6 6
+embed.fo                 E  16 16 6 6
+embed.sh=we-fo           SH 8 8 6 5
+rms.n                    -  288 288 78 10
+rms.ge                   E  7 10 78 5
+rms.fy                   E  16 16 78 6
+rms.k                    SH 0 5 78 4
+rms.2k(epsc shift)       SH 0 10 78 5
+rms.re                   E  30 33 78 7
+rms.sh=ge+re-fy          SH 22 26 78 6
+rms.ss                   -  451003156 22604812806 78 36
+rms.u                    -  463372662 22607905183 78 36
+rms.rm                   -  32989 65152 78 17
+rms.aq.e                 E  0 5 78 4
+rms.aq.sh=40-e           SH 35 40 78 7
+rms.aq.R                 -  16952337 32784055 78 26
+rms.out.m                -  33538 64859 78 17
+rms.out.e                E  16 21 78 6
+gemv.rows                -  288 32000 258 16
+gemv.n                   -  288 768 258 11
+gemv.gs==n               -  1 1 258 2
+gemv.we                  E  23 27 258 6
+gemv.xm                  -  33068 65866 258 18
+gemv.xe                  E  16 24 258 6
+gemv.fo                  E  16 16 258 6
+gemv.sh=we+xe-fo         SH 24 33 258 7
+gemv.wm                  -  2655 65117 299136 17
+gemv.S                   -  -4287303522 4141929542 299136 33
+gemv.S*xm                -  -230669791394166 212837191445212 299136 49
+gemv.acc                 -  -158350 236453 299136 19
+actq.n                   -  48 288 684 10
+actq.f                   E  16 16 684 6
+actq.q2047.calls         -  48 48 432 7
+actq.aq.e                E  5 12 684 5
+actq.aq.sh=40-e          SH 28 35 684 7
+actq.aq.R                -  16680244 33515565 684 26
+actq.out.m               -  32806 65917 684 18
+actq.q2047.out.e         E  23 28 432 6
+actq.q127.calls          -  48 288 252 10
+actq.q127.out.e          E  21 26 252 6
+attn.T                   -  1 256 216 10
+attn.hs                  -  48 48 216 7
+attn.kb                  -  12 12 216 5
+attn.vb                  -  8 8 216 5
+attn.qm                  -  32842 65194 216 17
+attn.qe                  E  26 28 216 6
+attn.d0                  -  7 7 216 4
+attn.km                  -  32790 65565 14184 18
+attn.ke                  E  23 26 14184 6
+attn.vm                  -  33029 66050 14184 18
+attn.ve                  E  21 26 14184 6
+attn.dot                 -  -17056370 22911793 14184 26
+attn.s.sh=qe+ke-d0-16    SH 26 31 14184 6
+attn.s                   -  -1330878 717385 14184 22
+attn.s-mx                -  -1483027 0 14184 22
+attn.e                   -  0 65536 14184 18
+attn.v.sh=ve-emin-G      SH -1 4 14184 4
+attn.w                   -  0 8539209728 14184 34
+attn.sum                 -  65536 3002840 216 23
+attn.R                   -  93736255 4294967296 216 34
+attn.emin                E  21 25 216 6
+attn.G                   -  0 1 216 2
+attn.mmax                -  33585 66050 216 18
+attn.o.sh=emin+G         SH 21 26 216 6
+attn.acc                 -  -1068749029376 1084479635456 10368 41
+swiglu.n                 -  768 768 36 11
+swiglu.aq.e              E  2 8 36 5
+swiglu.aq.sh=40-e        SH 32 38 36 7
+swiglu.out.e             E  18 24 36 6
+argmax.n                 -  32000 32000 6 16
+summary m2_15M E min 0 max 33 signed_bits 7
+summary m2_15M SH min -1 max 40 signed_bits 7
+records m2_15M 1428 replay_mismatch 0 exec_errors 0 read ok

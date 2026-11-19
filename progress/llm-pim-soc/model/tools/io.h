@@ -49,6 +49,7 @@ int bundle_step(bundle_t *b, int vi, int tok, int pos, float *logits, const k_ho
 typedef struct {
   FILE *f;
   int cap, active;
+  int skip; /* 1: write nothing (position filter of job dump); 0 keeps the old behaviour */
   int count[K_NKERN];
   long recs;
 } dump_t;
@@ -67,6 +68,15 @@ void both_hook(void *user, int phase, const kcall_t *c);
 
 /* dump record reader: fills c with malloc'd buffers; inputs and recorded outputs */
 int dump_read(FILE *f, kcall_t *c, void *recorded_out[KB_MAX]);
+/* position filter "a-b,c,..." (empty or NULL: every position); 1 if pos is selected */
+int pos_sel(const char *spec, int pos);
+/* job dump loop: variant vi, prompt tokens tok[nt] (tok[0] = BOS), greedy after the prompt.
+   Writes the kernel records of the positions selected by psel through d. noeos 0 stops when
+   the next token is BOS/EOS (old behaviour), 1 keeps going. seg (NULL or steps + 1 entries)
+   receives the file offset of d->f before every position and after the last one.
+   Returns the number of computed positions, -1 on a kernel error; *ndumped = selected ones. */
+int dump_steps(bundle_t *b, int vi, const int *tok, int nt, int steps, const char *psel,
+               int noeos, dump_t *d, long *seg, long *ndumped);
 void dump_free(kcall_t *c, void *recorded_out[KB_MAX]);
 
 #endif

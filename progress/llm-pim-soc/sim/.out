@@ -1,0 +1,43 @@
+### regression tier=all started 2026-11-19 12:11:12
+### axi_mem: compile (RTL_DIR=../../rtl)
+### axi_mem: compile done in 0 s
+### axi_mem/nostall: vsim tb_axi_mem +SEED=1 +PROF=0 (expect pass)
+axi_mem/nostall: PASS (rc=0 errors=0 RANGE=0 wall=719s) CHECKS [rdata]: checks=11218 mismatches=0 CHECKS [rid_rlast]: checks=11218 mismatches=0 CHECKS [bid]: checks=1200 mismatches=0 CHECKS [slv]: checks=12418 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/stall: vsim tb_axi_mem +SEED=2 +PROF=1 (expect pass)
+axi_mem/stall: PASS (rc=0 errors=0 RANGE=0 wall=61s) CHECKS [rdata]: checks=11216 mismatches=0 CHECKS [rid_rlast]: checks=11216 mismatches=0 CHECKS [bid]: checks=1200 mismatches=0 CHECKS [slv]: checks=22848 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/heavy: vsim tb_axi_mem +SEED=3 +PROF=2 (expect pass)
+axi_mem/heavy: PASS (rc=0 errors=0 RANGE=0 wall=7s) CHECKS [rdata]: checks=10866 mismatches=0 CHECKS [rid_rlast]: checks=10866 mismatches=0 CHECKS [bid]: checks=1200 mismatches=0 CHECKS [slv]: checks=69388 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/axi4len: vsim tb_axi_mem -gMAX_LEN=255 +SEED=4 +PROF=1 +MAXL=255 +N_BURST=60 (expect pass)
+axi_mem/axi4len: PASS (rc=0 errors=0 RANGE=0 wall=105s) CHECKS [rdata]: checks=38323 mismatches=0 CHECKS [rid_rlast]: checks=38323 mismatches=0 CHECKS [bid]: checks=360 mismatches=0 CHECKS [slv]: checks=72219 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/neg_hold: vsim tb_axi_mem +SEED=5 +PROF=1 +N_ROUND=2 +NEG=1 (expect assert:AXI_HOLD=1)
+axi_mem/neg_hold: PASS (rc=0 errors=1 RANGE=0 AXI_HOLD=1 wall=16s) CHECKS [rdata]: checks=4508 mismatches=0 CHECKS [rid_rlast]: checks=4508 mismatches=0 CHECKS [bid]: checks=400 mismatches=0 CHECKS [slv]: checks=8936 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/neg_stable: vsim tb_axi_mem +SEED=6 +PROF=1 +N_ROUND=2 +NEG=2 (expect assert:AXI_STABLE=1)
+axi_mem/neg_stable: PASS (rc=0 errors=1 RANGE=0 AXI_STABLE=1 wall=1s) CHECKS [rdata]: checks=4307 mismatches=0 CHECKS [rid_rlast]: checks=4307 mismatches=0 CHECKS [bid]: checks=401 mismatches=0 CHECKS [slv]: checks=8814 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/neg_len: vsim tb_axi_mem +SEED=7 +PROF=1 +N_ROUND=2 +NEG=3 (expect assert:AXI_LEN=1)
+axi_mem/neg_len: PASS (rc=0 errors=1 RANGE=0 AXI_LEN=1 wall=1s) CHECKS [rdata]: checks=4451 mismatches=0 CHECKS [rid_rlast]: checks=4451 mismatches=0 CHECKS [bid]: checks=400 mismatches=0 CHECKS [slv]: checks=8935 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/neg_4k_rd: vsim tb_axi_mem +SEED=8 +PROF=1 +N_ROUND=2 +NEG=4 (expect assert:AXI_4K=1)
+axi_mem/neg_4k_rd: PASS (rc=0 errors=1 RANGE=0 AXI_4K=1 wall=1s) CHECKS [rdata]: checks=4487 mismatches=0 CHECKS [rid_rlast]: checks=4487 mismatches=0 CHECKS [bid]: checks=400 mismatches=0 CHECKS [slv]: checks=9065 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/neg_4k_wr: vsim tb_axi_mem +SEED=9 +PROF=1 +N_ROUND=2 +NEG=5 (expect assert:AXI_4K=1)
+axi_mem/neg_4k_wr: PASS (rc=0 errors=1 RANGE=0 AXI_4K=1 wall=1s) CHECKS [rdata]: checks=4538 mismatches=0 CHECKS [rid_rlast]: checks=4538 mismatches=0 CHECKS [bid]: checks=401 mismatches=0 CHECKS [slv]: checks=9075 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/neg_wlast: vsim tb_axi_mem +SEED=10 +PROF=1 +N_ROUND=2 +NEG=6 (expect assert:AXI_WLAST=1)
+axi_mem/neg_wlast: PASS (rc=0 errors=1 RANGE=0 AXI_WLAST=1 wall=1s) CHECKS [rdata]: checks=4383 mismatches=0 CHECKS [rid_rlast]: checks=4383 mismatches=0 CHECKS [bid]: checks=401 mismatches=0 CHECKS [slv]: checks=8796 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/neg_burst: vsim tb_axi_mem +SEED=11 +PROF=1 +N_ROUND=2 +NEG=7 (expect assert:AXI_BURST=1)
+axi_mem/neg_burst: PASS (rc=0 errors=1 RANGE=0 AXI_BURST=1 wall=1s) CHECKS [rdata]: checks=4423 mismatches=0 CHECKS [rid_rlast]: checks=4423 mismatches=0 CHECKS [bid]: checks=400 mismatches=0 CHECKS [slv]: checks=8919 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/neg_align: vsim tb_axi_mem +SEED=12 +PROF=1 +N_ROUND=2 +NEG=8 (expect assert:AXI_ALIGN=1)
+axi_mem/neg_align: PASS (rc=0 errors=1 RANGE=0 AXI_ALIGN=1 wall=0s) CHECKS [rdata]: checks=4322 mismatches=0 CHECKS [rid_rlast]: checks=4322 mismatches=0 CHECKS [bid]: checks=400 mismatches=0 CHECKS [slv]: checks=8638 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/neg_x: vsim tb_axi_mem +SEED=13 +PROF=1 +N_ROUND=2 +NEG=9 (expect assert:AXI_X=1)
+axi_mem/neg_x: PASS (rc=0 errors=1 RANGE=0 AXI_X=1 wall=1s) CHECKS [rdata]: checks=4463 mismatches=0 CHECKS [rid_rlast]: checks=4463 mismatches=0 CHECKS [bid]: checks=400 mismatches=0 CHECKS [slv]: checks=8955 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/neg_idle: vsim tb_axi_mem +SEED=14 +PROF=1 +N_ROUND=2 +NEG=10 (expect assert:AXI_IDLE=1)
+axi_mem/neg_idle: PASS (rc=0 errors=1 RANGE=0 AXI_IDLE=1 wall=1s) CHECKS [rdata]: checks=4255 mismatches=0 CHECKS [rid_rlast]: checks=4255 mismatches=0 CHECKS [bid]: checks=400 mismatches=0 CHECKS [slv]: checks=8629 mismatches=0 CHECKS [file]: checks=4098 mismatches=0 CHECKS [uninit]: checks=1 mismatches=0 CHECKS [cnt]: checks=1 mismatches=0 
+### axi_mem/bad_dw: vsim tb_axi_mem -gDW=48 (expect elab_fail:axi_mem_slave: DW=48)
+axi_mem/bad_dw: PASS (rc=2 errors=1 RANGE=0 wall=0s) 
+### axi_mem/bad_len: vsim tb_axi_mem -gMAX_LEN=256 (expect elab_fail:axi_mem_slave: MAX_LEN=256)
+axi_mem/bad_len: PASS (rc=2 errors=1 RANGE=0 wall=0s) 
+### dpi_smoke: compile (RTL_DIR=../../rtl)
+### dpi_smoke: compile done in 1 s
+### dpi_smoke/m1: vsim tb_dpi_smoke +VEC=../../model/build/vec/m1 +PIM_DIR=../../model/build/vec/pim +RFILE (expect pass)
+dpi_smoke/m1: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [replay]: checks=2388 mismatches=0 CHECKS [gemv]: checks=42144 mismatches=0 CHECKS [dot8]: checks=42144 mismatches=0 CHECKS [rrec]: checks=433056 mismatches=0 CHECKS [bimg]: checks=512 mismatches=0 CHECKS [scalar]: checks=23 mismatches=0 CHECKS [rfile]: checks=576 mismatches=0 
+### dpi_smoke/m2: vsim tb_dpi_smoke +VEC=../../model/build/vec/m2 +MAXREC=50 +RFILE (expect pass)
+dpi_smoke/m2: PASS (rc=0 errors=0 RANGE=0 wall=3s) CHECKS [replay]: checks=348 mismatches=0 CHECKS [gemv]: checks=52832 mismatches=0 CHECKS [dot8]: checks=52832 mismatches=0 CHECKS [rrec]: checks=2075744 mismatches=0 CHECKS [bimg]: checks=5184 mismatches=0 CHECKS [scalar]: checks=23 mismatches=0 CHECKS [rfile]: checks=10656 mismatches=0 
+REGRESSION: tier=all runs=18 fails=0 wall=921.1s
+rc 0

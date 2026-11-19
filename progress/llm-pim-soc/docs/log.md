@@ -43,3 +43,13 @@
 - 결정(오케스트레이터): 열린 결정 D1~D14를 권고대로 확정(`spec/arch.md` 12절). 수퍼바이저 확인: `s4calc.py` 재실행 값이 문서 표와 일치.
 - 미확인: HP 실측 대역폭, 100 MHz 타이밍, LUT 수, Vivado의 parity bit 추론, 지수와 shift 범위. ARM baseline이 없어 가속비는 추정하지 않음.
 - 다음: S4-1 검증 기반(model 덤프 보강, DPI-C golden, 회귀 스크립트, AXI memory model).
+
+## 2026-11-19: S4-1 kernel IP 검증 기반  [notion: pending]
+- 한 일(hw-worker): model에 leaf 경계 stage 함수(`k_sat32`, `k_dot8`, `k_gemv_row`, `k_gemv_out`, `k_aq_*`)와 trace 판, PIM bank image(`bimg_*`)와 가속기형 행 레코드(`rrec_*`) 생성기, K12V8 덤프와 위치 필터(`cfg/d3`, `d4`), 벡터 도구 `tools/vt.c`. DPI-C wrapper(`tb/dpi/`), AXI4 slave memory model(`tb/common/axi_mem_slave.sv`), 회귀 스크립트(`sim/run.sh`).
+- 결과 [측정, 수퍼바이저 재실행]: `make test` TOTAL 16,669,793 항목, mismatch 0. `sim/run.sh all` 18 run, fails 0(DPI smoke 2, AXI memory model 정상 4, negative 10, 잘못된 parameter 2). negative run은 각각 기대한 assertion 태그 1개.
+- agent 보고(재실행 안 함): 기존 형식 덤프 4종이 변경 전과 `cmp` 동일. 벡터: 260K 2,388 레코드(12 위치, T 최대 512), 15M 1,428 레코드(6 위치, T 최대 256). PIM bank image 4,072/4,096 word.
+- 결정: `E_W` = 8, `SH_W` = 10. 근거: K12V8 덤프 집계에서 지수 0..33, shift -1..40(`model/results/range_k12v8.txt`). 프롬프트 1개의 일부 위치 값이라 상한 증명은 아니며, TB의 range assertion으로 범위 밖을 표시한다.
+- 수정: KV word는 210비트가 맞다(scale = 가수 17 + 지수 8). `s4calc.py`를 고쳤고 BRAM36 60개는 그대로. S2b의 `cost.py`는 scale 24비트 가정이라 260K KV가 2.5 KiB 작게 나와 있다(530.6 -> 533.1 KiB, 한도 560 KiB 안). 문서 수치 정리는 남은 일.
+- 발견(프로세스 노출): vsim이 자동으로 띄우는 vopt가 top 이름을, vlog의 DPI 자동 컴파일이 gcc에 work 라이브러리 절대 경로를 명령행에 드러낸다. 이 프로젝트의 `run.sh`는 명시적 `vopt -f o.f`(-j 1)와 `gcc @g.f`로 막았다(실행 중 cmdline 샘플 4,138건에서 이름 0건, agent 보고). `pqc-ntt-ip`의 `run.sh`에도 vopt 쪽 문제가 있을 수 있어 확인 필요.
+- 한계: AXI memory model TB의 데이터 오류 검출 mutation 시험 안 함. DPI smoke 15M은 kernel 파일마다 첫 50 레코드. attention, rmsnorm, swiglu, actq의 DPI trace는 S4-6, S4-7 직전으로 미룸.
+- 다음: S4-2(GEMV leaf와 `gemv_core`).

@@ -7,7 +7,10 @@
  *   job gen  : print greedy generations of one variant
  *   job ceval: per-story cross-entropy and top-1 agreement with F on the evaluation text
  *              (stories skip .. skip + nstory - 1), one line per story for paired statistics
- * keys: ck tk pf ev steps nstory skip vars var out dump cap pi
+ *   (dump keys added in S4-1: pos = position filter "a-b,c,...", only the kernel calls of the
+ *    selected positions are written, every position is still computed; noeos 1 = keep
+ *    generating after the BOS/EOS token so that long attention lengths are reached)
+ * keys: ck tk pf ev steps nstory skip vars var out dump cap pi pos noeos
  */
 #include <math.h>
 #include <stdlib.h>
@@ -268,11 +271,12 @@ static int job_dump(void) {
   char **pr;
   const char *var = cfg_s("var", "HB");
   char vars[32];
-  int np, pi = (int)cfg_i("pi", 0), steps = (int)cfg_i("steps", 16), nt, pos, cur;
-  float *l;
+  int np, pi = (int)cfg_i("pi", 0), steps = (int)cfg_i("steps", 16), nt, pos;
+  int noeos = (int)cfg_i("noeos", 0);
+  const char *psel = cfg_s("pos", NULL);
+  long npos = 0;
   int *tok;
   dump_t d;
-  k_hook_t hk;
   sprintf(vars, "%s", var);
   if (load(&b, vars)) return 1;
   np = io_prompts(cfg_s("pf", ""), &pr);
@@ -281,18 +285,12 @@ static int job_dump(void) {
   d.cap = (int)cfg_i("cap", 1000000);
   d.f = fopen(cfg_s("dump", "k.bin"), "wb");
   if (!d.f) return 1;
-  hk.fn = dump_hook;
-  hk.user = &d;
-  l = malloc(sizeof(float) * b.c.vocab_size);
   tok = malloc(sizeof(int) * 65536);
   lm_tok_encode(&b.tok, pr[pi], 1, 0, tok, &nt);
-  cur = tok[0];
-  for (pos = 0; pos < steps && pos < b.c.seq_len; pos++) {
-    int a = bundle_step(&b, 0, cur, pos, l, &hk), next = pos < nt - 1 ? tok[pos + 1] : a;
-    if (next == 1) break;
-    cur = next;
-  }
+  pos = dump_steps(&b, 0, tok, nt, steps, psel, noeos, &d, NULL, &npos);
+  if (pos < 0) { fprintf(stderr, "kernel error\n"); return 1; }
   fclose(d.f);
+  if (psel || noeos) P("# positions computed %d dumped %ld (pos %s)\n", pos, npos, psel ? psel : "all");
   P("dump records %ld\n", d.recs);
   return 0;
 }

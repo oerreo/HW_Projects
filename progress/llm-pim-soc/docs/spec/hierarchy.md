@@ -98,8 +98,8 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 ### 3.1 공통 (`rtl/pkg/llm_pkg.sv`)
 | 이름 | 값 | 의미 |
 |---|---|---|
-| `E_W` | 8 (signed) | 지수(`we`, 활성 `e`, `fo`, `qe`, `ke`, `ve`). 덤프의 실제 범위를 S4-1에서 집계해 확정한다 [추정: 7..50 근처, 확인 안 함] |
-| `SH_W` | 10 (signed) | 지수 합으로 만든 shift(`sh = we + xe - fo` 등) |
+| `E_W` | 8 (signed) | 지수(`we`, 활성 `e`, `fo`, `qe`, `ke`, `ve`). S4-1 집계(K12V8 두 모델 덤프, `model/results/range_k12v8.txt`): 0..33 [측정, PC], signed 7비트면 충분. 8은 1비트 여유 (확정 대기) |
+| `SH_W` | 10 (signed) | 지수 합으로 만든 shift(`sh = we + xe - fo` 등). S4-1 집계: -1..40 [측정, PC] (음수는 attention V 정렬 `ve - emin - G`만), signed 7비트. 10은 E_W 8비트 값 세 개의 합/차가 넘치지 않는 폭 (확정 대기) |
 | `AM_W` | 17 | 활성 scale 가수 `m` (`m < 2^17`) |
 | `WM_W` | 16 | 가중치 행 가수 `wm` |
 | `N_MAX` | 1024 | gemv 행 길이, 벡터 길이 상한(두 모델 최대 768). golden `K_NMAX`(16384)보다 작다. 넘는 descriptor는 ERR |
@@ -160,16 +160,16 @@ L3의 레지스터 맵과 kernel 호출 순서는 `arch.md` 7절.
 
 kernel 단위(K_GEMV, K_ACTQ, K_RMSNORM, K_ATTN2, K_SWIGLU, K_ARGMAX)는 기존 덤프 레코드로 검증할 수 있다. 아래는 leaf와 L1 단위의 경계가 없거나, kernel 덤프만으로는 부족한 것이다. 원칙: **kern.c의 kernel 함수가 스스로 호출하는 stage 함수로 쪼개서 export한다**(별도 재구현 금지). 바꾼 뒤 `make test` PASS와 기존 덤프 `cmp` 동일로 golden이 변하지 않았음을 확인한다.
 
-| ID | 대상 leaf/모듈 | 필요한 것 | 현재 상태 |
+| ID | 대상 leaf/모듈 | 필요한 것 | 현재 상태 (2026-11-19 S4-1) |
 |---|---|---|---|
-| A1 | `dotp`, `mac_row` | 행별 int32 `acc`(scale 전). `k_gemv`를 `k_gemv_acc`(행 하나의 그룹 합) + `k_gemv_out`으로 분리 | `k_gemv` 내부 루프, export 없음 |
-| A2 | `gemv_scale` | `(acc, wm, xm, sh) -> y` | 같은 함수 안의 한 줄 |
-| A3 | `attn_score`, `exp_unit`, `attn_vacc` | score 배열(softmax 전), `mx`, 분자 배열, `sum`, `R`, `emin`, `mmax`, `G`, 위치별 `w` | `attn_core`는 static, 중간값 없음 |
-| A4 | `rms_front`, `rsqrt_nr` 연결 | `k`, `ss`, `u`, `rm`, `re`, `sh`, 양자화 전 y 배열, `ymax` | `k_rmsnorm` 내부 |
-| A5 | `swi_front` | 양자화 전 `g` 배열과 `amax` | `k_swiglu` 내부 |
-| A6 | `pim_core` bank image | bank RAM의 144비트 word image 생성기(가중치 + parity bit의 행 가수, `arch.md` 3.3)와 그 image로 `bank_gemv`를 돌려 `k_gemv`와 같음을 보이는 시험 | `bank_pack`은 C 배열만 만든다 |
-| A7 | `actq_core` 내부(선택) | `aq_setup`(amax, mode, qmax -> M, R, e)과 `aq_one` export | static |
-| A8 | leaf 벡터 생성 | `rshr_sat`, `udiv_seq`, `lut_lerp`, `rsqrt_nr`용 random/전수 벡터. DPI-C로 kern.c를 TB에 직접 링크하는 방식을 권고(파일 없이 random 생성) | `make test`가 함수 자체는 검사함, 덤프 없음 |
-| A9 | 덤프 설정 | K12V8 덤프(260K `d3`, 15M `d4`). 위치 필터(예: 0..7, 63, 127, 255, 511)로 attention의 긴 T를 포함하되 파일 크기 제한 | `d1`, `d2`는 HB(K8V8), 앞 8 위치만 |
-| A10 | 범위 집계 | 덤프 전체의 지수(`we`, `e`), shift, `T`, `n`의 최소/최대 표 -> `E_W`, `SH_W` 확정 | 없음 |
-| A11 | 덤프 -> TB 변환 | kernel 레코드를 TB가 읽는 형식(kernel별 파일 + manifest)으로 나누는 도구. 인자 대신 환경변수 설정(`process-privacy.md`) | 없음 |
+| A1 | `dotp`, `mac_row` | 행별 int32 `acc`(scale 전). `k_gemv`를 `k_gemv_acc`(행 하나의 그룹 합) + `k_gemv_out`으로 분리 | **완료**. `k_dot8`(그룹 합), `k_gemv_row`(행의 S), `k_gemv_st`(행별 S trace). `k_gemv`가 이 함수들로 계산 |
+| A2 | `gemv_scale` | `(acc, wm, xm, sh) -> y` | **완료**. `k_gemv_out(S, xm, sh)`, S = acc x wm (gs = n). DPI `kd_gemv_out` |
+| A3 | `attn_score`, `exp_unit`, `attn_vacc` | score 배열(softmax 전), `mx`, 분자 배열, `sum`, `R`, `emin`, `mmax`, `G`, 위치별 `w` | **완료**. `k_attn2_st`(`k_attn_st_t`: dot, s, e, w, acc 배열과 d0, mx, sum, R, emin, mmax, G). DPI 노출은 S4-6에서 |
+| A4 | `rms_front`, `rsqrt_nr` 연결 | `k`, `ss`, `u`, `rm`, `re`, `sh`, 양자화 전 y 배열, `ymax` | **완료**. `k_rmsnorm_st`(`k_rms_st_t`). DPI 노출은 S4-7에서 |
+| A5 | `swi_front` | 양자화 전 `g` 배열과 `amax` | **완료**. `k_swiglu_st`(`k_swi_st_t`). DPI 노출은 S4-7에서 |
+| A6 | `pim_core` bank image | bank RAM의 144비트 word image 생성기(가중치 + parity bit의 행 가수, `arch.md` 3.3)와 그 image로 `bank_gemv`를 돌려 `k_gemv`와 같음을 보이는 시험 | **완료**. `bimg_pack`/`bimg_unpack`(`src/bank.c`), `vt` job bimg -> `build/vec/pim/bank0..3.hex`(word = tag 16 + lane 128, 4,072/4,096 word). `make test` `m1 PIM bank image`, DPI `kd_rec_bimg` |
+| A7 | `actq_core` 내부(선택) | `aq_setup`(amax, mode, qmax -> M, R, e)과 `aq_one` export | **완료**. `k_aq_setup`, `k_aq_one`(`k_aq_t`), `k_actq_st`. DPI 노출은 S4-7에서 |
+| A8 | leaf 벡터 생성 | `rshr_sat`, `udiv_seq`, `lut_lerp`, `rsqrt_nr`용 random/전수 벡터. DPI-C로 kern.c를 TB에 직접 링크하는 방식을 권고(파일 없이 random 생성) | **S4-2 분 완료**: DPI-C(`tb/dpi/kdpi.c`)로 `kd_rshr`, `kd_sat32`, `kd_dot8`, `kd_gemv_out`, `kd_exp2neg`, `kd_sigmoid`, `kd_rsqrt`. `udiv_seq`는 C `/` 그대로라 DPI 함수 미작성(S4-6) |
+| A9 | 덤프 설정 | K12V8 덤프(260K `d3`, 15M `d4`). 위치 필터(예: 0..7, 63, 127, 255, 511)로 attention의 긴 T를 포함하되 파일 크기 제한 | **완료**. `cfg/d3.cfg`(260K 위치 0..7, 63, 127, 255, 511, 2,388 레코드), `cfg/d4.cfg`(15M 위치 0..3, 127, 255, 1,428 레코드), 키 `pos`, `noeos` |
+| A10 | 범위 집계 | 덤프 전체의 지수(`we`, `e`), shift, `T`, `n`의 최소/최대 표 -> `E_W`, `SH_W` 확정 | **집계 완료**(`model/results/range_k12v8.txt`). 지수 0..33(signed 7비트), shift -1..40(signed 7비트). 확정은 오케스트레이터(3.1 표의 비고) |
+| A11 | 덤프 -> TB 변환 | kernel 레코드를 TB가 읽는 형식(kernel별 파일 + manifest)으로 나누는 도구. 인자 대신 환경변수 설정(`process-privacy.md`) | **완료**. `vt` job split -> `build/vec/m1`, `m2/<kernel>.bin` + `manifest.txt`(같은 레코드 형식, DPI `kd_rec_*`로 읽음). 행 레코드 `rrec.bin`(`vt` job rrec) |

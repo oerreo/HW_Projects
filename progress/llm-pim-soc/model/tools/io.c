@@ -218,7 +218,7 @@ void dump_hook(void *user, int phase, const kcall_t *c) {
   dump_t *d = user;
   int i;
   if (phase == 0) {
-    d->active = d->count[c->kid] < d->cap;
+    d->active = !d->skip && d->count[c->kid] < d->cap;
     if (!d->active) return;
     w32(d->f, DUMP_MAGIC);
     w32(d->f, (uint32_t)c->kid);
@@ -275,6 +275,57 @@ int dump_read(FILE *f, kcall_t *c, void *rec[KB_MAX]) {
       memset(c->b[i].p, 0xA5, (size_t)c->b[i].n * c->b[i].esz); /* poison before replay */
     }
   return ok ? 1 : -1;
+}
+
+int pos_sel(const char *spec, int pos) {
+  const char *p = spec;
+  if (!spec || !*spec) return 1;
+  while (*p) {
+    char *e;
+    long a = strtol(p, &e, 10), b = a;
+    if (e == p) return 0; /* malformed: select nothing */
+    if (*e == '-') {
+      p = e + 1;
+      b = strtol(p, &e, 10);
+      if (e == p) return 0;
+    }
+    if (pos >= a && pos <= b) return 1;
+    p = e;
+    while (*p == ',' || *p == ' ') p++;
+  }
+  return 0;
+}
+
+int dump_steps(bundle_t *b, int vi, const int *tok, int nt, int steps, const char *psel,
+               int noeos, dump_t *d, long *seg, long *ndumped) {
+  int pos, cur = tok[0];
+  long npos = 0;
+  float *l = malloc(sizeof(float) * b->c.vocab_size);
+  k_hook_t hk;
+  hk.fn = dump_hook;
+  hk.user = d;
+  for (pos = 0; pos < steps && pos < b->c.seq_len; pos++) {
+    int a, next;
+    if (seg) seg[pos] = ftell(d->f);
+    d->skip = !pos_sel(psel, pos);
+    npos += !d->skip;
+    a = bundle_step(b, vi, cur, pos, l, &hk);
+    if (a < 0) {
+      free(l);
+      return -1;
+    }
+    next = pos < nt - 1 ? tok[pos + 1] : a;
+    if (next == 1 && !noeos) {
+      pos++;
+      break;
+    }
+    cur = next;
+  }
+  if (seg) seg[pos] = ftell(d->f);
+  d->skip = 0;
+  free(l);
+  if (ndumped) *ndumped = npos;
+  return pos;
 }
 
 void dump_free(kcall_t *c, void *rec[KB_MAX]) {

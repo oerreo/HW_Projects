@@ -61,7 +61,12 @@ for N, LB in ((4, 16), (8, 8), (16, 8), (8, 16), (32, 8)):
 
 # KV 260K
 L, nkv, seq, hs = 5, 4, 512, 8
-bits = hs * 12 + hs * 8 + 24 + 24
+# word = K hs x 12 + V hs x 8 + ks + vs, each scale = m 17 bits (unsigned, m < 2^17) + e E_W bits.
+# E_W = 8 (hierarchy.md 3.1; S4-1 range of ke/ve over the K12V8 dumps is 21..27, model/results/
+# range_k12v8.txt) -> 25 bits per scale, 210 bits (arch.md 4.2). The old 24 + 24 (= 208) took the
+# 24-bit scale of cost.py (e in 7 bits); both fit 216 = 3 x 72, the BRAM36 count is the same.
+E_W = 8
+bits = hs * 12 + hs * 8 + 2 * (17 + E_W)
 print("KV word bits", bits, "BRAM36 (x72) per kvbank", cd(bits, 72) * cd(L * seq, 512), "total", nkv * cd(bits, 72) * cd(L * seq, 512))
 
 # attention cycles

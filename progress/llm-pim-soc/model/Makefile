@@ -13,7 +13,7 @@ CORE = core tok fwd_f fwd_q hq fwd_h kern tabs bank
 CORE_O = $(addprefix $(B)/,$(addsuffix .o,$(CORE)))
 HDRS = src/llm.h src/kern.h tools/io.h
 
-all: $(B)/run $(B)/t $(B)/rq
+all: $(B)/run $(B)/t $(B)/rq $(B)/vt
 
 $(B):
 	mkdir -p $(B)
@@ -39,6 +39,9 @@ $(B)/ref.o: tests/ref.c tests/ref.h $(B)/x1.c
 $(B)/t: tests/t.c $(B)/ref.o $(B)/io.o $(CORE_O)
 	$(CC) $(TOOL_STD) $(CFLAGS) -o $@ tests/t.c $(B)/ref.o $(B)/io.o $(CORE_O) -lm
 
+$(B)/vt: tools/vt.c $(B)/io.o $(CORE_O)
+	$(CC) $(TOOL_STD) $(CFLAGS) -o $@ tools/vt.c $(B)/io.o $(CORE_O) -lm
+
 $(B)/rq: tools/rq.c $(B)/x2.c $(B)/io.o $(CORE_O)
 	$(CC) $(TOOL_STD) -O2 -ffp-contract=off -w -I$(B) -o $@ tools/rq.c $(B)/io.o $(CORE_O) -lm
 
@@ -54,7 +57,11 @@ check-int: | $(B)
 test: all check-int
 	CFG=test.cfg ./$(B)/t
 
+# S4-1 RTL test vectors (dumps, per-kernel files, PIM image, row records, ranges)
+vec: all
+	sh tools/vec.sh
+
 clean:
 	rm -rf $(B)
 
-.PHONY: all tabs check-int test clean
+.PHONY: all tabs check-int test vec clean

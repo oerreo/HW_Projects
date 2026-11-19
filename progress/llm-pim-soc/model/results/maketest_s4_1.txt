@@ -1,0 +1,63 @@
+sh tools/chk.sh
+chk: kern undefined symbols: k_rsq_lut 
+chk: fwd_h undefined symbols: k_exec lm_take 
+chk: bank undefined symbols: k_rshr lm_take memcpy memset 
+chk: tabs undefined symbols: none
+chk: negative control rejected as expected
+check-int items 13 mismatch 0
+CFG=test.cfg ./build/t
+seed 20261118
+rsqrt rel err                items  248002 mismatch     0  max 3.05e-05 (bound 3.1e-05)
+exp2 LUT b=4                 items 1048576 mismatch     0  max over bound 0 LSB (rel bound 0.000235)
+exp2 LUT b=5                 items 1048576 mismatch     0  max over bound 0 LSB (rel bound 5.87e-05)
+exp2 LUT b=6                 items 1048576 mismatch     0  max over bound 0 LSB (rel bound 1.47e-05)
+exp2 LUT b=7                 items 1048576 mismatch     0  max over bound 0 LSB (rel bound 3.67e-06)
+exp2 LUT b=8                 items 1048576 mismatch     0  max over bound 0 LSB (rel bound 9.16e-07)
+sigmoid LUT b=4              items  873814 mismatch     0  max 764 LSB (bound 789)
+sigmoid LUT b=5              items  873814 mismatch     0  max 196 LSB (bound 198)
+sigmoid LUT b=6              items  873814 mismatch     0  max 49.5 LSB (bound 50.3)
+sigmoid LUT b=7              items  873814 mismatch     0  max 12.8 LSB (bound 13.3)
+sigmoid LUT b=8              items  873814 mismatch     0  max 3.79 LSB (bound 4.09)
+actq dequant err             items 2435303 mismatch     0  max 0.5008 step (bound 0.5 step) 0
+gemv vs exact                items   12753 mismatch     0  max 0.500 LSB (bound 0.5) 0
+rmsnorm vs float             items  528000 mismatch     0  max over bound 0 0
+rope vs float                items  195296 mismatch     0  max over bound 0 0
+attn vs float                items  104000 mismatch     0  max over bound 0 0
+swiglu vs float              items  940000 mismatch     0  max over bound 0 0
+add/argmax/topk/ranges       items   42171 mismatch     0  00
+m1 decode all ids            items    1024 mismatch     0  00
+m1 F vs ref (prompts)        items      32 mismatch     0  gen tokens 8722, logits max abs err 0
+    m1 logits bit-identical 4720128 of 4720128
+m2 decode all ids            items   64000 mismatch     0  00
+m2 F vs ref (prompts)        items      32 mismatch     0  gen tokens 6160, logits max abs err 0
+    m2 logits bit-identical 205888000 of 205888000
+m1 build+run all variants    items       1 mismatch     0  rc 0 0
+m2 build+run all variants    items       1 mismatch     0  rc 0 0
+m1 bank==gemv HB             items    1728 mismatch     0  banks 1..32, ROW and COL 00
+m1 bank==gemv HC             items    1728 mismatch     0  banks 1..32, ROW and COL 00
+m2 bank==gemv HB             items    2064 mismatch     0  banks 1..32, ROW and COL 00
+m1 dump replay HB            items    1194 mismatch     0  kernel kinds 9, records written 1194
+m1 dump replay HD            items    1194 mismatch     0  kernel kinds 9, records written 1194
+m2 dump replay HA            items     180 mismatch     0  kernel kinds 9, records written 180
+actq 12-bit dequant err      items 1220497 mismatch     0  max 0.5000 step (bound 0.5 step) 0
+attn2 == attn (8/8, 16/16)   items     600 mismatch     0  bit-exact 00
+attn2 vs float (9 widths)    items   75600 mismatch     0  max over bound 0 0
+attn2/actq12 range reject    items       4 mismatch     0  00
+m1 fwd attn2/window          items     384 mismatch     0  window differs after 64 at 96 of 96 positions
+m2 fwd attn2/window          items     208 mismatch     0  window differs after 64 at 8 of 8 positions
+m1 build+run S2b formats     items       1 mismatch     0  rc 0 0
+m1 build+run S2b formats     items       1 mismatch     0  rc 0 0
+m2 build+run S2b formats     items       1 mismatch     0  rc 0 0
+m2 build+run S2b formats     items       1 mismatch     0  rc 0 0
+m1 dump replay K12V8         items    1194 mismatch     0  kernel kinds 9, records written 1194
+m2 dump replay K8V12         items     180 mismatch     0  kernel kinds 9, records written 180
+m1 stage traces K12V8        items  474800 mismatch     0  records 7960, positions 40
+m2 stage traces K12V8        items  704334 mismatch     0  records 1428, positions 6
+m1 PIM bank image            items     831 mismatch     0  matrices 36, words per bank 4072
+m1 gemv row records          items     216 mismatch     0  bytes 288704, header overhead 10.78%
+m2 gemv row records          items     258 mismatch     0  bytes 1.55868e+07, header overhead 2.63%
+m1 dump position filter      items      17 mismatch     0  selected 6 of 12 positions
+H path integer-only (chk)    items      13 mismatch     0  00
+TOTAL items 16669793 mismatches 0
+PASS
+rc 0

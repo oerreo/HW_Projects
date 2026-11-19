@@ -117,3 +117,101 @@ void bank_gemv(const bank_mat_t *b, const int8_t *x, kscl_t xs, int fo, int32_t 
     st->rdmac += (long)N * b->rows * ng;
   }
 }
+
+/* ---------------- PIM bank RAM image (BANK_ROW, BIMG_LB lanes) ---------------- */
+int bimg_nw(int n) { return (n + BIMG_LB - 1) / BIMG_LB; }
+
+long bimg_words(int rows, int n, int nb) { return cdiv(rows, nb) * bimg_nw(n); }
+
+long bimg_pack(bimg_word_t *const *img, int nb, long depth, long base, const int8_t *W,
+               const uint16_t *wm, int rows, int n) {
+  int nw = bimg_nw(n), r, w, i;
+  long used = bimg_words(rows, n, nb);
+  if (base < 0 || base + used > depth) return -1;
+  for (r = 0; r < rows; r++) {
+    bimg_word_t *row = img[r % nb] + base + (long)(r / nb) * nw;
+    for (w = 0; w < nw; w++) {
+      for (i = 0; i < BIMG_LB; i++) {
+        int col = w * BIMG_LB + i;
+        row[w].d[i] = col < n ? W[(size_t)r * n + col] : 0;
+      }
+      row[w].tag = w == 0 ? wm[r] : 0;
+    }
+  }
+  if (rows % nb) /* unused slots of the last round stay zero */
+    for (r = rows; r < (int)cdiv(rows, nb) * nb; r++) {
+      bimg_word_t *row = img[r % nb] + base + (long)(r / nb) * nw;
+      memset(row, 0, sizeof(bimg_word_t) * nw);
+    }
+  return used;
+}
+
+long bimg_unpack(bank_mat_t *b, const bimg_word_t *const *img, int nb, long base, int rows,
+                 int n, int we, lm_arena_t *a) {
+  int nw = bimg_nw(n), k, i, w, l;
+  long bad = 0;
+  b->nbank = nb;
+  b->mode = BANK_ROW;
+  b->rows = rows;
+  b->n = n;
+  b->gs = n;
+  b->we = we;
+  b->m = NULL;
+  b->bw = lm_take(a, sizeof(int8_t *) * nb);
+  b->bm = lm_take(a, sizeof(uint16_t *) * nb);
+  b->brows = lm_take(a, sizeof(int) * nb);
+  b->c0 = lm_take(a, sizeof(int) * nb);
+  b->c1 = lm_take(a, sizeof(int) * nb);
+  for (k = 0; k < nb; k++) {
+    int rb = (rows - k + nb - 1) / nb;
+    void *pw = lm_take(a, (size_t)rb * n), *pm = lm_take(a, sizeof(uint16_t) * (size_t)rb);
+    if (!a->base || a->fail) continue;
+    b->bw[k] = pw;
+    b->bm[k] = pm;
+    b->brows[k] = rb;
+    b->c0[k] = 0;
+    b->c1[k] = n;
+    for (i = 0; i < rb; i++) {
+      const bimg_word_t *row = img[k] + base + (long)i * nw;
+      for (w = 0; w < nw; w++) {
+        for (l = 0; l < BIMG_LB; l++) {
+          int col = w * BIMG_LB + l;
+          if (col < n) b->bw[k][(size_t)i * n + col] = row[w].d[l];
+          else bad += row[w].d[l] != 0;
+        }
+        if (w > 0) bad += row[w].tag != 0;
+      }
+      b->bm[k][i] = row[0].tag;
+    }
+  }
+  return bad;
+}
+
+/* ---------------- gemv row records (accelerator IP) ---------------- */
+long rrec_bytes(int rows, int n) { return (long)rows * (RREC_HDR + cdiv(n, 8) * 8); }
+
+long rrec_pack(uint8_t *out, const int8_t *W, const uint16_t *wm, int rows, int n) {
+  long rb = RREC_HDR + cdiv(n, 8) * 8;
+  int r;
+  for (r = 0; r < rows; r++) {
+    uint8_t *o = out + (size_t)r * rb;
+    memset(o, 0, (size_t)rb);
+    o[0] = (uint8_t)(wm[r] & 0xFF);
+    o[1] = (uint8_t)(wm[r] >> 8);
+    memcpy(o + RREC_HDR, W + (size_t)r * n, (size_t)n);
+  }
+  return (long)rows * rb;
+}
+
+long rrec_unpack(const uint8_t *in, int rows, int n, int8_t *W, uint16_t *wm) {
+  long rb = RREC_HDR + cdiv(n, 8) * 8, bad = 0, i;
+  int r;
+  for (r = 0; r < rows; r++) {
+    const uint8_t *o = in + (size_t)r * rb;
+    wm[r] = (uint16_t)(o[0] | (o[1] << 8));
+    for (i = 2; i < RREC_HDR; i++) bad += o[i] != 0;
+    memcpy(W + (size_t)r * n, o + RREC_HDR, (size_t)n);
+    for (i = RREC_HDR + n; i < rb; i++) bad += o[i] != 0;
+  }
+  return bad;
+}

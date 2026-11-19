@@ -139,4 +139,37 @@ void bank_pack(bank_mat_t *b, const lm_hm_t *m, int nbank, int mode, lm_arena_t 
 void bank_gemv(const bank_mat_t *b, const int8_t *x, kscl_t xs, int fo, int32_t *y,
                int8_t *gbuf, int32_t *part, bank_stat_t *st);
 
+/* ---- PIM bank RAM image (arch.md 3.1, 3.3; S4-1 A6) ----
+ * BANK_ROW over nb banks of BIMG_LB lanes. One bank word = BIMG_LB int8 weights (lane i =
+ * column w * BIMG_LB + i of the row, columns >= n are 0) and a 16-bit tag. The tag of the
+ * first word of a row holds the row mantissa wm, the tags of the other words are 0
+ * (RTL word: bits [8i+7:8i] = lane i, bits [143:128] = tag). Row r of a matrix with
+ * gs == n lives in bank r % nb at word base + (r / nb) * nw, nw = ceil(n / BIMG_LB). */
+#define BIMG_LB 16
+typedef struct {
+  int8_t d[BIMG_LB];
+  uint16_t tag;
+} bimg_word_t;
+int bimg_nw(int n);
+/* words per bank for a rows x n matrix: ceil(rows / nb) * nw */
+long bimg_words(int rows, int n, int nb);
+/* writes W (rows x n, int8) and wm (one mantissa per row) at base; returns the words used
+   per bank, or -1 if base + words > depth */
+long bimg_pack(bimg_word_t *const *img, int nb, long depth, long base, const int8_t *W,
+               const uint16_t *wm, int rows, int n);
+/* rebuilds a BANK_ROW bank_mat_t (gs = n, weights and mantissas taken from the image only)
+   with arena memory; returns the number of format violations (non-zero padding lane or
+   non-zero tag outside the first word of a row) */
+long bimg_unpack(bank_mat_t *b, const bimg_word_t *const *img, int nb, long base, int rows,
+                 int n, int we, lm_arena_t *a);
+
+/* ---- gemv row records of the accelerator IP (arch.md 2.2; S4-1) ----
+ * Per row: 8 B header (wm little-endian in bytes 0..1, bytes 2..7 zero) and the n int8
+ * weights padded with zeros to a multiple of 8 B. Rows follow each other. */
+#define RREC_HDR 8
+long rrec_bytes(int rows, int n);
+long rrec_pack(uint8_t *out, const int8_t *W, const uint16_t *wm, int rows, int n);
+/* inverse of rrec_pack; returns the number of non-zero header or padding bytes */
+long rrec_unpack(const uint8_t *in, int rows, int n, int8_t *W, uint16_t *wm);
+
 #endif

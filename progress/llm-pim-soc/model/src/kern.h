@@ -70,6 +70,68 @@ uint32_t k_exp2neg(uint32_t u, int eb, const uint32_t *lut); /* 2^(-u/65536), Q1
 uint32_t k_sigmoid(int32_t a, int sb, const uint32_t *lut);  /* a in Q16, result Q16 */
 int64_t k_rshr(int64_t x, int s);
 
+/*
+ * ---- stage functions (S4-1, hierarchy.md 4 A1..A7) ----
+ * The kernels above are built from these functions; they are the golden of the
+ * RTL leaf and L1 modules (no second implementation exists).
+ */
+int32_t k_sat32(int64_t x);                         /* rshr_sat output saturation */
+/* A1 dotp / mac_row: sum of n int8 products (one weight group), |sum| < 2^31 */
+int32_t k_dot8(const int8_t *a, const int8_t *b, int n);
+/* A1: S of one gemv row = sum over groups of dot8(group) * wm[group] (gs = n: acc * wm) */
+int64_t k_gemv_row(const int8_t *w, const uint16_t *wm, const int8_t *x, int n, int gs);
+/* A2 gemv_scale: y = sat32(rshr(S * xm, sh)), sh = we + xe - fo */
+int32_t k_gemv_out(int64_t S, int32_t xm, int sh);
+
+/* A7 activation quantizer (actq_core): setup from amax > 0, then one value */
+typedef struct {
+  int mode, qmax, k, e;
+  int64_t R;
+  int32_t M;
+} k_aq_t;
+void k_aq_setup(k_aq_t *a, uint32_t amax, int mode, int qmax);
+int32_t k_aq_one(const k_aq_t *a, int32_t v);
+
+/* optional stage traces; a NULL trace (or NULL array field) records nothing */
+typedef struct {
+  uint32_t amax;  /* max |v|; 0 means all-zero output and no setup */
+  k_aq_t aq;      /* valid when amax > 0 */
+} k_actq_st_t;
+typedef struct {
+  int32_t *y;     /* [n] pre-quantization rmsnorm output (Q fy), or NULL */
+  uint32_t amax, ymax;
+  int k, re, sh;  /* input reduction shift, rsqrt exponent, y shift = ge + re - fy */
+  uint64_t ss, u; /* sum of squares, rsqrt input */
+  uint32_t rm;    /* rsqrt mantissa */
+  k_aq_t aq;      /* valid when ymax > 0 */
+} k_rms_st_t;
+typedef struct {
+  int32_t *g;     /* [n] pre-quantization swiglu output (Q16), or NULL */
+  uint32_t amax;
+  k_aq_t aq;      /* valid when amax > 0 */
+} k_swi_st_t;
+typedef struct {
+  int64_t *dot;   /* [T] raw q.K dot products, or NULL */
+  int32_t *s;     /* [T] scores (Q16), or NULL */
+  uint32_t *e;    /* [T] exp numerators (Q16), or NULL */
+  int64_t *w;     /* [T] aligned V weights (0 where vs.m == 0), or NULL */
+  int64_t *acc;   /* [hs] V accumulators, or NULL */
+  int d0, emin, G, have; /* have: some vs.m != 0 (else o = 0 and emin, G are 0) */
+  int32_t mx, mmax;
+  uint64_t sum, R;
+} k_attn_st_t;
+void k_gemv_st(const int8_t *W, const uint16_t *wm, int we, int rows, int n, int gs,
+               const int8_t *x, kscl_t xs, int fo, int32_t *y, int64_t *S);
+void k_actq_st(const int32_t *v, int n, int f, int mode, int qmax, void *q, kscl_t *s,
+               k_actq_st_t *st);
+void k_rmsnorm_st(const int32_t *x, int n, int fx, const int16_t *g, int ge, int32_t epsc,
+                  int fy, int mode, int8_t *q, kscl_t *s, k_rms_st_t *st);
+void k_swiglu_st(const int32_t *h1, const int32_t *h3, int n, int sb, const uint32_t *slut,
+                 int mode, int8_t *q, kscl_t *s, k_swi_st_t *st);
+void k_attn2_st(int T, int hs, int kb, int vb, const void *q, kscl_t qs, const void *K,
+                const kscl_t *ks, const void *V, const kscl_t *vs, int eb, const uint32_t *elut,
+                int32_t *p, int32_t *o, k_attn_st_t *st);
+
 /* ---- generic call descriptor ---- */
 enum {
   K_EMBED = 1, K_GEMV, K_RMSNORM, K_ACTQ, K_ROPE, K_ATTN, K_SWIGLU, K_ADD, K_ARGMAX, K_TOPK,
@@ -106,6 +168,10 @@ typedef struct {
  * Output buffers never alias input buffers.
  */
 int k_exec(const kcall_t *c); /* 0 ok, negative on bad descriptor or range violation */
+/* k_exec with stage traces: st points to k_actq_st_t (K_ACTQ), k_rms_st_t (K_RMSNORM),
+   k_swi_st_t (K_SWIGLU), k_attn_st_t (K_ATTN2) or int64_t S[rows] (K_GEMV); ignored for
+   other kernels. NULL equals k_exec. */
+int k_exec_st(const kcall_t *c, void *st);
 const char *k_name(int kid);
 
 /* hook called before (phase 0) and after (phase 1) every kernel call */

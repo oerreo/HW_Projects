@@ -7,3 +7,10 @@ model/build/
 # fpga: arrays derived from the model files (never committed) and host test outputs
 fpga/sw/gen/
 fpga/sw/test/build/
+# sim: run directories, lock and transcripts (sim/tests, sim/common and sim/run.sh are sources;
+# the workspace .gitignore ignores every **/sim/*/, re-included here)
+sim/*/
+!sim/tests/
+!sim/common/
+sim/.run.lock
+sim/regression_*.log

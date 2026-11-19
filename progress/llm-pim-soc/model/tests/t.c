@@ -816,6 +816,325 @@ static void t_build2(const char *ck, const char *tk, const char *vars, const cha
   check(nm, 1, bad > 0, "rc %g %g", (double)rc, 0.0);
 }
 
+/* ================= S4-1 additions (after all earlier groups; they draw random numbers
+   only after every earlier group, so the earlier sequence is unchanged) ================= */
+
+/* stage functions and traces (hierarchy.md 4 A1..A7): every K12V8 kernel record of a short
+   run is replayed through k_exec_st; the output must equal the recorded one, and the
+   recorded output must follow from the trace through the exported stage functions. */
+static void t_stage(const char *ck, const char *tk, int steps, const char *path, const char *tag) {
+  bundle_t b;
+  dump_t d;
+  FILE *f;
+  int tok[1] = {1}, rc;
+  long n = 0, bad = 0, nrec = 0;
+  char nm[64];
+  if (bundle_load(&b, ck, tk, "K12V8")) { check("stage load", 1, 1, "%g%g", 0, 0); return; }
+  memset(&d, 0, sizeof(d));
+  d.cap = 1000000000;
+  d.f = fopen(path, "wb");
+  bad += dump_steps(&b, 0, tok, 1, steps, NULL, 1, &d, NULL, NULL) != steps;
+  fclose(d.f);
+  f = fopen(path, "rb");
+  for (;;) {
+    kcall_t c;
+    void *rec[KB_MAX];
+    const int32_t *P;
+    int i, t;
+    rc = dump_read(f, &c, rec);
+    if (rc <= 0) break;
+    P = c.prm;
+    nrec++;
+    switch (c.kid) {
+    case K_GEMV: {
+      int rows = P[0], nn = P[1], gs = P[2], sh = P[3] + P[5] - P[6];
+      int64_t *S = malloc(sizeof(int64_t) * rows);
+      const int8_t *W = c.b[0].p, *x = c.b[2].p;
+      const uint16_t *wm = c.b[1].p;
+      const int32_t *y = rec[3];
+      bad += k_exec_st(&c, S) != 0;
+      for (i = 0; i < rows; i++) {
+        bad += y[i] != k_gemv_out(S[i], P[4], sh);
+        bad += gs != nn || S[i] != (int64_t)k_dot8(W + (size_t)i * nn, x, nn) * wm[i];
+        n += 2;
+      }
+      free(S);
+      break;
+    }
+    case K_ACTQ: {
+      k_actq_st_t st;
+      const int32_t *v = c.b[0].p;
+      const kscl_t *s = rec[2];
+      memset(&st, 0, sizeof(st));
+      bad += k_exec_st(&c, &st) != 0;
+      for (i = 0; i < P[0]; i++) {
+        int32_t q = P[3] == 127 ? ((int8_t *)rec[1])[i] : ((int16_t *)rec[1])[i];
+        bad += q != (st.amax ? k_aq_one(&st.aq, v[i]) : 0);
+        n++;
+      }
+      bad += st.amax ? (s->m != st.aq.M || s->e != st.aq.e + P[1]) : (s->m != 0 || s->e != 0);
+      n++;
+      break;
+    }
+    case K_RMSNORM: {
+      k_rms_st_t st;
+      const kscl_t *s = rec[3];
+      int re2;
+      memset(&st, 0, sizeof(st));
+      st.y = malloc(sizeof(int32_t) * P[0]);
+      bad += k_exec_st(&c, &st) != 0;
+      for (i = 0; i < P[0]; i++) {
+        bad += ((int8_t *)rec[2])[i] != (st.ymax ? k_aq_one(&st.aq, st.y[i]) : 0);
+        n++;
+      }
+      bad += st.sh != P[2] + st.re - P[4];
+      bad += k_rsqrt(st.u, &re2) != st.rm || re2 != st.re;
+      bad += st.ymax ? (s->m != st.aq.M || s->e != st.aq.e + P[4]) : (s->m != 0 || s->e != 0);
+      n += 3;
+      free(st.y);
+      break;
+    }
+    case K_SWIGLU: {
+      k_swi_st_t st;
+      const kscl_t *s = rec[4];
+      memset(&st, 0, sizeof(st));
+      st.g = malloc(sizeof(int32_t) * P[0]);
+      bad += k_exec_st(&c, &st) != 0;
+      for (i = 0; i < P[0]; i++) {
+        bad += ((int8_t *)rec[3])[i] != (st.amax ? k_aq_one(&st.aq, st.g[i]) : 0);
+        n++;
+      }
+      bad += st.amax ? (s->m != st.aq.M || s->e != st.aq.e + K_FX) : (s->m != 0 || s->e != 0);
+      n++;
+      free(st.g);
+      break;
+    }
+    case K_ATTN2: {
+      int T = P[0], hs = P[1];
+      k_attn_st_t st;
+      const kscl_t *ks = c.b[2].p;
+      const int32_t *p = rec[6], *o = rec[7];
+      uint64_t sum = 0;
+      int32_t mx;
+      memset(&st, 0, sizeof(st));
+      st.dot = malloc(sizeof(int64_t) * T);
+      st.s = malloc(sizeof(int32_t) * T);
+      st.e = malloc(sizeof(uint32_t) * T);
+      st.w = malloc(sizeof(int64_t) * T);
+      st.acc = malloc(sizeof(int64_t) * hs);
+      bad += k_exec_st(&c, &st) != 0;
+      mx = st.s[0];
+      for (t = 0; t < T; t++) {
+        int64_t cc = (int64_t)P[4] * ks[t].m;
+        bad += st.s[t] != k_sat32(k_rshr(k_rshr(st.dot[t], st.d0) * cc, P[5] + ks[t].e - st.d0 - K_FS));
+        bad += p[t] != (int32_t)(((uint64_t)st.e[t] * st.R + ((uint64_t)1 << 31)) >> 32);
+        if (st.s[t] > mx) mx = st.s[t];
+        sum += st.e[t];
+        n += 2;
+      }
+      bad += mx != st.mx || sum != st.sum || st.R != ((uint64_t)1 << 48) / st.sum;
+      for (i = 0; i < hs; i++) bad += o[i] != (st.have ? k_sat32(k_rshr(st.acc[i], 16 + st.emin + st.G - K_FX)) : 0);
+      n += 1 + hs;
+      free(st.dot); free(st.s); free(st.e); free(st.w); free(st.acc);
+      break;
+    }
+    default:
+      bad += k_exec(&c) != 0;
+      break;
+    }
+    for (i = 0; i < c.nb; i++)
+      if (c.b[i].out) bad += memcmp(c.b[i].p, rec[i], (size_t)c.b[i].n * c.b[i].esz) != 0;
+    n++;
+    dump_free(&c, rec);
+  }
+  fclose(f);
+  bad += rc < 0 || nrec != d.recs;
+  sprintf(nm, "%s stage traces K12V8", tag);
+  check(nm, n, bad, "records %g, positions %g", (double)nrec, (double)steps);
+  free(b.mem);
+  free(b.ck);
+  free(b.tk);
+}
+
+static int t_mats(const bundle_t *b, const lm_hm_t **o) {
+  const lm_hw_t *w = &b->v[0].hw;
+  int l, n = 0;
+  for (l = 0; l < b->c.n_layers; l++) {
+    o[n++] = &w->wq[l]; o[n++] = &w->wk[l]; o[n++] = &w->wv[l]; o[n++] = &w->wo[l];
+    o[n++] = &w->w1[l]; o[n++] = &w->w3[l]; o[n++] = &w->w2[l];
+  }
+  o[n++] = &w->cls;
+  return n;
+}
+
+/* A6: PIM bank image (NB 4 x LB 16, depth 4096) of every 260K matrix. The image rebuilt
+   into a bank_mat_t must equal bank_pack(BANK_ROW) array for array, bank_gemv on it must
+   equal k_gemv, and the depth must be the 4072 words of arch.md 3.1. */
+static void t_bimg(const char *ck, const char *tk, const char *tag) {
+  bundle_t b;
+  const lm_hm_t *ms[128];
+  int nm, i, k, nb = 4;
+  long n = 0, bad = 0, depth = 4096, base = 0;
+  bimg_word_t *img[4];
+  char nm2[64];
+  if (bundle_load(&b, ck, tk, "K12V8")) { check("bimg load", 1, 1, "%g%g", 0, 0); return; }
+  nm = t_mats(&b, ms);
+  for (k = 0; k < nb; k++) img[k] = calloc((size_t)depth, sizeof(bimg_word_t));
+  for (i = 0; i < nm; i++) {
+    const lm_hm_t *m = ms[i];
+    lm_arena_t a;
+    bank_mat_t bu, bp;
+    void *mu, *mp;
+    int8_t *x = malloc((size_t)m->n), *gb = malloc((size_t)m->n);
+    int32_t *y0 = malloc(4 * (size_t)m->rows), *y1 = malloc(4 * (size_t)m->rows);
+    long w = bimg_pack(img, nb, depth, base, m->q, m->m, m->rows, m->n), viol;
+    int rep;
+    bad += m->gs != m->n || w != bimg_words(m->rows, m->n, nb);
+    n++;
+    memset(&a, 0, sizeof(a));
+    bimg_unpack(&bu, (const bimg_word_t *const *)img, nb, base, m->rows, m->n, m->we, &a);
+    mu = malloc(a.off + 64);
+    memset(&a, 0, sizeof(a)); a.base = mu; a.cap = 1 << 30;
+    viol = bimg_unpack(&bu, (const bimg_word_t *const *)img, nb, base, m->rows, m->n, m->we, &a);
+    memset(&a, 0, sizeof(a));
+    bank_pack(&bp, m, nb, BANK_ROW, &a);
+    mp = malloc(a.off + 64);
+    memset(&a, 0, sizeof(a)); a.base = mp; a.cap = 1 << 30;
+    bank_pack(&bp, m, nb, BANK_ROW, &a);
+    bad += viol != 0;
+    n++;
+    for (k = 0; k < nb; k++) {
+      bad += bu.brows[k] != bp.brows[k];
+      bad += memcmp(bu.bw[k], bp.bw[k], (size_t)bp.brows[k] * m->n) != 0;
+      bad += memcmp(bu.bm[k], bp.bm[k], sizeof(uint16_t) * bp.brows[k]) != 0;
+      n += 3;
+    }
+    for (rep = 0; rep < 3; rep++) {
+      kscl_t xs;
+      bank_stat_t s1 = {0, 0, 0}, s2 = {0, 0, 0};
+      int j;
+      for (j = 0; j < m->n; j++) x[j] = rep == 0 ? 127 : (int8_t)rndi(-127, 127);
+      xs.m = rep == 0 ? 131071 : rndi(1, 131071);
+      xs.e = rndi(20, 34);
+      k_gemv(m->q, m->m, m->we, m->rows, m->n, m->gs, x, xs, K_FX, y0);
+      memset(y1, 0x5A, 4 * (size_t)m->rows);
+      bank_gemv(&bu, x, xs, K_FX, y1, gb, NULL, &s1);
+      bad += memcmp(y0, y1, 4 * (size_t)m->rows) != 0;
+      bank_gemv(&bp, x, xs, K_FX, y1, gb, NULL, &s2);
+      bad += s1.wrgb != s2.wrgb || s1.mac != s2.mac || s1.rdmac != s2.rdmac;
+      bad += s1.mac != (long)((m->rows + nb - 1) / nb) * ((m->n + 15) / 16);
+      n += 3;
+    }
+    base += w > 0 ? w : 0;
+    free(mu); free(mp); free(x); free(gb); free(y0); free(y1);
+  }
+  bad += base != 4072; /* arch.md 3.1 [calculated] */
+  n++;
+  { /* zero tags outside the used range and nothing written past it */
+    long a2;
+    for (k = 0; k < nb; k++)
+      for (a2 = base; a2 < depth; a2++) {
+        int l;
+        bad += img[k][a2].tag != 0;
+        for (l = 0; l < BIMG_LB; l++) bad += img[k][a2].d[l] != 0;
+      }
+    n++;
+    bad += bimg_pack(img, nb, depth, depth - 1, ms[0]->q, ms[0]->m, ms[0]->rows, ms[0]->n) != -1;
+    n++;
+  }
+  for (k = 0; k < nb; k++) free(img[k]);
+  sprintf(nm2, "%s PIM bank image", tag);
+  check(nm2, n, bad, "matrices %g, words per bank %g", (double)nm, (double)base);
+  free(b.mem);
+  free(b.ck);
+  free(b.tk);
+}
+
+/* gemv row records (arch.md 2.2) of every matrix: pack, unpack, compare */
+static void t_rrec(const char *ck, const char *tk, const char *tag) {
+  bundle_t b;
+  const lm_hm_t *ms[128];
+  int nm, i;
+  long n = 0, bad = 0, tot = 0, raw = 0;
+  char nm2[64];
+  if (bundle_load(&b, ck, tk, "K12V8")) { check("rrec load", 1, 1, "%g%g", 0, 0); return; }
+  nm = t_mats(&b, ms);
+  for (i = 0; i < nm; i++) {
+    const lm_hm_t *m = ms[i];
+    long nbt = rrec_bytes(m->rows, m->n);
+    uint8_t *buf = malloc((size_t)nbt);
+    int8_t *W = malloc((size_t)m->rows * m->n);
+    uint16_t *wm = malloc(sizeof(uint16_t) * m->rows);
+    bad += m->gs != m->n;
+    bad += rrec_pack(buf, m->q, m->m, m->rows, m->n) != nbt;
+    bad += nbt != (long)m->rows * (8 + ((m->n + 7) / 8) * 8);
+    bad += rrec_unpack(buf, m->rows, m->n, W, wm) != 0;
+    bad += memcmp(W, m->q, (size_t)m->rows * m->n) != 0;
+    bad += memcmp(wm, m->m, sizeof(uint16_t) * m->rows) != 0;
+    n += 6;
+    tot += nbt;
+    raw += (long)m->rows * ((m->n + 7) / 8) * 8;
+    free(buf); free(W); free(wm);
+  }
+  sprintf(nm2, "%s gemv row records", tag);
+  check(nm2, n, bad, "bytes %g, header overhead %.2f%%", (double)tot, 100.0 * (tot - raw) / raw);
+  free(b.mem);
+  free(b.ck);
+  free(b.tk);
+}
+
+/* position filter of job dump: the filtered file equals the records of the selected
+   positions of an unfiltered run, in order */
+static void t_dumpf(const char *ck, const char *tk, const char *pa, const char *pb, const char *tag) {
+  bundle_t b;
+  dump_t d;
+  int tok[1] = {1}, steps = 12, pos, i;
+  long seg[13], n = 0, bad = 0, nsel = 0;
+  const char *spec = "0-2,5,9-10";
+  char nm[64];
+  FILE *fa, *fb;
+  /* parser */
+  {
+    static const struct { const char *s; int pos, want; } pc[] = {
+      {NULL, 7, 1}, {"", 7, 1}, {"0-7,63", 63, 1}, {"0-7,63", 8, 0}, {"0-7,63", 0, 1},
+      {"5", 5, 1}, {"5", 4, 0}, {"1-3, 9", 9, 1}, {"x", 0, 0}, {"2-", 2, 0}};
+    for (i = 0; i < (int)(sizeof(pc) / sizeof(pc[0])); i++) {
+      bad += pos_sel(pc[i].s, pc[i].pos) != pc[i].want;
+      n++;
+    }
+  }
+  if (bundle_load(&b, ck, tk, "K12V8")) { check("dumpf load", 1, 1, "%g%g", 0, 0); return; }
+  memset(&d, 0, sizeof(d));
+  d.cap = 1000000000;
+  d.f = fopen(pa, "wb");
+  bad += dump_steps(&b, 0, tok, 1, steps, NULL, 1, &d, seg, NULL) != steps;
+  fclose(d.f);
+  memset(&d, 0, sizeof(d));
+  d.cap = 1000000000;
+  d.f = fopen(pb, "wb");
+  bad += dump_steps(&b, 0, tok, 1, steps, spec, 1, &d, NULL, &nsel) != steps;
+  fclose(d.f);
+  bad += nsel != 6;
+  fa = fopen(pa, "rb");
+  fb = fopen(pb, "rb");
+  for (pos = 0; pos < steps; pos++) {
+    long len = seg[pos + 1] - seg[pos], j;
+    if (!pos_sel(spec, pos)) continue;
+    fseek(fa, seg[pos], SEEK_SET);
+    for (j = 0; j < len; j++) bad += fgetc(fa) != fgetc(fb);
+    n++;
+  }
+  bad += fgetc(fb) != EOF;
+  n++;
+  fclose(fa);
+  fclose(fb);
+  sprintf(nm, "%s dump position filter", tag);
+  check(nm, n, bad, "selected %g of %g positions", (double)nsel, (double)steps);
+  free(b.mem);
+  free(b.ck);
+  free(b.tk);
+}
+
 int main(void) {
   char **pr;
   int np;
@@ -861,6 +1180,12 @@ int main(void) {
   }
   t_dump(cfg_s("ck1", ""), cfg_s("tk1", ""), "K12V8", cfg_s("dumpf", "k.bin"), 1000000, "m1");
   t_dump(cfg_s("ck2", ""), cfg_s("tk2", ""), "K8V12", cfg_s("dumpf", "k.bin"), 24, "m2");
+  t_stage(cfg_s("ck1", ""), cfg_s("tk1", ""), 40, cfg_s("dumpf", "k.bin"), "m1");
+  t_stage(cfg_s("ck2", ""), cfg_s("tk2", ""), 6, cfg_s("dumpf", "k.bin"), "m2");
+  t_bimg(cfg_s("ck1", ""), cfg_s("tk1", ""), "m1");
+  t_rrec(cfg_s("ck1", ""), cfg_s("tk1", ""), "m1");
+  t_rrec(cfg_s("ck2", ""), cfg_s("tk2", ""), "m2");
+  t_dumpf(cfg_s("ck1", ""), cfg_s("tk1", ""), cfg_s("dumpf", "k.bin"), cfg_s("dumpf2", "k2.bin"), "m1");
   {
     FILE *f = fopen(cfg_s("chkres", "build/chk.res"), "r");
     long ci = 0, cb = 1;
