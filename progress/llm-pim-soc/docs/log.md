@@ -85,3 +85,15 @@
 - 수정(오케스트레이터): `axi_rd_eng` 헤더 주석과 문서의 latency를 "명령 handshake c -> ARVALID c+2"로 정정(로직 변경 없음, TB로 잰 값 아님).
 - 한계: 100 MHz 타이밍, LUT 수 미확인. CYCLES 식은 기본 parameter와 stall 없는 모델에서만 확인. P = 2의 15M 전체는 stall 있는 run만. irun 교차는 S4-8. hierarchy.md에 `argmax_red`의 `max_o`와 S4-4 세부 반영 필요.
 - 다음: S4-5(GEMV PIM형 IP).
+
+## 2026-11-19: S4-5 GEMV PIM형 IP  [notion: pending]
+- 한 일(hw-worker): `rtl/l1/pim_gb.sv`, `pim_bank.sv`, `pim_ctrl.sv`, `rtl/l2/pim_core.sv`, `rtl/l3/pim_csr.sv`, `pim_top.sv`(직접 작성 RTL)와 모듈별 TB, `docs/spec/pim.md`(명령 형식, 레지스터 맵, 실행 규칙, cycle 식). 기존 RTL은 수정 없음.
+- 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 262 run, fails 0(기존 201 + 신규 61).
+- agent 보고(재실행 안 함): 260K K_GEMV 레코드 432개(42,144행) 전부 y mismatch 0(layer 순서 실행, token 한 run, 레코드별 run). LDW 뒤 bank 메모리 == `bimg_pack` image. 명령 수 카운터 == `bank_stat_t`. mutation 29개 중 28개 검출, 1개는 동치(FLUSH는 core가 idle일 때만 시작). lint 경고 0.
+- cycle [측정, 시뮬레이션, stall 없는 latency 1 메모리 모델]: MACAB `C_mac = ceil(rows/4) x ceil(n/16) + 12`(기본 조건), 모든 MACAB에서 식과 일치. 260K token당 MAC cycle 4,072(S4-0 계산과 같음), `pim_top` CYCLES는 token 한 run(57 명령) 4,501~4,506, layer마다 run 4,658~4,676, 레코드별 run 약 6,950. 초기 적재 LDW 36개 36,305 cycle.
+- 가속기형 대비 [측정, 시뮬레이션]: 같은 260K에서 가속기형 P = 1의 37,596 cycle 대비 PIM형 token 한 run이 8.35배, layer마다 run이 8.05배 적다(MAC만 비교한 계산값은 8.95배). 보드의 HP latency와 ARM 호출 비용(명령 push 57회)은 포함되지 않았다.
+- 정한 세부(pim.md): 명령은 CMD_PUSH 시점에 검사하고 오류 명령은 FIFO에 넣지 않음, CTRL op RUN/FLUSH, ERR 비트 8개, 두 round의 마지막 word 간격 4 cycle 이상(n <= 48이면 round가 4 cycle), y는 credit(`Y_DEPTH` 32)과 `sync_fifo`, HP 포트 하나의 read/write 채널 사용.
+- RDROW: 구현하지 않음(op 4는 BAD_CMD). embedding은 ARM에 남는다.
+- 자원 [계산, 합성 안 함]: 8x8 곱 64개 + scale 3 = 67, bank BRAM36 64개(tag 16비트가 parity에 들어간다는 전제, Vivado 추론 미확인). 관찰(오케스트레이터): `pim_ctrl`이 LDW 읽기 길이를 `rows x 레코드 크기` 곱으로 구해 합성 시 곱셈기 하나가 더 들 수 있다.
+- 한계: 100 MHz 타이밍(bank 깊이 mux와 gather mux가 scale 앞 조합), LUT 수, parity 추론 미확인. `pim_top`은 NB = 4만 실행(NB 2/8은 `pim_ctrl`에서만). mutation 실행 방식의 cmdline 샘플 확인은 이번에 하지 않음(agent 보고).
+- 다음: S4-6(attention IP).

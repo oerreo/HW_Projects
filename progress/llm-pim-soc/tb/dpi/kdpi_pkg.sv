@@ -57,4 +57,14 @@ package kdpi_pkg;
   // k_argmax over the first n elements of v (index of the first maximum)
   import "DPI-C" function int kd_argmax(input int v[], input int n);
 
+  // ---- S4-5: PIM bank model (bank_pack BANK_ROW + bank_gemv) ----
+  // current K_GEMV record over nb banks: st = {wrgb, mac, rdmac} of this call (bank_stat_t);
+  // returns the number of y differing from the recorded y, -1 if not row-wise
+  import "DPI-C" function int kd_rec_bank(input int nb, inout longint st[]);
+  // synthetic rows x n matrix (w row-major, wm[rows] as 16-bit values, x[n]): y[rows], st
+  import "DPI-C" function int kd_bank_syn(input byte w[], input shortint wm[], input byte x[],
+                                          input int rows, input int n, input int we, input int xm,
+                                          input int xe, input int fo, input int nb,
+                                          inout int y[], inout longint st[]);
+
 endpackage

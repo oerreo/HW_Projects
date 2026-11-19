@@ -1,0 +1,2 @@
+MSEL=23 sh sim/.mut5/r.sh > sim/.mut5/log2.txt 2>&1
+grep -E "^RESULT|apply" sim/.mut5/res.txt

@@ -17,7 +17,7 @@
 | S4-2 | `rshr_sat`, `dotp`, `sync_fifo`, `ram_sdp` -> `mac_row`, `gemv_scale` -> `gemv_core` | leaf 벡터와 K_GEMV 레코드 전부(두 모델) mismatch 0, cycle 식 일치 | 완료 (2026-11-19). 7개 모듈 단독 G4, `sim/run.sh all` 97 run fails 0 (수퍼바이저 재실행), mutation 18/18 검출, cycle 식 일치 |
 | S4-3 | `axi_rd_eng`, `axi_wr_eng` (+ HP 대역폭 측정 top, 사용자 보드 실행 요청) | AXI memory model에서 데이터 mismatch 0, 프로토콜 assertion 0 | RTL 완료 (2026-11-19). 4개 모듈 단독 G4, `sim/run.sh all` 164 run fails 0 (수퍼바이저 재실행), mutation 30/31 검출(1개 동치). HP 대역폭 측정 빌드(`fpga/bw/`)는 사용자 보드 실행 대기 |
 | S4-4 | `argmax_red`, `gemv_acc_csr`, `gemv_acc_top` (GEMV 가속기형 IP) | AXI BFM으로 K_GEMV(분류기 포함)와 K_ARGMAX mismatch 0 | 완료 (2026-11-19). P = 1, 2 모두 G4, `sim/run.sh all` 201 run fails 0 (수퍼바이저 재실행), mutation 24/24 검출. 레지스터 맵 `spec/gemv_acc.md` |
-| S4-5 | `pim_bank`, `pim_gb`, `pim_ctrl`, `pim_core`, `pim_top` (GEMV PIM형 IP) | 260K 전 행렬 K_GEMV mismatch 0, `bank.c` 명령 수 일치 | 대기 |
+| S4-5 | `pim_bank`, `pim_gb`, `pim_ctrl`, `pim_core`, `pim_top` (GEMV PIM형 IP) | 260K 전 행렬 K_GEMV mismatch 0, `bank.c` 명령 수 일치 | 완료 (2026-11-19). 6개 모듈 단독 G4, `sim/run.sh all` 262 run fails 0 (수퍼바이저 재실행), mutation 28/28 검출(동치 1개 제외). 명령과 레지스터 맵 `spec/pim.md`. RDROW 미구현 |
 | S4-6 | `udiv_seq`, `lut_lerp`(EXP2N), `exp_unit`, `attn_score`, `attn_vacc`, `attn_core`, `kv_store`, `kv_rd`, `attn_top` | K_ATTN2(T 1..512, p와 o) mismatch 0 | 대기 |
 | S4-7 | `rsqrt_nr`, `lut_lerp`(SIGM), `actq_core`, `rms_front`, `swi_front`, `vec_core`, `vec_top` | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX mismatch 0 | 대기 |
 | S4-8 | 전체 회귀(Questa. irun 교차는 라이선스 정책상 하지 않음, 2026-11-19), 다이어그램(`visual-docs.md`), viewer 확장 | `sim/run.sh all` 전 run PASS, 로그 보관 | 대기 |

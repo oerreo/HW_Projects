@@ -1,0 +1,7 @@
+### pim_top: compile (RTL_DIR=../../rtl)
+### pim_top: compile done in 1 s
+### pim_top/q_err: vsim tb_pim_top +SEED=5 +PROF=0 +MAXD=0 +ERR=1 (expect pass)
+pim_top/q_err: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [y]: checks=6 mismatches=0 CHECKS [cycles]: checks=12 mismatches=0 CHECKS [counters]: checks=42 mismatches=0 CHECKS [memory]: checks=258 mismatches=0 CHECKS [csr_model]: checks=400 mismatches=0 CHECKS [csr]: checks=4 mismatches=0 CHECKS [err]: checks=54 mismatches=0 
+### pim_top/cd4_syn: vsim tb_pim_top -gCMD_DEPTH=4 +SEED=13 +PROF=1 +MAXD=1 +SYN=100 +ERR=1 (expect pass)
+pim_top/cd4_syn: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [y]: checks=201 mismatches=0 CHECKS [cycles]: checks=249 mismatches=0 CHECKS [counters]: checks=595 mismatches=0 CHECKS [memory]: checks=30801 mismatches=0 CHECKS [csr_model]: checks=86008 mismatches=0 CHECKS [csr]: checks=83 mismatches=0 CHECKS [err]: checks=54 mismatches=0 
+rc 0

@@ -35,13 +35,13 @@ L3  pim_top          GEMV PIM형 IP. CSR + 명령 FIFO + HP master + pim_core   
       L1  axil_slave, axi_rd_eng, axi_wr_eng, sync_fifo (위와 같은 모듈)
       L3  pim_csr          레지스터 맵, 명령 FIFO 입구                                              RTL
       L2  pim_core         NB개 bank + global buffer + 명령 컨트롤러 + 결과 gather                    RTL
-            L1  pim_ctrl         명령 FSM: LDW, WRGB, MACAB, RDROW. bank 주소와 lock-step 스케줄     RTL
+            L1  pim_ctrl         명령 FSM: LDW, WRGB, MACAB(RDROW 미구현). bank 주소, lock-step 스케줄, gather 순서  RTL
             L1  pim_gb           global buffer(활성 벡터 1개), 방송 read                           RTL
             L1  pim_bank         bank 하나: 가중치 RAM + mac_row + mantissa 추출 + MAC_REG           RTL
                   L0  ram_sdp    가중치 image (2 x BRAM36 폭, 8 깊이)                               RTL
                   L1  mac_row    (위와 같은 모듈, LANES = 16)
             L1  gemv_scale       (위와 같은 모듈) bank 결과를 순서대로 1개/cycle 처리                 RTL
-            L0  ram_sdp          y buffer                                                            RTL
+            L0  sync_fifo        y FIFO (S4-5: ram_sdp y buffer 대신, 32 x 33)                       RTL
 
 L3  attn_top         attention IP. CSR + HP master + attn_core + KV source                            RTL
       L3  attn_csr
@@ -67,7 +67,7 @@ L3  vec_top          벡터 IP. CSR + HP master + vec_core                      
 ```
 
 - HLS(Catapult) 병행은 선택 사항이다. 후보는 `exp_unit`과 `gemv_core`의 데이터패스(같은 포트, 같은 벡터). v1에서는 하지 않는 것을 권고한다(`arch.md` 열린 결정 D13).
-- `embed`, `rope`, `add`는 v1에서 ARM에 남긴다(`spec/measure.md` 7절). PIM형에서 embedding 행 읽기는 `pim_core`의 `RDROW` 명령으로 선택 지원한다.
+- `embed`, `rope`, `add`는 v1에서 ARM에 남긴다(`spec/measure.md` 7절). PIM형에서 embedding 행 읽기(`RDROW`)는 S4-5에서 구현하지 않았다(op 4는 BAD_CMD, `spec/pim.md`).
 - 디렉토리: `rtl/l0/`, `rtl/l1/`, `rtl/l2/`, `rtl/l3/`, `rtl/l4/`, `rtl/pkg/llm_pkg.sv`. `tb/<module>/`, `sim/<module>/`. 회귀 스크립트는 pqc-ntt-ip의 `sim/run.sh`를 복사해 이 프로젝트 것으로 둔다.
 
 ## 2. 진행 순서 (bottom-up)
@@ -140,9 +140,9 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 | `attn_vacc` | `VL`, `HS_MAX`, `T_MAX`, `ACC_W` | in: `e_i`(p buffer), `R_i[33]`, V beat, `vm`, `ve`, `emin`, `G`. out: `p_o[32]`(정규화 확률 스트림), 끝에 `o_o`(hs x 32) | 고정 + hs/VL | K_ATTN2의 p와 o. V 누산 `ACC_W = 35 + 16 + clog2(T_MAX) = 60` [계산, vb = 16까지] |
 | `axi_rd_eng` | `DW` = 64, `AW` = 32, `MAX_BURST` = 16, `OUTS` = 4 | cmd: `cmd_valid_i/ready_o`, `addr_i`, `bytes_i`. data: `d_valid_o/ready_i`, `d_o[64]`, `d_last_o`. AXI AR/R | - | 없음(프로토콜). AXI3 호환 burst(LEN <= 15), ID 0, in-order |
 | `axi_wr_eng` | 같음 | cmd + data in stream. AXI AW/W/B. `done_o`(모든 B 응답 수신) | - | 없음 |
-| `pim_bank` | `LB` = 16, `DEPTH` = 4096 | 가중치 쓰기(`we`, `waddr`, `wdata[144]`), lock-step 입력(`addr`, `gb_word[128]`, `first`, `last`, `en`), 출력 `acc_o`, `wm_o`, `acc_valid_o` (MAC_REG, double buffer) | `mac_row.LATENCY + RD_LAT` | `bank_gemv` BANK_ROW의 bank 하나 |
-| `pim_gb` | `N_MAX` | 쓰기 스트림(64b), read `word_o[128]` | 1 | `bank_gemv`의 `gbuf` |
-| `pim_ctrl` | `NB`, `LB` | 명령 스트림 in, bank 주소/enable, gather 순서, 상태 | - | `bank_stat_t`(명령 수), 4절 A6 |
+| `pim_bank` | `LB` = 16, `DEPTH` = 4096, `NMAX`, `DOT_PIPE` | 가중치 쓰기(`we_i`, `waddr_i`, `wdata_i[144]`), lock-step 입력(`re_i`, `raddr_i`, `first_i`, `last_i`, `x_i[128]`은 read 1 cycle 뒤), 출력 `res_valid_o`(1 cycle), `res_acc_o[25]`, `res_wm_o[16]` (MAC_REG) | `LATENCY = 3 + DOT_PIPE`(마지막 word read -> res_valid) | `bank_gemv` BANK_ROW의 bank 하나(행 합 `k_dot8`, wm) |
+| `pim_gb` | `NMAX`, `LB` = 16 | `load_i` + `n_i`, 쓰기 스트림(64b, `wr_ready_o` = busy), `done_o`, read `rd_en_i`/`rd_addr_i` -> `rd_word_o[128]`(n 밖 0) | 1 | `bank_gemv`의 `gbuf` |
+| `pim_ctrl` | `NB`, `LB`, `DEPTH`, `NMAX`, `Y_DEPTH`, `L_BANK` | 명령 스트림 in, rd/wr 명령, LDW 스트림, gb load/read, bank write port, MAC read(mask, word, first/last), gather(`g_sel`, `g_last`, xm, sh), `y_pop_i`, 사건 펄스 | - | `bimg_pack`(bank 쓰기), `bank_stat_t`(사건 수) |
 | `rms_front` | `N_MAX` | x stream + g stream in, cfg(`ge`, `epsc`, `fy`) -> y stream out(32b) to `actq_core` | 가변(3n + rsqrt) | A4 (k, u, rm, re, y) |
 | `swi_front` | - | h1, h3 stream in -> g stream out(32b) | 고정 | A5 (g) |
 
@@ -151,7 +151,7 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 | 모듈 | 주요 parameter | 입력 | 출력 | cycle 식 [계산] | golden 레코드 |
 |---|---|---|---|---|---|
 | `gemv_core` | `LANES` = 8, `N_MAX` | cfg: `rows`, `n`, `we`, `xm`, `xe`, `fo`, `start`. x stream(`ceil(n/8)` beat), 행 레코드 stream(header beat + `ceil(n/8)` beat) | y stream(32b), `done` | `ceil(n/8) + rows x (1 + ceil(n/8)) + L_pipe` (입력이 매 cycle 올 때) | K_GEMV (gs = n) |
-| `pim_core` | `NB` = 4, `LB` = 16, `DEPTH` = 4096 | 명령 stream(LDW, WRGB, MACAB, RDROW), 데이터 stream(64b) | y stream(32b), 상태 | MACAB: `ceil(rows/NB) x ceil(n/16) + L_pipe + NB` | K_GEMV + `bank_gemv` |
+| `pim_core` | `NB` = 4, `LB` = 16, `DEPTH` = 4096, `DOT_PIPE`, `SCALE_PIPE`, `Y_DEPTH` = 32 | 명령 stream(LDW, WRGB, MACAB), rd 명령 + 데이터 stream(64b) | wr 명령, y stream(32b + `y_last_o`), `busy_o`, `rd_stall_o`, 사건 | MACAB(앞 round에서 떨어진 경우): `(R-1) max(nw,4) + nw + L_BANK + nvl + L_S`, 기본 `ceil(rows/4) x ceil(n/16) + 12` (nw >= 4, rows % 4 = 0; S4-5 측정으로 확정) | K_GEMV + `bank_gemv` |
 | `attn_core` | `KL` = 8, `VL` = 8, `HS_MAX`, `T_MAX` | cfg(`T`, `hs`, `kb`, `vb`, `qm`, `qe`), q(hs x 16b), KV pass stream(K beat + ks + vs / V beat + vs) | p stream(T x 32b), o(hs x 32b), `done` | `T x ceil(hs/KL) + T + T x ceil(hs/VL) + C_div + L_pipe` (KV가 매 cycle 올 때) | K_ATTN2 |
 | `kv_store` | `NKV`, `L`, `SEQ`, `HS` | 쓰기(layer, kv head, pos, K/V 행, scale), pass read 요청 | KV pass stream | 1 위치/cycle | `fwd_h.c`의 `kc/vc/kcs/vcs` slot 배치 |
 | `kv_rd` | - | pass 요청 + DDR 주소 | KV pass stream | DDR beat 수에 묶임(`arch.md` 4.4) | 같음 |
@@ -228,6 +228,18 @@ L3의 레지스터 맵과 kernel 호출 순서는 `arch.md` 7절.
 - 오류 비트(ERR, W1C): bit0 START_BUSY, bit1 BAD_OP, bit2 BAD_DESC, bit3 MISALIGN, bit4 RD_RESP, bit5 WR_RESP. RD_RESP/WR_RESP는 RRESP[1]/BRESP[1]인 AXI handshake마다 set한다. descriptor 검사가 engine의 거절 조건(정렬, 길이 0, 2^32 넘김)을 막아 engine은 명령을 거절하지 않는다(시뮬레이션 검사 `L3_ENGCMD`). `FLAGS[1:0] = 0`(y_en, argmax_en 모두 0)은 BAD_DESC.
 - 시간 정의: CTRL 쓰기가 수행되는 cycle이 s, 호출 종료 cycle이 e(모든 시작한 core의 `done_o`, `y_en`이면 마지막 B handshake, `argmax_en`이면 `argmax_red`의 `done_o`). `CYCLES = e - s`(busy cycle 수). descriptor는 s + 1에 latch되고 core start와 명령 순서기 적재도 s + 1, 명령 제시는 s + 2부터다.
 - `argmax_red`의 `max_o`는 3.2절 표에 반영했다(`gemv_acc_csr`의 `ARGMAX_VAL`로 간다).
+
+### 3.8 S4-5에서 고정한 세부 (2026-11-19)
+`pim_gb`, `pim_bank`, `pim_ctrl`, `pim_core`, `pim_csr`, `pim_top`(상태: 시뮬레이션 통과). 명령 형식, 레지스터 맵, 실행 규칙, cycle 식, 검증 내용은 `spec/pim.md`가 원본이고 아래는 계층 관점의 요약이다. 시뮬레이션 모델의 값이며 보드 값이 아니다.
+
+- 구성: `pim_top` = `axil_slave` + `pim_csr` + `sync_fifo`(명령 FIFO, `CMD_DEPTH` 32 x 128) + `pim_core` + `axi_rd_eng` + packer + `axi_wr_eng`(HP 포트 하나의 read/write 채널). `pim_core` = `pim_ctrl` + `pim_gb` + `pim_bank` x 4 + gather mux + `gemv_scale` + `sync_fifo`(y FIFO). 하위 모듈(`mac_row`, `gemv_scale`, engine, `ram_sdp`, `sync_fifo`, `axil_slave`)은 수정 없이 인스턴스만 했다.
+- 명령은 CSR의 CMD_PUSH 때 검사한다(BAD_CMD, BAD_DESC, MISALIGN, FIFO_OVF). 그래서 core에는 합법 명령만 가고 engine은 명령을 거절하지 않는다(`L3_ENGCMD`, `PIM_RANGE`). CTRL op 1 RUN(FIFO가 빌 때까지, run 중 push 허용), op 2 FLUSH.
+- MAC_REG: bank마다 `mac_row` 누산기 뒤 레지스터 하나. round(행 4개)의 마지막 word read에서 `L_BANK` = 3 + DOT_PIPE 뒤에 4 bank의 결과가 동시에 MAC_REG에 있고, `pim_ctrl`이 bank 0..3 순서로 한 cycle에 하나씩 gather한다. round 마지막 word 사이 간격 >= NB(nw < 4이면 round 4 cycle)라 MAC_REG 하나로 충분하다. y 쪽 backpressure는 round 단위 y FIFO credit(Y_DEPTH)으로 처리한다.
+- LDW: 행 레코드 beat 둘 -> word 하나(열 >= n은 0, tag는 첫 word의 wm), 마지막 round의 빈 slot은 0 word로 채운다(`bimg_pack`과 같은 image). WRGB: `pim_gb`가 n 밖을 0으로 읽는다.
+- 사건 카운터(`bank_stat_t` 정의): ST_MAC = MAC read cycle, ST_WRGB = gb beat 0, 4, 8, ..., ST_RDMAC = gather 수. 레코드마다 WRGB를 내는 순서에서는 `bank_gemv`의 합과 같고, layer 순서에서는 wrgb만 WRGB 명령 수에 맞게 줄어든다.
+- run 종료: FIFO가 비고, core에 진행 중인 것이 없고, write engine이 마지막 B를 받은 다음 cycle. CYCLES = e - s.
+- 260K token(stall 없는 메모리 모델, latency 1): MAC 4,072 cycle(식과 같음), 컨트롤러 점유 4,108, `pim_top` run CYCLES 합 4,501~4,506(token 한 run), 4,658~4,676(layer마다 run). 같은 모델의 가속기형 P = 1은 37,596.
+- RDROW는 구현하지 않았다.
 
 ## 4. golden에 경계가 없어 `model/`에 추가해야 하는 것
 

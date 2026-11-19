@@ -291,6 +291,98 @@ int kd_gemv1(const svOpenArrayHandle w, const svOpenArrayHandle x, int n, int wm
   return r;
 }
 
+/* ---- S4-5: PIM bank model (bank_pack BANK_ROW + bank_gemv, model/src/bank.c) ---- */
+
+/* bank_gemv of one rows x n matrix (gs = n) over nb banks: y[rows] and the command counts of
+   this one call in st[0..2] = wrgb, mac, rdmac (bank_stat_t). Returns 0, or -1 on bad
+   arguments / no memory. All arithmetic is model/src (bank_pack, bank_gemv). */
+static int bank_run(const int8_t *W, const uint16_t *wm, const int8_t *x, int rows, int n,
+                    int we, int xm, int xe, int fo, int nb, int32_t *y, long *st) {
+  lm_hm_t m;
+  bank_mat_t b;
+  lm_arena_t a = {0};
+  bank_stat_t s = {0, 0, 0};
+  int8_t *gbuf;
+  int32_t *part;
+  kscl_t xs;
+  if (rows < 1 || n < 1 || nb < 1 || nb > 64) return -1;
+  m.q = (int8_t *)W;
+  m.m = (uint16_t *)wm;
+  m.we = we;
+  m.rows = rows;
+  m.n = n;
+  m.gs = n;
+  bank_pack(&b, &m, nb, BANK_ROW, &a); /* sizing pass */
+  a.cap = a.off + 64;
+  a.base = malloc(a.cap);
+  a.off = 0;
+  if (!a.base) return -1;
+  bank_pack(&b, &m, nb, BANK_ROW, &a);
+  gbuf = malloc((size_t)n + 1);
+  part = malloc(sizeof(int32_t) * ((size_t)nb * rows + 1));
+  xs.m = xm;
+  xs.e = xe;
+  if (a.fail || !gbuf || !part) {
+    free(a.base);
+    free(gbuf);
+    free(part);
+    return -1;
+  }
+  bank_gemv(&b, x, xs, fo, y, gbuf, part, &s);
+  st[0] = s.wrgb;
+  st[1] = s.mac;
+  st[2] = s.rdmac;
+  free(a.base);
+  free(gbuf);
+  free(part);
+  return 0;
+}
+
+/* current K_GEMV record through bank_gemv: st[0..2] = wrgb, mac, rdmac; returns the number of
+   y elements differing from the recorded y, -1 if not a row-wise K_GEMV record */
+int kd_rec_bank(int nb, const svOpenArrayHandle st) {
+  int rows = RC.prm[0], n = RC.prm[1], i, bad = 0;
+  int32_t *y;
+  long s[3];
+  if (!is_gemv() || RC.prm[2] != n) return -1;
+  y = malloc(sizeof(int32_t) * (size_t)rows);
+  if (!y || bank_run(RC.b[0].p, RC.b[1].p, RC.b[2].p, rows, n, RC.prm[3], RC.prm[4], RC.prm[5],
+                     RC.prm[6], nb, y, s)) {
+    free(y);
+    return -1;
+  }
+  for (i = 0; i < rows; i++) bad += y[i] != ((const int32_t *)RO[3])[i];
+  for (i = 0; i < 3; i++) *(int64_t *)svGetArrElemPtr1(st, svLow(st, 1) + i) = s[i];
+  free(y);
+  return bad;
+}
+
+/* synthetic matrix: w[rows * n] (row-major), wm[rows], x[n] -> y[rows] and st[0..2] */
+int kd_bank_syn(const svOpenArrayHandle w, const svOpenArrayHandle wm, const svOpenArrayHandle x,
+                int rows, int n, int we, int xm, int xe, int fo, int nb,
+                const svOpenArrayHandle y, const svOpenArrayHandle st) {
+  int8_t *pw = malloc((size_t)rows * n + 1), *px = malloc((size_t)n + 1);
+  uint16_t *pm = malloc(sizeof(uint16_t) * ((size_t)rows + 1));
+  int32_t *py = malloc(sizeof(int32_t) * ((size_t)rows + 1));
+  long s[3];
+  int i, r = -1;
+  if (pw && px && pm && py) {
+    for (i = 0; i < rows * n; i++) pw[i] = *(int8_t *)svGetArrElemPtr1(w, svLow(w, 1) + i);
+    for (i = 0; i < n; i++) px[i] = *(int8_t *)svGetArrElemPtr1(x, svLow(x, 1) + i);
+    for (i = 0; i < rows; i++) pm[i] = (uint16_t)*(int16_t *)svGetArrElemPtr1(wm, svLow(wm, 1) + i);
+    r = bank_run(pw, pm, px, rows, n, we, xm, xe, fo, nb, py, s);
+    if (r == 0) {
+      for (i = 0; i < rows; i++) *(int32_t *)svGetArrElemPtr1(y, svLow(y, 1) + i) = py[i];
+      for (i = 0; i < 3; i++) *(int64_t *)svGetArrElemPtr1(st, svLow(st, 1) + i) = s[i];
+    }
+  }
+  free(pw);
+  free(px);
+  free(pm);
+  free(py);
+  return r;
+}
+
 /* ---- S4-4 ---- */
 
 /* k_argmax over the first n elements of an int open array (index of the first maximum) */

@@ -1,0 +1,7 @@
+umask 077
+export TMPDIR=/tmp/.rt-$(id -u)/t; mkdir -p "$TMPDIR"
+export T=pim_top
+export ONLY="q_err|cd4"
+./sim/run.sh > sim/.out5 2>&1
+echo "rc $?" >> sim/.out5
+grep -E ": (PASS|FAIL)|compile FAIL|rc " sim/.out5 | cut -c1-400
