@@ -124,7 +124,7 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 | `udiv_seq` | `NUM_W`, `DEN_W`, `Q_W` | `start_i`, `num_i[NUM_W]`, `den_i[DEN_W]` (den > 0, 몫 < 2^Q_W 전제) | `q_o[Q_W]`, `done_o`(1 cycle pulse), `busy_o` | `CYCLES = Q_W + 2` | C `/` (`aq_setup`의 M, R; attention의 `2^48 / sum`) |
 | `lut_lerp` | `FUNC`(EXP2N, SIGM), `PIPE` | EXP2N: `u_i[32]`(Q16 지수, >= 0). SIGM: `a_i[32]` signed Q16. `valid_i` | `y_o[17]` Q16 unsigned, `valid_o` | `PIPE` (1..3, 표 read가 동기라 1 이상) | `k_exp2neg(u, 8, lut)`, `k_sigmoid(a, 8, lut)`. 표는 `tabs.c`에서 생성한 SV package |
 | `rsqrt_nr` | - | `start_i`, `u_i[42]` | `rm_o[32]`, `re_o[E_W]`, `done_o` | `CYCLES` 고정 (곱셈기 1개 순차, 약 12~20 [추정]) | `k_rsqrt` |
-| `argmax_red` | `IDX_W` | `v_i[32]` signed, `valid_i`, `first_i`, `last_i` | `idx_o[IDX_W]`, `done_o` | 1 | `k_argmax` (같은 값이면 앞 index: 엄격한 `>`만 갱신) |
+| `argmax_red` | `IDX_W` | `v_i[32]` signed, `valid_i`, `first_i`, `last_i` | `idx_o[IDX_W]`, `max_o[32]` signed, `done_o` | 1 (`done_o` 1 cycle pulse, `idx_o`/`max_o`는 done cycle부터 다음 valid_i까지 유지) | `k_argmax` (같은 값이면 앞 index: 엄격한 `>`만 갱신) |
 | `sync_fifo` | `W`, `DEPTH` | `in_valid_i`, `in_data_i`, `out_ready_i` | `in_ready_o`, `out_valid_o`, `out_data_o`, `level_o` | - | (control) |
 | `ram_sdp` | `W`, `DEPTH`, `RD_LAT`(1) | `we_i`, `waddr_i`, `wdata_i`, `re_i`, `raddr_i` | `rdata_o` (re일 때만 갱신) | `RD_LAT` | (memory) 추론형, FPGA/ASIC 교체 지점. 72비트 폭은 parity bit까지 데이터로 쓴다 |
 
@@ -216,6 +216,18 @@ L3의 레지스터 맵과 kernel 호출 순서는 `arch.md` 7절.
 
 - outstanding 1에서 burst 사이 빈 cycle은 왕복 지연(AR 제시 1 + 모델 latency + 버퍼 1 + 다음 AR 판단)이다. 실제 HP 포트의 latency는 보드 측정(`spec/bwtest.md`) 전까지 모른다.
 - `bw_top`(P = 1, 2) 64 KiB RD op의 CYCLES는 8,197(P = 1과 2 모두, stall 없는 모델), 즉 8,192 beat + 5 cycle의 시작/종료 지연이다.
+
+### 3.7 S4-4에서 고정한 세부 (2026-11-19)
+`argmax_red`, `gemv_acc_csr`, `gemv_acc_top`(상태: 시뮬레이션 통과, `./sim/run.sh all` 201 run fails 0). 레지스터 맵, 호출 규칙, CYCLES 식, 검증 내용은 `spec/gemv_acc.md`가 원본이고 아래는 계층 관점의 요약이다. 시뮬레이션 모델의 값이며 보드 값이 아니다.
+
+- 구성: `axil_slave`(`u_axil`) + `gemv_acc_csr`(`u_csr`) + slice p(p < P)마다 `axi_rd_eng`(`u_rd`) + `gemv_core`(`u_core`) + y merge + `argmax_red`(`u_am`) + packer + `axi_wr_eng`(`u_wr`, 포트 0). 하위 모듈은 수정 없이 인스턴스만 했고 top이 직접 하는 것은 명령 순서기, read stream router, merge, packer, 종료 판정, 오류/stall event다.
+- 행 분배: P = 2이면 slice p가 행 r (r mod P = p)을 계산한다. P = 1은 행 레코드 명령 1개(`W_ADDR`, ROWS x RB), P = 2는 행마다 read 명령 1개(`W_ADDR + r RB`, RB). 두 포트가 행을 교대로 가져가 주소가 2 RB 간격이라 한 명령으로 묶을 수 없기 때문이다. 명령 순서는 x 명령 다음 행 레코드 명령이고, read stream은 x 명령의 마지막 beat까지 core의 x 포트(`xph_q`), 그 뒤 w 포트로 간다. 행이 없는 slice(P = 2, ROWS = 1의 slice 1)는 시작하지 않는다.
+- y merge: 행 순서대로 slice (r mod P)에서 하나씩 받는다(`sel_q`). `y_en = 0`이면 merge가 기다리지 않고 y를 버린다.
+- packer: y 2개를 64비트 beat로 묶는다(y[2k]는 [31:0]). 홀수 ROWS의 마지막 beat는 y 하나이고 [63:32]는 0이며, 쓰기 명령 길이가 4 ROWS byte라 `axi_wr_eng`가 그 beat의 WSTRB를 0x0F로 낸다(3.6). y 뒤 4 byte는 바뀌지 않는다.
+- RD_STALL 정의: 어떤 slice의 core가 read beat를 받을 수 있는데(x 포트는 LOADX, w 포트는 RUN) beat가 없는 cycle. engine 경계가 아니라 core 경계에서 센다. WR_STALL은 packer의 beat를 `axi_wr_eng`가 받지 못한 cycle(`stall_o`).
+- 오류 비트(ERR, W1C): bit0 START_BUSY, bit1 BAD_OP, bit2 BAD_DESC, bit3 MISALIGN, bit4 RD_RESP, bit5 WR_RESP. RD_RESP/WR_RESP는 RRESP[1]/BRESP[1]인 AXI handshake마다 set한다. descriptor 검사가 engine의 거절 조건(정렬, 길이 0, 2^32 넘김)을 막아 engine은 명령을 거절하지 않는다(시뮬레이션 검사 `L3_ENGCMD`). `FLAGS[1:0] = 0`(y_en, argmax_en 모두 0)은 BAD_DESC.
+- 시간 정의: CTRL 쓰기가 수행되는 cycle이 s, 호출 종료 cycle이 e(모든 시작한 core의 `done_o`, `y_en`이면 마지막 B handshake, `argmax_en`이면 `argmax_red`의 `done_o`). `CYCLES = e - s`(busy cycle 수). descriptor는 s + 1에 latch되고 core start와 명령 순서기 적재도 s + 1, 명령 제시는 s + 2부터다.
+- `argmax_red`의 `max_o`는 3.2절 표에 반영했다(`gemv_acc_csr`의 `ARGMAX_VAL`로 간다).
 
 ## 4. golden에 경계가 없어 `model/`에 추가해야 하는 것
 

@@ -76,7 +76,7 @@
 - 프로세스 노출: agent가 프로젝트 경로가 든 `cd` 명령으로 job을 실행해 경로가 job마다 수 초에서 약 5분 보였다. 발견 후 비공개 포인터 파일 방식으로 바꿨고 `process-privacy.md`에 규칙으로 추가.
 - 다음: 사용자 보드 실행 요청(대역폭 측정), S4-4(GEMV 가속기형 IP top).
 
-## 2026-11-19: S4-4 GEMV 가속기형 IP  [notion: pending]
+## 2026-11-19: S4-4 GEMV 가속기형 IP  [notion: synced]
 - 한 일(hw-worker): `rtl/l0/argmax_red.sv`, `rtl/l3/gemv_acc_csr.sv`, `rtl/l3/gemv_acc_top.sv`(axil_slave + CSR + slice P개(`axi_rd_eng` + `gemv_core`) + y merge + argmax + packer + `axi_wr_eng`)와 TB 3개, `docs/spec/gemv_acc.md`(레지스터 맵, 호출 규칙, CYCLES 식).
 - 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 201 run, fails 0(기존 164 + 신규 37).
 - agent 보고(재실행 안 함): 두 모델의 K_GEMV 레코드 전부(15M 분류기 포함, y 299,136개)와 K_ARGMAX 레코드에서 mismatch 0, P = 1과 2. y 영역 앞뒤 guard 불변, 매 cycle CSR 참조 모델 대조, 오류 경로(BAD_OP, BAD_DESC, MISALIGN, START_BUSY, SLVERR/DECERR)와 복구. mutation 24/24 검출(첫 회차 생존 2개는 TB 공백이라 보강). lint 경고 0.
