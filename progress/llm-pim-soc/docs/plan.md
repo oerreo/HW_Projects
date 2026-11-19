@@ -20,7 +20,7 @@
 | S4-5 | `pim_bank`, `pim_gb`, `pim_ctrl`, `pim_core`, `pim_top` (GEMV PIM형 IP) | 260K 전 행렬 K_GEMV mismatch 0, `bank.c` 명령 수 일치 | 대기 |
 | S4-6 | `udiv_seq`, `lut_lerp`(EXP2N), `exp_unit`, `attn_score`, `attn_vacc`, `attn_core`, `kv_store`, `kv_rd`, `attn_top` | K_ATTN2(T 1..512, p와 o) mismatch 0 | 대기 |
 | S4-7 | `rsqrt_nr`, `lut_lerp`(SIGM), `actq_core`, `rms_front`, `swi_front`, `vec_core`, `vec_top` | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX mismatch 0 | 대기 |
-| S4-8 | 전체 회귀, irun 교차, 다이어그램(`visual-docs.md`), viewer 확장 | `sim/run.sh all` 전 run PASS, 로그 보관 | 대기 |
+| S4-8 | 전체 회귀(Questa. irun 교차는 라이선스 정책상 하지 않음, 2026-11-19), 다이어그램(`visual-docs.md`), viewer 확장 | `sim/run.sh all` 전 run PASS, 로그 보관 | 대기 |
 | S5 | 시스템 통합과 FPGA 환경(G5): kernel별 오프로드 빌드 | AXI BFM 시뮬레이션 통과 | 대기 |
 | S6 | 보드 측정(G6, 사용자): kernel별 가속비, end-to-end, 추정과 실측 비교 | 결과 mismatch 0, 측정 표 | 대기 |
 | S7 | 정리(G7) | 문서, `done/` 이동 | 대기 |

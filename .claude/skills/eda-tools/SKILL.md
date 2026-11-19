@@ -10,12 +10,16 @@ description: Use when running Questa, irun (NC), Catapult, Rise, or DC on this s
 ```bash
 source $R/scripts/env.sh questa   # Questa 2024.2 (+ Catapult 2026.3_1)
 source $R/scripts/env.sh hls      # questa와 동일 환경
-source $R/scripts/env.sh nc       # Cadence irun / ncverilog
-source $R/scripts/env.sh dc       # Synopsys dc_shell W-2024.09  (사용자 승인 후에만 실행)
+# nc: eval/bm06 라이선스가 아니라 사용 금지. 사용자가 그 실행을 허락했을 때만 RESEARCH_ALLOW_NONEVAL=1로
+# dc: eval/bm06 라이선스가 아님. 사용자 승인 후에만, RESEARCH_ALLOW_NONEVAL=1로
 source $R/scripts/env.sh rise     # Rise (RDA_HOME) + Questa 2025.3
 ```
 
 `/Tools/env/` 아래 파일에는 라이선스와 계정 정보가 있다. 내용을 출력하거나 저장소·문서·Notion에 옮기지 않는다.
+
+## 라이선스 정책 (2026-11-19 사용자 지시)
+- eval 환경만, 라이선스 서버는 bm06만. `env.sh questa|hls|rise`가 여기에 해당하고, 다른 서버가 설정되면 `env.sh`가 거부한다.
+- NC(irun)와 DC는 해당하지 않는다. 쓰지 않는다. 다른 머신에서 실행하지 않는다.
 
 ## 실행 전 확인
 - 지금 돌고 있는 무거운 프로세스가 2개 미만인가 (`pgrep -u $USER -fa 'vsim|vopt|catapult|irun|dc_shell'`).
@@ -34,7 +38,7 @@ grep -E "PASS|FAIL|Error|mismatch" run.log
 - wave는 디버그 때만: `-wlf` 대신 `vcd`/`+acc` 범위를 좁혀서.
 - `vsim -c`가 에러로 멈춰 대기하지 않도록 `-do`에 `onerror {quit -f -code 1}`를 넣는다.
 
-## irun (교차 확인)
+## irun (사용 금지: 라이선스 정책. 사용자가 허락한 실행만)
 ```bash
 source $R/scripts/env.sh nc
 irun -64bit -sv -access +r <files> -top <tb_top> -l irun.log

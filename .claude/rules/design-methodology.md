@@ -21,7 +21,7 @@
 - 입력 공간이 작으면(대략 2^28 이하) exhaustive, 크면 corner + constrained random. 시드와 벡터 수를 로그에 남긴다.
 - TB는 self-checking이며 마지막에 mismatch 수와 `PASS`/`FAIL`을 출력한다. 0 mismatch만 통과다.
 - backpressure와 stall은 random으로 흔들어 본다.
-- 기본 시뮬레이터는 Questa. 릴리스 시점에 irun으로 교차 확인한다.
+- 시뮬레이터는 Questa(eval 라이선스, bm06)만 쓴다. irun 교차 확인은 라이선스 정책(`machine-limits.md`)상 하지 않는다. 사용자가 따로 허락할 때만 한다.
 
 ## Hierarchical design (bottom-up)
 - 설계는 계층으로 나누고 작은 leaf 모듈부터 올라간다. 계층과 모듈 목록은 프로젝트의 `docs/spec/hierarchy.md`가 원본이다.

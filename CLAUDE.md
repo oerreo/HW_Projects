@@ -42,6 +42,6 @@ paper/    논문 원고
 7. **회사 자산 분리**: 회사 코드/IP(`~/work`의 다른 디렉토리)를 이 연구에 복사하거나 참조하지 않는다. 툴만 사용한다.
 
 ## 환경
-- 툴 환경: `source /home/theo/work/research/scripts/env.sh <questa|nc|hls|dc|rise>` (스킬 `eda-tools`)
+- 툴 환경: `source /home/theo/work/research/scripts/env.sh <questa|hls|rise>` (스킬 `eda-tools`). 라이선스는 eval 환경, 서버 bm06만 사용(`machine-limits.md`). NC와 DC는 사용자 허락 없이는 쓰지 않는다.
 - 보드: Digilent Zybo Z7-20 (XC7Z020-1CLG400C). 비트스트림 생성은 사용자가 Vivado로 직접 수행하므로, Claude는 Tcl 스크립트와 실행 안내까지만 준비한다.
 - 응답과 문서는 한국어, 코드와 식별자(module/signal 이름)는 영어.
