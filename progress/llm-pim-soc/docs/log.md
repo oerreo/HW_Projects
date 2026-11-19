@@ -75,3 +75,13 @@
 - UNVERIFIED: `fpga/bw/`의 Vivado Tcl(PS7 속성 이름, module reference, HP DDR segment), XSCT 스크립트, Xilinx BSP 호출, 100 MHz timing. PS 프로그램의 checksum은 스펙 문서로 쓴 C 호스트 모델로만 확인(RTL trace 대조 안 함).
 - 프로세스 노출: agent가 프로젝트 경로가 든 `cd` 명령으로 job을 실행해 경로가 job마다 수 초에서 약 5분 보였다. 발견 후 비공개 포인터 파일 방식으로 바꿨고 `process-privacy.md`에 규칙으로 추가.
 - 다음: 사용자 보드 실행 요청(대역폭 측정), S4-4(GEMV 가속기형 IP top).
+
+## 2026-11-19: S4-4 GEMV 가속기형 IP  [notion: pending]
+- 한 일(hw-worker): `rtl/l0/argmax_red.sv`, `rtl/l3/gemv_acc_csr.sv`, `rtl/l3/gemv_acc_top.sv`(axil_slave + CSR + slice P개(`axi_rd_eng` + `gemv_core`) + y merge + argmax + packer + `axi_wr_eng`)와 TB 3개, `docs/spec/gemv_acc.md`(레지스터 맵, 호출 규칙, CYCLES 식).
+- 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 201 run, fails 0(기존 164 + 신규 37).
+- agent 보고(재실행 안 함): 두 모델의 K_GEMV 레코드 전부(15M 분류기 포함, y 299,136개)와 K_ARGMAX 레코드에서 mismatch 0, P = 1과 2. y 영역 앞뒤 guard 불변, 매 cycle CSR 참조 모델 대조, 오류 경로(BAD_OP, BAD_DESC, MISALIGN, START_BUSY, SLVERR/DECERR)와 복구. mutation 24/24 검출(첫 회차 생존 2개는 TB 공백이라 보강). lint 경고 0.
+- CYCLES [측정, 시뮬레이션, stall 없음]: 15M token당 1,951,575~1,951,644(S4-0 계산 1,950,260), 260K token당 P = 1 37,596 / P = 2 19,597(계산 36,446 / 18,402). 차이는 호출당 고정 항 15~35 cycle. 식은 `gemv_acc.md` 5절. 보드의 HP latency가 반영되지 않은 값이다.
+- 스펙 대비 확정(gemv_acc.md): ERR 비트 배치, RD_RESP/WR_RESP는 AXI handshake마다 set, RD_STALL은 core 경계에서 정의, `argmax_red`에 `max_o` 추가, FLAGS = 0은 BAD_DESC, P = 2는 행마다 read 명령 하나(slice별 HP 포트), y는 포트 0으로 씀.
+- 수정(오케스트레이터): `axi_rd_eng` 헤더 주석과 문서의 latency를 "명령 handshake c -> ARVALID c+2"로 정정(로직 변경 없음, TB로 잰 값 아님).
+- 한계: 100 MHz 타이밍, LUT 수 미확인. CYCLES 식은 기본 parameter와 stall 없는 모델에서만 확인. P = 2의 15M 전체는 stall 있는 run만. irun 교차는 S4-8. hierarchy.md에 `argmax_red`의 `max_o`와 S4-4 세부 반영 필요.
+- 다음: S4-5(GEMV PIM형 IP).

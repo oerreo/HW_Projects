@@ -28,7 +28,7 @@
 // err_cmd_o = sticky rejected command. err_clr_i clears both (a new error in the same cycle
 // wins).
 //
-// Latency (no backpressure): command handshake in cycle c -> ARVALID in c + 1.
+// Latency (no backpressure): command handshake in cycle c -> ARVALID in c + 2 (the handshake sets act_q, the next cycle registers the AR).
 // Simulation-only checks (tag first): VR_X / VR_HOLD / VR_STABLE on the command channel
 // (and on the R FIFO input inside sync_fifo), ENG_CMD, ENG_RSTALL, ENG_RUNEXP (R beat with no
 // burst outstanding), ENG_RLAST (RLAST not on the last beat of the burst).

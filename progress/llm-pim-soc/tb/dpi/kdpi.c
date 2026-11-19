@@ -290,3 +290,15 @@ int kd_gemv1(const svOpenArrayHandle w, const svOpenArrayHandle x, int n, int wm
   free(px);
   return r;
 }
+
+/* ---- S4-4 ---- */
+
+/* k_argmax over the first n elements of an int open array (index of the first maximum) */
+int kd_argmax(const svOpenArrayHandle v, int n) {
+  int32_t *pv = malloc((size_t)(n > 0 ? n : 1) * sizeof(int32_t));
+  int i, r;
+  for (i = 0; i < n; i++) pv[i] = *(int32_t *)svGetArrElemPtr1(v, svLow(v, 1) + i);
+  r = k_argmax(pv, n);
+  free(pv);
+  return r;
+}

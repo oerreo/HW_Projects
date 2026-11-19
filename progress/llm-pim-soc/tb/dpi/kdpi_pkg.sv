@@ -53,4 +53,8 @@ package kdpi_pkg;
   import "DPI-C" function int kd_gemv1(input byte w[], input byte x[], input int n, input int wm,
                                        input int xm, input int sh);
 
+  // ---- S4-4 ----
+  // k_argmax over the first n elements of v (index of the first maximum)
+  import "DPI-C" function int kd_argmax(input int v[], input int n);
+
 endpackage

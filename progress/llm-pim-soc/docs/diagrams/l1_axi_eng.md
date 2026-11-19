@@ -50,7 +50,7 @@ flowchart LR
 
 - `RREADY` = `u_rbuf`의 `in_ready_o`(버퍼가 차지 않음). AR을 낼 때 버퍼 여유(`space_q`)가 burst 전체를 덮는지 확인하므로, RVALID가 올 때 버퍼는 항상 비어 있다. 어기면 시뮬레이션 tag `ENG_RSTALL`.
 - `RID`는 무시한다(ID 0 하나, 순서대로).
-- 명령 handshake가 cycle c이면 `ARVALID`는 c + 1이다(RTL 헤더 주석 "Latency"와 `hierarchy.md` 3.6의 값을 옮긴 것이고, cycle 번호 정의는 확인하지 않았다).
+- 명령 handshake가 cycle c이면 `ARVALID`는 c + 2이다(handshake가 `act_q`를 세우고 다음 cycle에 `arvalid_q`가 등록된다. RTL 구조에서 도출, TB로 재지 않음).
 - 마지막 beat의 길이 밖 byte는 메모리 내용 그대로 나가고, 소비자가 무시한다.
 - `ar_free` = `!arvalid_q || m_axi_arready_i`.
 
