@@ -5,7 +5,7 @@
 - 한 일: brief와 plan 작성, 서베이(S0) 착수.
 - S0 결과: `survey/survey.md`(직접 확인 38, 재인용 1, 미확인 10). S1 결정: 두 모델(260K, 15M) 지원, C 구현 3단계(F, Q, H), kernel 6종 초안. `spec/scope.md`.
 
-## 2026-11-18: S2 C golden model (G1)  [notion: pending]
+## 2026-11-18: S2 C golden model (G1)  [notion: synced]
 - 한 일: `model/`(F float 참조판, Q int8 matmul판, H 전체 정수판과 kernel 경계 함수, bank 분할 GEMV), `data/`(받는 스크립트, 체크섬, 프롬프트 32개), `docs/spec/numeric.md`.
 - 결과(수퍼바이저 재실행): `make test` 14,190,666 항목, mismatch 0, PASS. 포함: F판이 공개 참조 구현과 두 모델에서 생성 token과 logits 일치, H판 추론 경로에 float 없음(13항목), bank 분할 GEMV bit-exact, 덤프 재생.
 - agent 보고(재실행 안 함): 정확도 표(F 대비 cross-entropy 증가. 260K: Qg +0.0014, HD +0.0011. 15M: Qg +0.0030, HD +0.0053 nats/token), PC 시간 비중(260K gemv 43%, attn 49%. 15M gemv 94.6%. x86 수치이며 ARM 아님).
@@ -14,7 +14,7 @@
 - 한계: ARM 컴파일 미확인(cross compiler 없음). 15M tokenizer 라이선스 미확인.
 - 다음: S2b(평가 확대와 형식 확정), S3(ARM baseline 프로그램).
 
-## 2026-11-18: S2b 정수 형식 평가와 H판 형식 확정  [notion: pending]
+## 2026-11-18: S2b 정수 형식 평가와 H판 형식 확정  [notion: synced]
 - 한 일(hw-worker): `k_attn2`(K 비트 kb, V 비트 vb 각 8/12/16)와 descriptor `K_ATTN2`, `lm_hfmt_t`의 `kbits`, `vbits`, `win`(0이면 기존 동작), `job ceval`, `tools/ci.py`, `tools/cost.py`, 평가 설정 `cfg/g1~g4`, `h1~h3` 추가. 평가 텍스트를 TinyStories valid 처음 1 MiB로 확대(260K 1,320 story 482,940 token F CE 1.41128, 15M 300 story 59,041 token F CE 0.87401, 15M은 시간 때문에 축소). 구간은 story 단위 paired bootstrap 95%(B=4000, seed 20261118).
 - 결과 [측정, PC x86-64]: dCE(F 대비 cross-entropy 증가, nats/token) 260K K12V8 +0.00186 [+0.00169, +0.00204]. HD(K16V16)와 구분되지 않음(HD - K12V8 -0.00006 [-0.00023, +0.00012]). HB(K8V8)보다 0.00163 [0.00136, 0.00190] 좋음. K 폭이 결정적, V 폭 8/12/16은 구분되지 않음. 15M K12V8 +0.00295 [+0.00229, +0.00364], HB와 구분되지 않음(HB - K12V8 -0.00015 [-0.00094, +0.00060]). 300 story로는 MANT 형식 사이 거의 모든 쌍이 구분되지 않음. window 축소와 POW2 활성 scale(HA)은 확실히 나쁨. 전체 표는 `spec/numeric.md` 2.5절.
 - 메모리 [계산, `model/results/cost.txt`]: 260K 가중치 270.6 KiB + KV 260 KiB = 530.6 KiB, 560 KiB 이하, BRAM36 하한 127.7/140. HD(K16V16)는 KV 380 KiB로 합계 650.6 KiB라 넘침. 15M KV 1134 KiB는 DDR. 기존 numeric.md의 KV 160/320 KiB는 scale(위치, 층, head, K/V마다 24비트, 260K ctx512에서 60 KiB)이 빠져 있어 고침.
@@ -25,7 +25,7 @@
 - 한계: 15M K12V8s 미실행. 15M 300 story는 표본 부족(구간 폭 약 +-0.0007). 처음 32 story가 S2 선정과 겹침. BRAM/DSP는 전부 계산(포트, 깊이 단위, 버퍼 미포함, 12비트와 24비트 packing은 가정). ring buffer 배치는 직접 돌려 보지 않음.
 - 다음: S3 호스트 테스트 재실행 결과 반영(오케스트레이터), ARM baseline.
 
-## 2026-11-18: S3 ARM baseline 프로그램 준비 (G2 test data, 보드 실행 대기)  [notion: pending]
+## 2026-11-18: S3 ARM baseline 프로그램 준비 (G2 test data, 보드 실행 대기)  [notion: synced]
 - 한 일(hw-worker): `data/`(받는 스크립트 `data/scripts/fetch.sh`, 체크섬), `fpga/sw/`(bare-metal baseline 프로그램: 플랫폼 계층 `plat_xil.c`/`plat_host.c`, 측정 `bench.c`, probe `prof.c`, `fq_prof.c`, 로그 파서 `parse_log.py`, 기대값 생성기, `xsct_build.tcl`), 호스트 테스트 `fpga/sw/test/`, 문서 `fpga/README.md`, `docs/spec/measure.md`. 모델 260K(배열 내장)와 15M(JTAG로 DDR 적재), 판 F, Qg, H, 실행 E(계측 없음), T(위치별), P(kernel별 lap probe).
 - S2b 결정 반영(오케스트레이터): H판 형식을 HD에서 K12V8로 바꿨다. `fpga/sw/tools/m1.cfg`, `m2.cfg`의 `vars`는 `F,Qg,K12V8`, 기대값 헤더 `fpga/sw/expect/exp_m1.h`, `exp_m2.h`를 다시 생성, `fpga/sw/test/run.sh`의 형식 이름 고정 3곳도 K12V8로 수정. K12V8의 KV는 K int16 container(12비트), V int8.
 - 검수 [측정, 오케스트레이터 재실행, PC x86-64]: `make -C fpga/sw/test gen` 후 `make test`: HOSTTEST items=23 fail=0, RESULT PASS. 첫 재실행은 21/23이었고 실패 2건(td_ok run selection, parser tamper)은 `run.sh`에 `v=HD`가 고정돼 있던 것이 원인이었다(프로그램의 token/hash 비교는 그때도 64비트와 `-m32` 빌드 모두 mismatch 0). 수정 후 23/23. 로그는 `fpga/sw/test/build/logs/`(`t.log` 64비트, `t32.log` `-m32`, `stack.txt`).
@@ -35,3 +35,11 @@
 - 결정: ARM 측정값 없이는 kernel 우선순위를 정하지 않는다(PC 비중은 참고만). 보드 실행은 사용자가 한다.
 - 사용자 실행 순서: (1) `sh data/scripts/fetch.sh` (2) `make -C fpga/sw/test data` (3) `xsct fpga/sw/xsct_build.tcl XSA=<file.xsa>` (4) 같은 명령에 `RUN=1` (5) `RUN=1 RUNOPT=O3`. 돌려받을 것: `fpga/results/<date>_<o2|o3>/uart.log`(원본)와 `notes.txt`(Vitis 버전, XSA, CPU 클럭, 경고).
 - 다음: 사용자 보드 실행 결과 분석(kernel 우선순위, Amdahl 추정 입력), 그동안 S4 kernel IP 계획 준비.
+
+## 2026-11-19: S4-0 kernel IP 계층과 구조 스펙  [notion: pending]
+- 한 일(hw-worker): `spec/hierarchy.md`(계층, 진행 순서, 모듈 인터페이스, golden 대응), `spec/arch.md`(GEMV 가속기형과 PIM형, attention, vec, HW/SW 인터페이스, 자원 예산), `spec/s4calc.py`([계산] 값 재현), plan의 S4-1~S4-8.
+- 구조 요약 [계산, 측정 아님]: 가속기형 GEMV는 HP 포트당 8 lane(포트 하나의 대역폭이 한도), 15M token당 1,950,260 cycle(P = 1, 대역폭 효율 1 가정의 하한). PIM형은 bank 4 x 16 lane, 가중치 BRAM36 64개, 260K token당 MAC 4,072 cycle(가속기형 P = 1의 36,446 대비 8.95배). attention은 3 pass + 나눗셈 1회, 260K KV는 BRAM36 60개. vec IP 하나가 rmsnorm, swiglu, actq, argmax를 맡는다.
+- 자원 [계산, LUT는 추정]: 260K PIM형 시스템 DSP 147/220, BRAM36 126/140. 15M 가속기형 DSP 58, BRAM36 약 3.
+- 결정(오케스트레이터): 열린 결정 D1~D14를 권고대로 확정(`spec/arch.md` 12절). 수퍼바이저 확인: `s4calc.py` 재실행 값이 문서 표와 일치.
+- 미확인: HP 실측 대역폭, 100 MHz 타이밍, LUT 수, Vivado의 parity bit 추론, 지수와 shift 범위. ARM baseline이 없어 가속비는 추정하지 않음.
+- 다음: S4-1 검증 기반(model 덤프 보강, DPI-C golden, 회귀 스크립트, AXI memory model).
