@@ -37,6 +37,9 @@ done
 # TinyStories validation split: first 256 KiB only (CDLA-Sharing-1.0)
 get "$HF/datasets/roneneldan/TinyStories/resolve/main/TinyStories-valid.txt" \
     "$tp/tinystories/valid_head.txt" "0-262143"
+# S2b: first 1 MiB for the larger paired evaluation (about 1,200 stories)
+get "$HF/datasets/roneneldan/TinyStories/resolve/main/TinyStories-valid.txt" \
+    "$tp/tinystories/valid_1m.txt" "0-1048575"
 get "$HF/datasets/roneneldan/TinyStories/resolve/main/README.md" "$tp/tinystories/README.dataset.md"
 
 if [ -s "$here/checksums.sha256" ]; then

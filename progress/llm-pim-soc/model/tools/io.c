@@ -95,16 +95,40 @@ int io_prompts(const char *path, char ***out) {
 }
 
 /* ---------------- formats ---------------- */
-/*                    name  act       wgs exp sig kv16 */
+/*                    name  act       wgs exp sig kv16 kbits vbits win */
 static const lm_hfmt_t FMTS[] = {
-    {"HA", ACT_POW2, 0, 4, 5, 0},  /* cheapest: shift-only activation scales, small LUTs */
-    {"HB", ACT_MANT, 0, 8, 8, 0},  /* mantissa activation scales, row-wise weight scale */
-    {"HC", ACT_MANT, 64, 8, 8, 0}, /* HB with weight groups (divisor of row <= 64) */
-    {"HD", ACT_MANT, 0, 8, 8, 1},  /* HB with int16 q, k, v in attention */
-    {"HE", ACT_POW2, 0, 8, 8, 0},  /* HB with shift-only activation scales */
-    {"HF", ACT_MANT, 0, 4, 5, 0},  /* HB with small LUTs */
-    {"HG", ACT_MANT, 0, 4, 5, 1},  /* HD with small LUTs (recommended candidate) */
-    {"HH", ACT_MANT, 64, 4, 5, 1}, /* HG with weight groups */
+    {"HA", ACT_POW2, 0, 4, 5, 0, 0, 0, 0},  /* cheapest: shift-only activation scales, small LUTs */
+    {"HB", ACT_MANT, 0, 8, 8, 0, 0, 0, 0},  /* mantissa activation scales, row-wise weight scale */
+    {"HC", ACT_MANT, 64, 8, 8, 0, 0, 0, 0}, /* HB with weight groups (divisor of row <= 64) */
+    {"HD", ACT_MANT, 0, 8, 8, 1, 0, 0, 0},  /* HB with int16 q, k, v in attention */
+    {"HE", ACT_POW2, 0, 8, 8, 0, 0, 0, 0},  /* HB with shift-only activation scales */
+    {"HF", ACT_MANT, 0, 4, 5, 0, 0, 0, 0},  /* HB with small LUTs */
+    {"HG", ACT_MANT, 0, 4, 5, 1, 0, 0, 0},  /* HD with small LUTs */
+    {"HH", ACT_MANT, 64, 4, 5, 1, 0, 0, 0}, /* HG with weight groups */
+    /* S2b: fields after kv16 are kbits, vbits (0: from kv16) and win (attention window, 0 = all) */
+    {"HI", ACT_MANT, 64, 8, 8, 1, 0, 0, 0},  /* HD with weight groups (HH with 8-bit LUTs) */
+    /* HB/HD base (MANT, row-wise weight scale, 8-bit LUTs), q and K kbits, V vbits */
+    {"K8V8", ACT_MANT, 0, 8, 8, 0, 8, 8, 0},    /* == HB through K_ATTN2 */
+    {"K8V12", ACT_MANT, 0, 8, 8, 0, 8, 12, 0},
+    {"K8V16", ACT_MANT, 0, 8, 8, 0, 8, 16, 0},
+    {"K12V8", ACT_MANT, 0, 8, 8, 0, 12, 8, 0},
+    {"K12V12", ACT_MANT, 0, 8, 8, 0, 12, 12, 0},
+    {"K12V16", ACT_MANT, 0, 8, 8, 0, 12, 16, 0},
+    {"K16V8", ACT_MANT, 0, 8, 8, 0, 16, 8, 0},
+    {"K16V12", ACT_MANT, 0, 8, 8, 0, 16, 12, 0},
+    {"K16V16", ACT_MANT, 0, 8, 8, 0, 16, 16, 0}, /* == HD through K_ATTN2 */
+    {"K12V8s", ACT_MANT, 0, 4, 5, 0, 12, 8, 0},  /* K12V8 with small LUTs (4/5-bit, as HF) */
+    /* attention window (sliding, the KV cache keeps only the last win positions) */
+    {"HBw256", ACT_MANT, 0, 8, 8, 0, 8, 8, 256},
+    {"HBw128", ACT_MANT, 0, 8, 8, 0, 8, 8, 128},
+    {"HBw64", ACT_MANT, 0, 8, 8, 0, 8, 8, 64},
+    {"HDw256", ACT_MANT, 0, 8, 8, 0, 16, 16, 256},
+    {"HDw128", ACT_MANT, 0, 8, 8, 0, 16, 16, 128},
+    {"HDw64", ACT_MANT, 0, 8, 8, 0, 16, 16, 64},
+    {"K12V12w256", ACT_MANT, 0, 8, 8, 0, 12, 12, 256},
+    {"K12V12w128", ACT_MANT, 0, 8, 8, 0, 12, 12, 128},
+    {"K8V12w256", ACT_MANT, 0, 8, 8, 0, 8, 12, 256},
+    {"K8V12w128", ACT_MANT, 0, 8, 8, 0, 8, 12, 128},
 };
 const char *FMT_NAMES[] = {"HA", "HB", "HC", "HD", "HE", "HF", "HG", "HH", NULL};
 
@@ -271,7 +295,8 @@ void prof_hook(void *user, int phase, const kcall_t *c) {
   p->calls[c->kid]++;
   switch (c->kid) {
   case K_GEMV: p->macs[c->kid] += (double)c->prm[0] * c->prm[1]; p->elems[c->kid] += c->prm[0]; break;
-  case K_ATTN: p->macs[c->kid] += 2.0 * c->prm[0] * c->prm[1]; p->elems[c->kid] += c->prm[0]; break;
+  case K_ATTN:
+  case K_ATTN2: p->macs[c->kid] += 2.0 * c->prm[0] * c->prm[1]; p->elems[c->kid] += c->prm[0]; break;
   case K_RMSNORM: p->macs[c->kid] += 2.0 * c->prm[0]; p->elems[c->kid] += c->prm[0]; break;
   case K_SWIGLU: p->macs[c->kid] += 2.0 * c->prm[0]; p->elems[c->kid] += c->prm[0]; break;
   case K_ROPE: p->macs[c->kid] += 2.0 * c->prm[0]; p->elems[c->kid] += c->prm[0]; break;

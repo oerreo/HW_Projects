@@ -8,7 +8,8 @@
 
 void lm_h_alloc(lm_hs_t *s, const lm_cfg_t *c, const lm_hfmt_t *f, lm_arena_t *a) {
   int D = c->dim, H = c->hidden_dim, hs = D / c->n_heads, kv = D * c->n_kv_heads / c->n_heads;
-  int esz = f->kv16 ? 2 : 1, mx = H > D ? H : D;
+  int kbit = f->kbits ? f->kbits : (f->kv16 ? 16 : 8), vbit = f->kbits ? f->vbits : kbit;
+  int ek = kbit > 8 ? 2 : 1, ev = vbit > 8 ? 2 : 1, mx = H > D ? H : D;
   size_t cache = (size_t)c->n_layers * c->n_kv_heads * c->seq_len;
   s->x = lm_take(a, 4 * (size_t)D);
   s->x2 = lm_take(a, 4 * (size_t)D);
@@ -26,10 +27,10 @@ void lm_h_alloc(lm_hs_t *s, const lm_cfg_t *c, const lm_hfmt_t *f, lm_arena_t *a
   s->argmax = lm_take(a, 4);
   s->a8 = lm_take(a, (size_t)mx);
   s->as = lm_take(a, sizeof(kscl_t));
-  s->qh = lm_take(a, (size_t)esz * hs);
+  s->qh = lm_take(a, (size_t)ek * hs);
   s->qhs = lm_take(a, sizeof(kscl_t));
-  s->kc = lm_take(a, (size_t)esz * cache * hs);
-  s->vc = lm_take(a, (size_t)esz * cache * hs);
+  s->kc = lm_take(a, (size_t)ek * cache * hs);
+  s->vc = lm_take(a, (size_t)ev * cache * hs);
   s->kcs = lm_take(a, sizeof(kscl_t) * cache);
   s->vcs = lm_take(a, sizeof(kscl_t) * cache);
 }
@@ -112,8 +113,11 @@ const int32_t *lm_h_forward(lm_hs_t *s, const lm_cfg_t *cf, const lm_hw_t *w, in
                             const k_hook_t *h) {
   const lm_hfmt_t *f = &w->f;
   int D = cf->dim, H = cf->hidden_dim, hs = D / cf->n_heads, nkv = cf->n_kv_heads;
-  int kv = hs * nkv, kvmul = cf->n_heads / nkv, esz = f->kv16 ? 2 : 1;
-  int qmax = f->kv16 ? 32767 : 127, mode = f->act_mode, T = pos + 1;
+  int kv = hs * nkv, kvmul = cf->n_heads / nkv;
+  int kbit = f->kbits ? f->kbits : (f->kv16 ? 16 : 8), vbit = f->kbits ? f->vbits : kbit;
+  int ek = kbit > 8 ? 2 : 1, ev = vbit > 8 ? 2 : 1;
+  int qk = (1 << (kbit - 1)) - 1, qv = (1 << (vbit - 1)) - 1, mode = f->act_mode, T = pos + 1;
+  int T0 = (f->win > 0 && T > f->win) ? T - f->win : 0; /* first attended position */
   const int16_t *cs = w->rope + (size_t)pos * hs;
   int rc = 0, l, j;
   kcall_t c;
@@ -134,21 +138,30 @@ const int32_t *lm_h_forward(lm_hs_t *s, const lm_cfg_t *cf, const lm_hw_t *w, in
     rc |= rope(h, s->k, kv, hs, cs, s->kr);
     for (j = 0; j < nkv; j++) {
       size_t slot = ((size_t)l * nkv + j) * cf->seq_len + pos;
-      rc |= actq(h, s->kr + j * hs, hs, mode, qmax, (int8_t *)s->kc + slot * hs * esz, s->kcs + slot);
-      rc |= actq(h, s->v + j * hs, hs, mode, qmax, (int8_t *)s->vc + slot * hs * esz, s->vcs + slot);
+      rc |= actq(h, s->kr + j * hs, hs, mode, qk, (int8_t *)s->kc + slot * hs * ek, s->kcs + slot);
+      rc |= actq(h, s->v + j * hs, hs, mode, qv, (int8_t *)s->vc + slot * hs * ev, s->vcs + slot);
     }
     for (j = 0; j < cf->n_heads; j++) {
-      size_t base = ((size_t)l * nkv + j / kvmul) * cf->seq_len;
-      rc |= actq(h, s->qr + j * hs, hs, mode, qmax, s->qh, s->qhs);
-      kc0(&c, K_ATTN);
-      kp(&c, T); kp(&c, hs); kp(&c, esz); kp(&c, s->qhs->m); kp(&c, s->qhs->e); kp(&c, f->exp_bits);
-      kb(&c, s->qh, esz, hs, 0);
-      kb(&c, (int8_t *)s->kc + base * hs * esz, esz, T * hs, 0);
-      kb(&c, s->kcs + base, 4, 2 * T, 0);
-      kb(&c, (int8_t *)s->vc + base * hs * esz, esz, T * hs, 0);
-      kb(&c, s->vcs + base, 4, 2 * T, 0);
+      /* the window is a contiguous slice; a ring buffer gives the same result because the
+         kernel is invariant to the order of positions (integer sums, max, min) */
+      size_t base = ((size_t)l * nkv + j / kvmul) * cf->seq_len + T0;
+      int Tw = T - T0;
+      rc |= actq(h, s->qr + j * hs, hs, mode, qk, s->qh, s->qhs);
+      if (f->kbits) {
+        kc0(&c, K_ATTN2);
+        kp(&c, Tw); kp(&c, hs); kp(&c, kbit); kp(&c, vbit);
+      } else {
+        kc0(&c, K_ATTN);
+        kp(&c, Tw); kp(&c, hs); kp(&c, ek);
+      }
+      kp(&c, s->qhs->m); kp(&c, s->qhs->e); kp(&c, f->exp_bits);
+      kb(&c, s->qh, ek, hs, 0);
+      kb(&c, (int8_t *)s->kc + base * hs * ek, ek, Tw * hs, 0);
+      kb(&c, s->kcs + base, 4, 2 * Tw, 0);
+      kb(&c, (int8_t *)s->vc + base * hs * ev, ev, Tw * hs, 0);
+      kb(&c, s->vcs + base, 4, 2 * Tw, 0);
       kb(&c, w->elut, 4, (1 << f->exp_bits) + 1, 0);
-      kb(&c, s->p, 4, T, 1);
+      kb(&c, s->p, 4, Tw, 1);
       kb(&c, s->att + j * hs, 4, hs, 1);
       rc |= run(h, &c);
     }

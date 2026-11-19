@@ -83,6 +83,10 @@ typedef struct {
   int exp_bits;  /* exp2 LUT index bits (4..8) */
   int sig_bits;  /* sigmoid LUT index bits (4..8) */
   int kv16;      /* 1: q, k, v quantized to int16 for attention */
+  /* S2b additions (0 keeps the behaviour above bit for bit) */
+  int kbits;     /* q and K bits 8, 12 or 16 (attention through K_ATTN2); 0: from kv16, K_ATTN */
+  int vbits;     /* V bits 8, 12 or 16, used when kbits != 0 */
+  int win;       /* attention window: only the last win positions are attended; 0: all */
 } lm_hfmt_t;
 typedef struct {
   int8_t *q;

@@ -5,7 +5,9 @@
  *   job prof : per-kernel call count, MAC count and PC time of one H variant
  *   job dump : kernel input/output records of one H variant (RTL test vectors)
  *   job gen  : print greedy generations of one variant
- * keys: ck tk pf ev steps nstory vars var out dump cap pi
+ *   job ceval: per-story cross-entropy and top-1 agreement with F on the evaluation text
+ *              (stories skip .. skip + nstory - 1), one line per story for paired statistics
+ * keys: ck tk pf ev steps nstory skip vars var out dump cap pi
  */
 #include <math.h>
 #include <stdlib.h>
@@ -150,6 +152,65 @@ static int job_eval(void) {
   return 0;
 }
 
+/* ---------------- ceval ---------------- */
+static int job_ceval(void) {
+  bundle_t b;
+  char *txt;
+  static char *stories[16384];
+  int ns, i, v, V, steps = (int)cfg_i("steps", 256), nst = (int)cfg_i("nstory", 32);
+  int skip = (int)cfg_i("skip", 0);
+  float *lf, *lv;
+  int *tok;
+  double t0 = io_now();
+  if (load(&b, cfg_s("vars", "F,HB"))) return 1;
+  if (strcmp(b.v[0].name, "F")) { fprintf(stderr, "first variant must be F\n"); return 1; }
+  V = b.c.vocab_size;
+  if (steps > b.c.seq_len) steps = b.c.seq_len;
+  txt = io_read(cfg_s("ev", ""), NULL);
+  if (!txt) { fprintf(stderr, "inputs missing\n"); return 1; }
+  ns = split_stories(txt, stories, 16384);
+  if (skip > ns) skip = ns;
+  if (ns > skip + nst) ns = skip + nst;
+  lf = malloc(sizeof(float) * V);
+  lv = malloc(sizeof(float) * V);
+  tok = malloc(sizeof(int) * 65536);
+  P("# ceval dim=%d layers=%d vocab=%d seq_len=%d steps=%d stories=%d..%d\n", b.c.dim,
+    b.c.n_layers, V, b.c.seq_len, steps, skip, ns - 1);
+  P("# st index predicted_tokens sum_ce(variant...) | top1_agree_with_F(variant 1..)\n");
+  P("vars");
+  for (v = 0; v < b.nv; v++) P(" %s", b.v[v].name);
+  P("\n");
+  for (i = skip; i < ns; i++) {
+    int nt, pos;
+    double ce[MAXV];
+    long t1[MAXV];
+    if (strlen(stories[i]) > 60000) continue;
+    lm_tok_encode(&b.tok, stories[i], 1, 0, tok, &nt);
+    if (nt > b.c.seq_len) nt = b.c.seq_len;
+    if (nt > steps) nt = steps;
+    for (v = 0; v < MAXV; v++) { ce[v] = 0; t1[v] = 0; }
+    for (pos = 0; pos < nt - 1; pos++) {
+      int af = bundle_step(&b, 0, tok[pos], pos, lf, NULL);
+      ce[0] += ce_of(lf, V, tok[pos + 1]);
+      for (v = 1; v < b.nv; v++) {
+        int av = bundle_step(&b, v, tok[pos], pos, lv, NULL);
+        if (av < 0) { fprintf(stderr, "kernel error %s\n", b.v[v].name); return 1; }
+        ce[v] += ce_of(lv, V, tok[pos + 1]);
+        t1[v] += av == af;
+      }
+    }
+    P("st %d %d", i, nt - 1);
+    for (v = 0; v < b.nv; v++) P(" %.10f", ce[v]);
+    P(" |");
+    for (v = 1; v < b.nv; v++) P(" %ld", t1[v]);
+    P("\n");
+    if (OUT) fflush(OUT);
+    fflush(stdout);
+  }
+  P("# pc_sec %.1f\n", io_now() - t0);
+  return 0;
+}
+
 /* ---------------- prof ---------------- */
 static int job_prof(void) {
   bundle_t b;
@@ -277,6 +338,7 @@ int main(void) {
   else if (!strcmp(job, "prof")) rc = job_prof();
   else if (!strcmp(job, "dump")) rc = job_dump();
   else if (!strcmp(job, "gen")) rc = job_gen();
+  else if (!strcmp(job, "ceval")) rc = job_ceval();
   else rc = 2;
   if (OUT) fclose(OUT);
   return rc;

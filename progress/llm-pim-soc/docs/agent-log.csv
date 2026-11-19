@@ -1,3 +1,7 @@
 id,date,type,module,level,model,rounds,tokens,tool_uses,duration_s,accept,sup_defects,human_interv,spec_issue,note
 S0,2026-11-18,survey,survey,,opus,1,218680,86,876,pass,0,0,0,38 verified sources
 S2,2026-11-18,model,C golden F/Q/H + kernels + bank GEMV,,opus,1,338639,96,2981,pass,0,0,0,make test 14.19M items 0 mismatch (supervisor rerun); format decision deferred
+S2b,2026-11-18,model,integer format evaluation (k_attn2, ceval, ci.py, cost.py),,opus,,,,,pass,,,,"make test 15.49M items 0 mismatch (supervisor rerun); format K12V8 decided; tokens/rounds/duration not given to doc-writer"
+S2b-doc,2026-11-18,doc,numeric.md scope.md plan.md log.md update for S2b,,sonnet,1,,,,,,,,"tokens/tool_uses/duration not available; sup_defects pending review"
+S3,2026-11-18,model,"ARM baseline program + test data + host test (fpga/sw, data/)",,opus,,,,,pass,,,,"host test 23/23 PASS (supervisor rerun, PC x86-64); first rerun 21/23 due to HD fixed in run.sh, fixed by supervisor; ARM build and board not run; tokens/rounds/duration not given to doc-writer"
+S3-doc,2026-11-18,doc,"fpga/README.md measure.md plan.md log.md update for S3 (K12V8)",,sonnet,1,,,,,,,,"tokens/tool_uses/duration not available; sup_defects pending review"

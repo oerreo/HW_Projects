@@ -4,3 +4,6 @@ data/third_party/
 model/build/
 # job file used to run long commands
 .job
+# fpga: arrays derived from the model files (never committed) and host test outputs
+fpga/sw/gen/
+fpga/sw/test/build/

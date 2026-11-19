@@ -12,3 +12,4 @@ b0a507e7ad0f626624f17112325e66691f9076d622e1d3274d103d00299f2696  ./models/stori
 50a52ef822ee9e83de5ce9d0be0a025a773d019437f58b5ff9dcafb063ece361  ./models/tokenizer.bin
 f67b71c3ffe761795b9428222444bfc1ec447d45cb13b00821b7e6c1ceecf7c5  ./tinystories/README.dataset.md
 aa75eba9ae1a6e7fc6ed8ba0a2b55e38dde3ad2de9f2139bfd1533cd1c69d165  ./tinystories/valid_head.txt
+ae55d9eb37d0e99c6e1051dbeb212f51b6c1d2d98858fccd81f5676bee92a4e7  ./tinystories/valid_1m.txt

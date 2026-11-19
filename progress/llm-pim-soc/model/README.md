@@ -28,7 +28,12 @@ CFG=cfg/e1.cfg ./build/run       # 평가 (e1: 260K, e2: 15M) -> results/eval_m*
 CFG=cfg/p1.cfg ./build/run       # kernel 프로파일 -> results/prof_m*.txt
 CFG=cfg/d1.cfg ./build/run       # kernel 입출력 덤프 -> build/vec_m*.bin
 CFG=cfg/r1.cfg ./build/rq        # runq.c 그룹 경계 검사 -> results/runq_m*.txt
+CFG=cfg/g1.cfg ./build/run       # S2b story 단위 평가 (g1~g3: 260K, h1~h3: 15M) -> results/ce_m*.txt
+CI_IN="results/ce_m1a.txt results/ce_m1b.txt results/ce_m1c.txt" CI_OUT=results/ci_m1.txt python3 -I tools/ci.py
+python3 -I tools/cost.py         # 형식별 메모리 비용 [계산] -> 표준 출력 (results/cost.txt)
 ```
+- `job ceval`(S2b): story마다 한 줄(`st index tokens sum_ce(F, 변형...) | top1(변형...)`)을 쓴다. `tools/ci.py`가 여러 파일을 story index로 합치고(F 합이 파일 사이에서 같은지 검사) paired bootstrap과 표준오차로 95% 구간을 낸다. 인자 없이 환경변수(`CI_IN`, `CI_OUT`, `CI_B`, `CI_SEED`)만 쓴다.
+- S2b 형식(`tools/io.c`의 `FMTS`): `HI`(HD + 가중치 그룹), `KxVy`(HB/HD 바탕, q와 K x비트, V y비트, x, y는 8, 12, 16), 이름 끝 `w<N>`(attention window N). `lm_hfmt_t`의 추가 필드 `kbits`, `vbits`, `win`이 0이면 기존 동작과 bit 단위로 같다. `kbits`가 0이 아니면 attention은 `K_ATTN2`(`k_attn2`)로 호출된다.
 
 - 빌드 플래그 `-O2 -ffp-contract=off`(F판의 bit 일치 조건). `-ffast-math` 금지.
 - `make -j` 금지(Makefile이 `.NOTPARALLEL`).

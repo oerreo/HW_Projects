@@ -13,3 +13,25 @@
 - 미정: H판 형식. 권장 HD(q/k/v int16)는 260K에서 KV cache 320 KiB(추정)라 가중치와 함께 BRAM에 안 들어간다. 후보 간 차이가 표본(프롬프트 32, story 32) 잡음 수준이라 평가를 늘려 다시 잰다(S2b).
 - 한계: ARM 컴파일 미확인(cross compiler 없음). 15M tokenizer 라이선스 미확인.
 - 다음: S2b(평가 확대와 형식 확정), S3(ARM baseline 프로그램).
+
+## 2026-11-18: S2b 정수 형식 평가와 H판 형식 확정  [notion: pending]
+- 한 일(hw-worker): `k_attn2`(K 비트 kb, V 비트 vb 각 8/12/16)와 descriptor `K_ATTN2`, `lm_hfmt_t`의 `kbits`, `vbits`, `win`(0이면 기존 동작), `job ceval`, `tools/ci.py`, `tools/cost.py`, 평가 설정 `cfg/g1~g4`, `h1~h3` 추가. 평가 텍스트를 TinyStories valid 처음 1 MiB로 확대(260K 1,320 story 482,940 token F CE 1.41128, 15M 300 story 59,041 token F CE 0.87401, 15M은 시간 때문에 축소). 구간은 story 단위 paired bootstrap 95%(B=4000, seed 20261118).
+- 결과 [측정, PC x86-64]: dCE(F 대비 cross-entropy 증가, nats/token) 260K K12V8 +0.00186 [+0.00169, +0.00204]. HD(K16V16)와 구분되지 않음(HD - K12V8 -0.00006 [-0.00023, +0.00012]). HB(K8V8)보다 0.00163 [0.00136, 0.00190] 좋음. K 폭이 결정적, V 폭 8/12/16은 구분되지 않음. 15M K12V8 +0.00295 [+0.00229, +0.00364], HB와 구분되지 않음(HB - K12V8 -0.00015 [-0.00094, +0.00060]). 300 story로는 MANT 형식 사이 거의 모든 쌍이 구분되지 않음. window 축소와 POW2 활성 scale(HA)은 확실히 나쁨. 전체 표는 `spec/numeric.md` 2.5절.
+- 메모리 [계산, `model/results/cost.txt`]: 260K 가중치 270.6 KiB + KV 260 KiB = 530.6 KiB, 560 KiB 이하, BRAM36 하한 127.7/140. HD(K16V16)는 KV 380 KiB로 합계 650.6 KiB라 넘침. 15M KV 1134 KiB는 DDR. 기존 numeric.md의 KV 160/320 KiB는 scale(위치, 층, head, K/V마다 24비트, 260K ctx512에서 60 KiB)이 빠져 있어 고침.
+- 곱셈기 [계산, 합성 안 함]: score MAC 12x12는 DSP48E1 하나. V MAC은 위치 가중치(최대 34비트) x V라 vb와 무관하게 DSP 2개. V 누산은 약 vb+42비트로 48비트를 넘어 확장 필요.
+- 결정(오케스트레이터): H판 형식을 두 모델 모두 **K12V8**로 확정(이전 권고 HD를 대체). 이유: (1) 위 측정, (2) 메모리 한도, (3) 두 모델이 attention IP와 LUT 하나를 공유. agent 권고는 260K K12V8s(작은 LUT, +0.00175, K12V8과 구분되지 않음)와 15M HB였으나, LUT 차이 약 8 Kb와 15M KV 트래픽 차이(가중치 트래픽 대비 7.6% 대 6.2% [계산])보다 IP 통일의 이득을 택함. 15M에서 작은 LUT가 약간 나쁜 경향(HD - HG -0.00071 [-0.00144, +0.00000], 경계선)도 이유. 기각: context window 축소(128은 260K에서 K12V12 대비 +0.0104, 15M에서 K12V8 대비 +0.0133 악화, 256은 260K에서 HD 대비 +0.0005 악화), POW2 활성 scale(HA).
+- 이전 32 표본 결론 수정: 260K의 "int16이 크게 좋다"는 K 쪽 효과였고 12비트면 충분, V는 8비트. 15M에서 HD가 HB보다 나쁘고 HH가 좋아 보인 것은 잡음.
+- 검증: `make test` TOTAL items 15,489,337, mismatches 0, PASS(clean build 후, 오케스트레이터 재실행 [측정]). 기존 8형식 x 2모델 kernel 덤프 16개는 변경 전후 `cmp` 동일(agent 보고, 재확인 안 함).
+- 한계: 15M K12V8s 미실행. 15M 300 story는 표본 부족(구간 폭 약 +-0.0007). 처음 32 story가 S2 선정과 겹침. BRAM/DSP는 전부 계산(포트, 깊이 단위, 버퍼 미포함, 12비트와 24비트 packing은 가정). ring buffer 배치는 직접 돌려 보지 않음.
+- 다음: S3 호스트 테스트 재실행 결과 반영(오케스트레이터), ARM baseline.
+
+## 2026-11-18: S3 ARM baseline 프로그램 준비 (G2 test data, 보드 실행 대기)  [notion: pending]
+- 한 일(hw-worker): `data/`(받는 스크립트 `data/scripts/fetch.sh`, 체크섬), `fpga/sw/`(bare-metal baseline 프로그램: 플랫폼 계층 `plat_xil.c`/`plat_host.c`, 측정 `bench.c`, probe `prof.c`, `fq_prof.c`, 로그 파서 `parse_log.py`, 기대값 생성기, `xsct_build.tcl`), 호스트 테스트 `fpga/sw/test/`, 문서 `fpga/README.md`, `docs/spec/measure.md`. 모델 260K(배열 내장)와 15M(JTAG로 DDR 적재), 판 F, Qg, H, 실행 E(계측 없음), T(위치별), P(kernel별 lap probe).
+- S2b 결정 반영(오케스트레이터): H판 형식을 HD에서 K12V8로 바꿨다. `fpga/sw/tools/m1.cfg`, `m2.cfg`의 `vars`는 `F,Qg,K12V8`, 기대값 헤더 `fpga/sw/expect/exp_m1.h`, `exp_m2.h`를 다시 생성, `fpga/sw/test/run.sh`의 형식 이름 고정 3곳도 K12V8로 수정. K12V8의 KV는 K int16 container(12비트), V int8.
+- 검수 [측정, 오케스트레이터 재실행, PC x86-64]: `make -C fpga/sw/test gen` 후 `make test`: HOSTTEST items=23 fail=0, RESULT PASS. 첫 재실행은 21/23이었고 실패 2건(td_ok run selection, parser tamper)은 `run.sh`에 `v=HD`가 고정돼 있던 것이 원인이었다(프로그램의 token/hash 비교는 그때도 64비트와 `-m32` 빌드 모두 mismatch 0). 수정 후 23/23. 로그는 `fpga/sw/test/build/logs/`(`t.log` 64비트, `t32.log` `-m32`, `stack.txt`).
+- 로그 값 [측정, PC x86 `-m32`, gcc 8.5 `-O2`, ARM 아님]: 모델 메모리(`ARENA need`) 260K 2,466,496 B, 15M 78,198,848 B. H판(K12V8) `VAR bytes` 260K 694,864 B, 15M 16,942,400 B. 15M K12V8 run E 6.650 ms/token(1702.294 ms, 256 위치), 150.385 tok/s. 64비트 빌드는 포인터 폭 때문에 값이 다르다(260K `ARENA need` 2,469,568 B).
+- 참고용 PC 프로파일 [측정, x86 `-m32`, ARM 아님, run P 비중]: 260K K12V8(512 위치)은 attn 70.5%, gemv 합계 약 18.9%, swiglu 4.1%, rmsnorm 3.1%. 15M K12V8(256 위치)은 gemv_cls 52.0%, gemv_w1/w2/w3 합 22.1%, gemv_q/k/v/o 합 11.3%, attn 9.7%. 260K K12V8 token당 시간은 0.571 ms(`t32.log` run E). 직전 실행의 같은 항목은 0.552 ms였다(공용 서버의 실행 간 변동, 로그는 덮어씀). 이전 S2의 PC 프로파일(260K attn 49%, 15M gemv 94.6%)은 F/Q판 기준이고 H판 K12V8과 비교할 수 없다.
+- 이 서버에서 한 번도 실행하지 않은 것: ARM 컴파일, Xilinx API(`plat_xil.c`, CP15 PMU, global timer 포함), XSCT 스크립트(stub 문법 검사만), Vitis 동작, 보드 실행 시간과 UART 출력량, 스택 64 KB 충분성(호스트 `-m32` 측정 약 2.3 KB). Qg판의 보드 bit 일치는 newlib libm이 glibc와 같은 결과를 내야 성립한다(미확인, 다르면 Q hash FAIL). H판은 float를 쓰지 않는다. 15M `tokenizer.bin` 라이선스는 미확인이라 저장소와 ELF에 넣지 않았다.
+- 결정: ARM 측정값 없이는 kernel 우선순위를 정하지 않는다(PC 비중은 참고만). 보드 실행은 사용자가 한다.
+- 사용자 실행 순서: (1) `sh data/scripts/fetch.sh` (2) `make -C fpga/sw/test data` (3) `xsct fpga/sw/xsct_build.tcl XSA=<file.xsa>` (4) 같은 명령에 `RUN=1` (5) `RUN=1 RUNOPT=O3`. 돌려받을 것: `fpga/results/<date>_<o2|o3>/uart.log`(원본)와 `notes.txt`(Vitis 버전, XSA, CPU 클럭, 경고).
+- 다음: 사용자 보드 실행 결과 분석(kernel 우선순위, Amdahl 추정 입력), 그동안 S4 kernel IP 계획 준비.

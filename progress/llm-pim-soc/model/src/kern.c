@@ -225,17 +225,20 @@ void k_rope(const int32_t *v, int n, int hs, const int16_t *cs, int32_t *o) {
 /* ---------------- attention: score, softmax, weighted V sum (one head) ---------------- */
 #define LOG2E_Q15 47274 /* round(log2(e) * 2^15) */
 
-void k_attn(int T, int hs, int esz, const void *q, kscl_t qs, const void *K, const kscl_t *ks,
-            const void *V, const kscl_t *vs, int eb, const uint32_t *elut, int32_t *p, int32_t *o) {
-  int t, i, d0 = esz == 2 ? 15 : 0, emin = 0, have = 0;
+/* ek, ev: element bytes of (q, K) and V; d0: right shift of the q.K dot product
+   (keeps |dot >> d0| < 2^22 so that the product with c < 2^34 stays < 2^56) */
+static void attn_core(int T, int hs, int ek, int d0, const void *q, kscl_t qs, const void *K,
+                      const kscl_t *ks, int ev, const void *V, const kscl_t *vs, int eb,
+                      const uint32_t *elut, int32_t *p, int32_t *o) {
+  int t, i, emin = 0, have = 0;
   int32_t mx;
   uint64_t sum = 0, R;
   /* scores, Q(K_FS) */
   for (t = 0; t < T; t++) {
     int64_t dot = 0, c = (int64_t)qs.m * ks[t].m; /* c < 2^34 */
     const int base = t * hs;
-    for (i = 0; i < hs; i++) dot += (int64_t)ld(q, esz, i) * ld(K, esz, base + i);
-    /* |dot| < 2^21 (int8) or 2^36 (int16, reduced by d0 = 15) */
+    for (i = 0; i < hs; i++) dot += (int64_t)ld(q, ek, i) * ld(K, ek, base + i);
+    /* |dot| < 2^21 (int8), 2^29 (12 bit, d0 = 7) or 2^37 (int16, d0 = 15) */
     p[t] = sat32(k_rshr(k_rshr(dot, d0) * c, qs.e + ks[t].e - d0 - K_FS));
   }
   /* softmax numerators: 2^((s - max) * log2 e), Q16 */
@@ -274,11 +277,25 @@ void k_attn(int T, int hs, int esz, const void *q, kscl_t qs, const void *K, con
         int64_t w;
         if (vs[t].m == 0) continue;
         w = k_rshr((int64_t)p[t] * vs[t].m, vs[t].e - emin - G); /* <= 2^33 */
-        for (i = 0; i < hs; i++) acc[i] += w * ld(V, esz, t * hs + i); /* < 2^60, T <= 4096 */
+        for (i = 0; i < hs; i++) acc[i] += w * ld(V, ev, t * hs + i); /* < 2^60, T <= 4096 */
       }
       for (i = 0; i < hs; i++) o[i] = sat32(k_rshr(acc[i], 16 + emin + G - K_FX));
     }
   }
+}
+
+void k_attn(int T, int hs, int esz, const void *q, kscl_t qs, const void *K, const kscl_t *ks,
+            const void *V, const kscl_t *vs, int eb, const uint32_t *elut, int32_t *p, int32_t *o) {
+  attn_core(T, hs, esz, esz == 2 ? 15 : 0, q, qs, K, ks, esz, V, vs, eb, elut, p, o);
+}
+
+int k_attn_d0(int kb) { return kb > 8 ? 2 * kb - 17 : 0; }
+
+void k_attn2(int T, int hs, int kb, int vb, const void *q, kscl_t qs, const void *K,
+             const kscl_t *ks, const void *V, const kscl_t *vs, int eb, const uint32_t *elut,
+             int32_t *p, int32_t *o) {
+  attn_core(T, hs, kb > 8 ? 2 : 1, k_attn_d0(kb), q, qs, K, ks, vb > 8 ? 2 : 1, V, vs, eb, elut,
+            p, o);
 }
 
 /* ---------------- swiglu ---------------- */
@@ -338,7 +355,8 @@ void k_topk(const int32_t *v, int n, int k, int32_t *idx, int32_t *val) {
 
 /* ---------------- descriptor dispatch ---------------- */
 static const char *knames[K_NKERN] = {"?",     "embed", "gemv", "rmsnorm", "actq", "rope",
-                                      "attn",  "swiglu", "add", "argmax",  "topk"};
+                                      "attn",  "swiglu", "add", "argmax",  "topk",
+                                      "attn2"};
 const char *k_name(int kid) { return (kid > 0 && kid < K_NKERN) ? knames[kid] : "?"; }
 
 #define NEED(cond) \
@@ -372,7 +390,7 @@ int k_exec(const kcall_t *c) {
               (kscl_t *)c->b[3].p);
     return 0;
   case K_ACTQ:
-    NEED(c->np == 4 && c->nb == 3 && P[0] > 0 && (P[3] == 127 || P[3] == 32767));
+    NEED(c->np == 4 && c->nb == 3 && P[0] > 0 && (P[3] == 127 || P[3] == 2047 || P[3] == 32767));
     BUF(0, 4, P[0]); BUF(1, P[3] == 127 ? 1 : 2, P[0]); BUF(2, 4, 2);
     k_actq(c->b[0].p, P[0], P[1], P[2], P[3], c->b[1].p, (kscl_t *)c->b[2].p);
     return 0;
@@ -392,6 +410,20 @@ int k_exec(const kcall_t *c) {
     qs.e = P[4];
     k_attn(T, hs, esz, c->b[0].p, qs, c->b[1].p, (const kscl_t *)c->b[2].p, c->b[3].p,
            (const kscl_t *)c->b[4].p, P[5], c->b[5].p, c->b[6].p, c->b[7].p);
+    return 0;
+  }
+  case K_ATTN2: {
+    kscl_t qs;
+    int T = P[0], hs = P[1], kb = P[2], vb = P[3], ek = kb > 8 ? 2 : 1, ev = vb > 8 ? 2 : 1;
+    NEED(c->np == 7 && c->nb == 8 && T > 0 && T <= K_TMAX && hs > 0 && hs <= K_HSMAX &&
+         (kb == 8 || kb == 12 || kb == 16) && (vb == 8 || vb == 12 || vb == 16) && P[6] >= 4 &&
+         P[6] <= 8);
+    BUF(0, ek, hs); BUF(1, ek, T * hs); BUF(2, 4, 2 * T); BUF(3, ev, T * hs);
+    BUF(4, 4, 2 * T); BUF(5, 4, (1 << P[6]) + 1); BUF(6, 4, T); BUF(7, 4, hs);
+    qs.m = P[4];
+    qs.e = P[5];
+    k_attn2(T, hs, kb, vb, c->b[0].p, qs, c->b[1].p, (const kscl_t *)c->b[2].p, c->b[3].p,
+            (const kscl_t *)c->b[4].p, P[6], c->b[5].p, c->b[6].p, c->b[7].p);
     return 0;
   }
   case K_SWIGLU:

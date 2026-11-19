@@ -11,7 +11,7 @@ sh data/scripts/fetch.sh
 
 - 이미 받은 파일은 다시 받지 않는다. 받은 뒤 `data/scripts/checksums.sha256`으로 검증한다(처음 실행 때 이 목록을 만들었다).
 - 받은 날짜: 2026-11-18. 요청에는 일반 User-Agent(`curl`)만 쓰고 개인 정보는 넣지 않는다.
-- 용량: 약 63 MB(대부분 stories15M.bin).
+- 용량: 약 64 MB(대부분 stories15M.bin). S2b에서 `valid_1m.txt`(1 MiB)를 추가했다.
 
 ## 파일, 출처, 라이선스
 
@@ -26,6 +26,7 @@ sh data/scripts/fetch.sh
 | `llama2c/runq.c` | 같은 저장소 | MIT | 확인 | 공개 int8 구현. 그룹 경계 의심 확인(`model/tools/rq.c`)에만 사용 |
 | `llama2c/export.py`, `model.py`, `tokenizer.py`, `README.md`, `LICENSE` | 같은 저장소 | MIT | 확인 | 형식 확인용 참고 자료(실행하지 않음) |
 | `tinystories/valid_head.txt` | https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStories-valid.txt 의 처음 262,144 B (HTTP Range) | CDLA-Sharing-1.0 | 확인: 데이터셋 README 메타데이터 (`tinystories/README.dataset.md`) | 평가 텍스트(cross-entropy). 앞쪽 32개 story만 사용 |
+| `tinystories/valid_1m.txt` | 같은 URL의 처음 1,048,576 B (HTTP Range), 2026-11-18 받음 | CDLA-Sharing-1.0 | 확인: 위와 같음 | S2b 확대 평가(story 단위 paired 통계). 앞 262,144 B는 `valid_head.txt`와 byte 단위로 같다(`cmp` 확인). story 구분자 1,320개, 마지막(잘린) 조각을 빼고 완결 story 1,320개(평가 index 0..1319) |
 | `tinystories/README.dataset.md` | https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/README.md | - | - | 라이선스 근거 보관 |
 
 - `master` 브랜치와 `main` revision에서 받았으므로 원본이 바뀌면 체크섬 검증이 실패한다. 그때는 바뀐 내용을 확인하고 체크섬과 이 표를 갱신한다.

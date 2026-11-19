@@ -1,6 +1,6 @@
 # S1 범위 결정: llm-pim-soc
 
-상태: 결정 (2026-11-18, 오케스트레이터). 사용자 검토 대상. 근거는 `docs/survey/survey.md` 9절. 숫자 형식의 최종 확정은 S2의 정확도 측정 뒤.
+상태: 결정 (2026-11-18, 오케스트레이터). 사용자 검토 대상. 근거는 `docs/survey/survey.md` 9절. 숫자 형식은 S2b에서 K12V8로 확정(2026-11-18, `spec/numeric.md` 4절).
 
 ## 모델
 - 구조: llama2.c 계열(RMSNorm, RoPE, multi-head attention, SwiGLU FFN, 가중치 공유 분류기). C 코드베이스 하나가 config로 크기를 고른다.
@@ -15,7 +15,8 @@
 | Q (int8 matmul) | 가중치와 활성 int8, 누산 int32, 그룹 scale. 비선형은 float | F 대비 logits 오차, top-1 일치율, 평균 loss 차이 보고 |
 | H (HW형, 전체 정수) | Q + 비선형(RMSNorm, softmax, SiLU, RoPE)의 정수 근사, scale은 가수 + shift. PL이 실제로 하는 연산과 bit-exact. kernel 경계 함수로 분리 | Q 대비 같은 지표. 이 판이 RTL의 golden |
 
-- H판의 형식(비트폭, 근사 방식)은 S2에서 후보를 비교해 고른다. 통과 기준(잠정): 검증 프롬프트 세트에서 F 대비 평균 loss 증가와 top-1 일치율을 보고하고, 수치는 사용자 검토로 확정.
+- H판의 형식(비트폭, 근사 방식)은 S2, S2b에서 후보를 비교해 **K12V8로 확정**했다(두 모델 공통): MANT 활성 scale, 행 단위 가중치 scale, q와 K 12비트, V 8비트, 8비트 LUT + 보간, context 전체. 근거와 측정은 `spec/numeric.md` 2.5절과 4절. 통과 기준: 검증 텍스트에서 F 대비 평균 loss 증가와 top-1 일치율을 보고(수치는 사용자 검토).
+- 메모리 배치 [계산]: 260K는 가중치 270.6 KiB + KV 260 KiB = 530.6 KiB로 BRAM(560 KiB) 이하(PIM형의 전제 성립, BRAM36 하한 127.7/140). 15M은 가중치(약 14.6 MiB)와 KV(1134 KiB)가 모두 DDR.
 - 서베이가 제기한 의심(공개 양자화 구현에서 hidden_dim이 그룹 크기의 배수가 아닐 때의 그룹 경계)은 S2에서 실행으로 확인한다. 우리 구현은 행 단위 또는 행 길이의 약수로 그룹을 잡는다.
 
 ## kernel 목록 (초안, 우선순위는 S3 프로파일로)

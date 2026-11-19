@@ -51,6 +51,13 @@ void k_rmsnorm(const int32_t *x, int n, int fx, const int16_t *g, int ge, int32_
 void k_rope(const int32_t *v, int n, int hs, const int16_t *cs, int32_t *o);
 void k_attn(int T, int hs, int esz, const void *q, kscl_t qs, const void *K, const kscl_t *ks,
             const void *V, const kscl_t *vs, int eb, const uint32_t *elut, int32_t *p, int32_t *o);
+/* attention with separate bit widths: kb for q and K, vb for V, each 8, 12 or 16 (12 and 16
+   bit values are stored in int16). kb = vb = 8 equals k_attn(esz 1), 16 equals k_attn(esz 2).
+   The q.K dot product is shifted right by k_attn_d0(kb) = 0, 7, 15 before the scale product. */
+void k_attn2(int T, int hs, int kb, int vb, const void *q, kscl_t qs, const void *K,
+             const kscl_t *ks, const void *V, const kscl_t *vs, int eb, const uint32_t *elut,
+             int32_t *p, int32_t *o);
+int k_attn_d0(int kb);
 void k_swiglu(const int32_t *h1, const int32_t *h3, int n, int sb, const uint32_t *slut,
               int mode, int8_t *q, kscl_t *s);
 void k_add(const int32_t *a, const int32_t *b, int n, int32_t *o);
@@ -66,7 +73,7 @@ int64_t k_rshr(int64_t x, int s);
 /* ---- generic call descriptor ---- */
 enum {
   K_EMBED = 1, K_GEMV, K_RMSNORM, K_ACTQ, K_ROPE, K_ATTN, K_SWIGLU, K_ADD, K_ARGMAX, K_TOPK,
-  K_NKERN
+  K_ATTN2, K_NKERN
 };
 #define KP_MAX 12
 #define KB_MAX 8
@@ -87,9 +94,11 @@ typedef struct {
  *  K_EMBED   prm n gs we fo                 b q:i8[n] m:u16[n/gs] | y:i32[n]
  *  K_GEMV    prm rows n gs we xm xe fo      b W:i8[rows*n] m:u16[rows*n/gs] x:i8[n] | y:i32[rows]
  *  K_RMSNORM prm n fx ge epsc fy mode       b x:i32[n] g:i16[n] | q:i8[n] s:i32[2]
- *  K_ACTQ    prm n f mode qmax              b v:i32[n] | q:i8 or i16[n] s:i32[2]
+ *  K_ACTQ    prm n f mode qmax              b v:i32[n] | q:i8 (qmax 127) or i16[n] (2047, 32767) s:i32[2]
  *  K_ROPE    prm n hs                       b v:i32[n] cs:i16[hs] | o:i32[n]
  *  K_ATTN    prm T hs esz qm qe eb          b q[hs] K[T*hs] ks:i32[2T] V[T*hs] vs:i32[2T] lut:u32 | p:i32[T] o:i32[hs]
+ *  K_ATTN2   prm T hs kb vb qm qe eb        b q[hs] K[T*hs] ks:i32[2T] V[T*hs] vs:i32[2T] lut:u32 | p:i32[T] o:i32[hs]
+ *            (q, K: i8 if kb == 8 else i16; V: i8 if vb == 8 else i16)
  *  K_SWIGLU  prm n sb mode                  b h1:i32[n] h3:i32[n] lut:u32 | q:i8[n] s:i32[2]
  *  K_ADD     prm n                          b a:i32[n] b:i32[n] | o:i32[n]
  *  K_ARGMAX  prm n                          b v:i32[n] | idx:i32[1]
