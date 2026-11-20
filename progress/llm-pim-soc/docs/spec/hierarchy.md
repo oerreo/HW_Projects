@@ -1,6 +1,6 @@
 # 계층 구조: llm-pim-soc (S4)
 
-상태: **초안** (2026-11-19, S4-0). attention 부분(1절 트리, 2절 S4-6 행, 3.2~3.4 표의 attention 모듈, 3.9절, 4절 A3)은 S4-6 구현에 맞춰 갱신했다(2026-11-19). 오케스트레이터 검토 전이며, `arch.md` 끝의 "열린 결정"이 확정되면 해당 부분을 고친다. 이 문서의 구성과 포트는 열린 결정의 **권고안**을 기준으로 적었다. 구조 결정과 수치 근거는 `arch.md`가 원본이다.
+상태: **초안** (2026-11-19, S4-0). attention 부분(1절 트리, 2절 S4-6 행, 3.2~3.4 표의 attention 모듈, 3.9절, 4절 A3)은 S4-6 구현에 맞춰 갱신했다(2026-11-19). S4-7(2026-11-20)에서 vec 부분(1절 트리, 2절 S4-7 행, 3.2~3.4 표의 vec 모듈, 3.11절, 4절 A4, A5, A7)을 구현에 맞춰 갱신했다. 오케스트레이터 검토 전이며, `arch.md` 끝의 "열린 결정"이 확정되면 해당 부분을 고친다. 이 문서의 구성과 포트는 열린 결정의 **권고안**을 기준으로 적었다. 구조 결정과 수치 근거는 `arch.md`가 원본이다.
 
 - golden: `model/src/kern.c`(kernel 함수), `model/src/bank.c`(PIM bank 분할 GEMV), `model/src/fwd_h.c`(호출 순서와 KV cache 배치). RTL은 kernel 경계에서 bit-exact여야 한다.
 - 형식: K12V8(`spec/numeric.md` 4절). 행 단위 가중치 scale(gs = n), MANT 활성 scale, q/K 12비트(int16 container), V 8비트, LUT 8비트(257항목).
@@ -54,7 +54,7 @@ L3  attn_top         attention IP. CSR + read port per engine + attn_core x H_PA
             L1  attn_score       dotp(16x16, KL lane) + c = qm*km + 곱 + rshr_sat, running max, emin/mmax/have  RTL
                   L0  dotp, rshr_sat
             L1  exp_unit         d = s - max (clamp), w = rshr(d*log2e, 15), lut_lerp(EXP2N)          RTL (HLS 비교 후보)
-                  L0  lut_lerp   257항목 표 + 선형 보간 (EXP2N; SIGM은 S4-7)                          RTL
+                  L0  lut_lerp   257항목 표 + 선형 보간 (FUNC EXP2N; SIGM은 S4-7에서 추가)            RTL
                   L0  rshr_sat
             L0  udiv_seq         순차 나눗셈 (R = 2^48 / sum, Q_W 33)                               RTL
             L1  attn_vacc        p = e*R 정규화, w = rshr(p*vm, ...), V MAC(VL lane), o 출력 shift     RTL
@@ -65,13 +65,18 @@ L3  attn_top         attention IP. CSR + read port per engine + attn_core x H_PA
             L0  ram_sdp, sync_fifo
       L2  kv_rd            (KV_SRC 1, sys_a) DDR KV reader: axi_rd_eng 명령/데이터 -> pass 스트림 (engine마다)  RTL
 
-L3  vec_top          벡터 IP. CSR + HP master + vec_core                                              RTL
-      L2  vec_core         op 선택(RMSNORM, SWIGLU, ACTQ, ARGMAX), actq_core 하나 공유               RTL
-            L1  rms_front        amax, k, sum(xs^2), rsqrt_nr, y = xs*g*rm 계산                      RTL
-                  L0  rsqrt_nr   48항목 seed + Newton 2회 (순차)                                    RTL
-            L1  swi_front        sigmoid(lut_lerp SIGM), silu, g = silu*h3                            RTL
-            L1  actq_core        int32 벡터 저장 + amax + (M, R) 계산(udiv_seq) + 양자화 lane         RTL
-                  L0  udiv_seq, rshr_sat, ram_sdp
+L3  vec_top          벡터 IP (S4-7). axil_slave + vec_csr + axi_rd_eng + axi_wr_eng + vec_core + 명령 순서기 + packer   RTL
+      L1  axil_slave, axi_rd_eng, axi_wr_eng (위와 같은 모듈)
+      L3  vec_csr          레지스터 맵, 1 cycle descriptor 검사(shift와 덧셈만), start/done, latch    RTL
+      L2  vec_core         op 선택(RMSNORM, SWIGLU, ACTQ, ARGMAX), unpacker, 공유 front buffer, actq_core 하나 공유   RTL
+            L1  rms_front        amax, k, sum(xs^2), rsqrt_nr, y = sat32(rshr(xs*g*rm, sh))          RTL
+                  L0  rsqrt_nr   48항목 seed + Newton 2회 (17x35 곱셈기 1개 순차, CYCLES 15)        RTL
+                  L0  rshr_sat
+            L1  swi_front        sigmoid(lut_lerp SIGM), silu -> buffer, g = sat32(rshr(silu*h3, 16))   RTL
+                  L0  lut_lerp (FUNC SIGM), rshr_sat
+            L1  actq_core        int32 buffer + amax + (M, R)(udiv_seq 하나 두 번) + 양자화 + q FIFO   RTL
+                  L0  udiv_seq, rshr_sat, ram_sdp, sync_fifo
+            L0  ram_sdp          공유 front buffer (rms_front: x, swi_front: silu)
             L0  argmax_red
 ```
 
@@ -96,9 +101,9 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 | S4-6 | `udiv_seq`, `lut_lerp`(EXP2N) | L0 | RTL | `udiv_seq`: random + 몫 경계, golden C `/`. EXP2N: u 전수 [0, 2^21) + I >= 32 random, golden `k_exp2neg` | mismatch 0 |
 | S4-6 | `exp_unit`, `attn_score`, `attn_vacc`, `attn_core` (pass FSM은 `attn_core` 안) | L1, L2 | RTL | stage trace(A3) + K_ATTN2 레코드(T = 1..512, K12V8) + K_ATTN 레코드(HB = K8V8, HD = K16V16 덤프), KV stream random stall | p와 o 모두 mismatch 0 (완료 2026-11-19, `spec/attn.md`) |
 | S4-6 | `kv_store`, `kv_rd`, `attn_csr`, `attn_top` | L2, L3 | RTL | KVW(golden 배치의 K/V 버퍼)로 쓰기, K_ATTN2 레코드로 읽기. AXI BFM | mismatch 0 (완료 2026-11-19) |
-| S4-7 | `rsqrt_nr`, `lut_lerp`(SIGM) | L0 | RTL | rsqrt: `make test`의 248,002 입력 + random, golden `k_rsqrt`. SIGM: a 전수 [-2^20, 2^20] + 포화 구간 random, golden `k_sigmoid` | mismatch 0 |
-| S4-7 | `actq_core` | L1 | RTL | K_ACTQ 레코드 전부(qmax 127, 2047) + DPI random(amax 0, 1, 2^31-1 포함) | mismatch 0 |
-| S4-7 | `rms_front`, `swi_front`, `vec_core`, `vec_top` | L1~L3 | RTL | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX 레코드 + stage 덤프(A4, A5) | mismatch 0 |
+| S4-7 | `rsqrt_nr`, `lut_lerp`(SIGM) | L0 | RTL | rsqrt: 비트 길이마다 4,000(make test 방식) + seed 경계 + random 10^6, golden `k_rsqrt`(rm 범위는 C 전수). SIGM: a 전수 [-2^20, 2^20] + 포화 구간 random, golden `k_sigmoid` | mismatch 0 (완료 2026-11-20, `spec/vec.md`) |
+| S4-7 | `actq_core` | L1 | RTL | K_ACTQ 레코드 전부(qmax 127, 2047) + DPI random(amax 0, 1, 2^31-1 포함, qmax 32767) + stage(amax, L, e, num, M, R) | mismatch 0 (완료 2026-11-20) |
+| S4-7 | `rms_front`, `swi_front`, `vec_core`, `vec_csr`, `vec_top` | L1~L3 | RTL | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX 레코드 전부(두 모델) + stage(A4, A5), `vec_csr` 단독 TB, AXI BFM | mismatch 0 (완료 2026-11-20) |
 | S4-8 | 전체 회귀, irun 교차, 다이어그램, viewer 확장 | - | - | `sim/run.sh all` | 전 run PASS, 로그 보관 |
 
 - S4-2~S4-4가 GEMV 가속기형, S4-5가 PIM형, S4-6이 attention, S4-7이 나머지다. 오케스트레이터 순서와 다른 점과 근거는 `arch.md` 9절.
@@ -132,8 +137,8 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 | `dotp` | `LANES`, `AW`, `BW`, `PIPE` | `a_i[LANES*AW]`, `b_i[LANES*BW]` signed, `valid_i` | `sum_o[AW+BW+clog2(LANES)]` signed, `valid_o` | `PIPE` (0..clog2(LANES)+1) | `k_gemv` 내부 곱합, `attn_core`의 dot (stage 덤프 A1, A3) |
 | `udiv_seq` | `NUM_W`, `DEN_W`, `Q_W` | `start_i`, `num_i[NUM_W]`, `den_i[DEN_W]` (den > 0, 몫 < 2^Q_W 전제) | `q_o[Q_W]`, `done_o`(1 cycle pulse), `busy_o` | `CYCLES = Q_W + 1` (S4-6 확정: start cycle c, done c + Q_W + 1) | C `/` (`aq_setup`의 M, R; attention의 `2^48 / sum`) |
 | `umul_seq` | `A_W`, `B_W` (각 1..64) | `start_i`, `a_i[A_W]`, `b_i[B_W]` | `p_o[A_W+B_W]`(정확한 곱), `done_o`(1 cycle pulse), `busy_o` | `CYCLES = B_W + 1` (start cycle c, busy c+1 .. c+B_W, done c + B_W + 1, `udiv_seq`와 같은 handshake. S4-6b) | 정수 곱 (TB의 128비트 곱) |
-| `lut_lerp` | `FUNC`(0 = EXP2N; 1 = SIGM은 S4-7, 지금은 elaboration 실패), `PIPE` | EXP2N: `u_i[32]`(Q16 지수, >= 0). SIGM: `a_i[32]` signed Q16. `valid_i` | `y_o[17]` Q16 unsigned, `valid_o` | `PIPE` (1..3, 표 read가 동기라 1 이상) | `k_exp2neg(u, 8, lut)`, `k_sigmoid(a, 8, lut)`. 표는 `tabs.c`에서 생성한 SV package(`rtl/pkg/lut_pkg.sv`, `model/tools/lutsv.py`) |
-| `rsqrt_nr` | - | `start_i`, `u_i[42]` | `rm_o[32]`, `re_o[E_W]`, `done_o` | `CYCLES` 고정 (곱셈기 1개 순차, 약 12~20 [추정]) | `k_rsqrt` |
+| `lut_lerp` | `FUNC`(0 = EXP2N, 1 = SIGM; 다른 값은 elaboration 실패), `PIPE` | EXP2N: `u_i[32]`(Q16 지수, >= 0). SIGM: 같은 `u_i[32]` 포트를 signed Q16 a로 읽는다(S4-7). `valid_i` | `y_o[17]` Q16 unsigned, `valid_o` | `PIPE` (1..3, 표 read가 동기라 1 이상) | `k_exp2neg(u, 8, lut)`, `k_sigmoid(a, 8, lut)`. 표는 `tabs.c`에서 생성한 SV package(`rtl/pkg/lut_pkg.sv`의 EXP2N_TAB, SIGM_TAB, `model/tools/lutsv.py`) |
+| `rsqrt_nr` | `U_W`(1..62, 기본 42) | `start_i`, `u_i[U_W]` | `rm_o[17]`(전수 확인: rm <= 65535), `re_o[E_W]` signed, `done_o`, `busy_o` | `CYCLES = 15`(start c, done c + 15, udiv_seq와 같은 handshake; 17x35 곱셈기 1개를 cycle마다 한 번) | `k_rsqrt` (seed 표 `lut_pkg::RSQ_TAB`) |
 | `argmax_red` | `IDX_W` | `v_i[32]` signed, `valid_i`, `first_i`, `last_i` | `idx_o[IDX_W]`, `max_o[32]` signed, `done_o` | 1 (`done_o` 1 cycle pulse, `idx_o`/`max_o`는 done cycle부터 다음 valid_i까지 유지) | `k_argmax` (같은 값이면 앞 index: 엄격한 `>`만 갱신) |
 | `sync_fifo` | `W`, `DEPTH` | `in_valid_i`, `in_data_i`, `out_ready_i` | `in_ready_o`, `out_valid_o`, `out_data_o`, `level_o` | - | (control) |
 | `ram_sdp` | `W`, `DEPTH`, `RD_LAT`(1) | `we_i`, `waddr_i`, `wdata_i`, `re_i`, `raddr_i` | `rdata_o` (re일 때만 갱신) | `RD_LAT` | (memory) 추론형, FPGA/ASIC 교체 지점. 72비트 폭은 parity bit까지 데이터로 쓴다 |
@@ -144,7 +149,7 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 |---|---|---|---|---|
 | `mac_row` | `LANES`, `AW`, `BW`, `ACC_W` | in: `valid_i`, `first_i`, `last_i`(행 첫/끝 beat), `a_i`, `b_i`. out: `acc_o[ACC_W]` signed, `acc_valid_o`(행 끝에서 1 cycle) | `LATENCY = dotp.LATENCY + 1` | 행의 int32 `acc` (A1). gemv: `ACC_W = 15 + clog2(N_MAX) = 25` [계산: 1024 x 127^2 < 2^24] |
 | `gemv_scale` | `ACC_W`, `PIPE` | in: `acc_i[ACC_W]`, `wm_i[16]`, `xm_i[17]`, `sh_i[SH_W]`, `valid_i`. out: `y_o[32]`, `valid_o` | 고정 `LATENCY` (곱 2단 + shift) | `k_gemv`의 `y = sat32(rshr(acc*m*xm, sh))` (A2). `S = acc*m`은 41비트, `S*xm`은 58비트 [계산] |
-| `actq_core` | `N_MAX`, `IN_W` = 32 | cfg: `n_i`, `f_i[E_W]`, `qmax_i[16]`(127, 2047, 32767), `start_i`. in stream: `v_valid_i/v_ready_o`, `v_i[32]`. out stream: `q_valid_o/q_ready_i`, `q_o[16]`(int8은 sign-extend). scale: `m_o[17]`, `e_o[E_W]`, `done_o` | 가변(2n + 약 90 cycle) | K_ACTQ 레코드. MANT만 지원(POW2는 ERR) |
+| `actq_core` | `N_MAX`, `Q_DEPTH`(>= 5) | cfg: `n_i`, `f_i[E_W]`, `qmax_i[16]`(127, 2047, 32767), `start_i`. in: `v_valid_i/v_ready_o`(LOAD 동안 항상 1), `v_i[32]`. out: `q_valid_o/q_ready_i`, `q_o[16]`(int8은 sign-extend). scale: `m_o[17]`, `e_o[SH_W]`(e + f, amax 0이면 0), `scl_valid_o`, `busy_o`, `done_o` | 마지막 입력 원소 cycle t에서 done = t + n + 59(amax 0이면 t + n + 6) | K_ACTQ 레코드. MANT만 |
 | `exp_unit` | `RS_PIPE`, `LUT_PIPE` | in: `s_i[32]`, `mx_i[32]`, `valid_i`. out: `e_o[17]`, `valid_o` | `1 + RS_PIPE + LUT_PIPE` | `k_attn_exp` (S4-6 export) |
 | `attn_score` | `KL`, `HS_MAX`, `DOT_PIPE`, `SH_PIPE` | cfg `hs`, `d0`, `qm`, `qe`, `clr_i`; q 적재(`q_we_i`, group, `KL x 16b`); K beat(`k_valid_i`, `KL x 16b`, 위치의 마지막 beat에서 `km`, `ke`, `vm`, `ve`). out: `s_valid_o`, `s_o[32]`, `s_vm_o`, `s_ve_o`, `mx_o`, `emin_o`, `mmax_o`, `have_o` | `DOT_PIPE + 3 + SH_PIPE` (마지막 beat -> s) | `k_attn_score` + P1 trace |
 | `attn_vacc` | `VL`, `HS_MAX`, `T_MAX`, `ACC_W` | cfg `R`, `emin`, `G`, `clr_i`; V beat(`b_valid_i`, `b_first_i`, group, `VL x 16b`, 첫 beat에 `e`, `vm`, `ve`). out: `p_valid_o`/`p_o`(첫 beat + 2), o 읽기(`o_rd_i`, `o_idx_i` -> `o_valid_o`, `o_o`, + 2) | p 2, 누산 6, o 2 | `k_attn_pn`, `k_attn_w`, `k_attn_out`. `ACC_W` 60 (>= 50 + log2 T_MAX) |
@@ -153,8 +158,8 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 | `pim_bank` | `LB` = 16, `DEPTH` = 4096, `NMAX`, `DOT_PIPE` | 가중치 쓰기(`we_i`, `waddr_i`, `wdata_i[144]`), lock-step 입력(`re_i`, `raddr_i`, `first_i`, `last_i`, `x_i[128]`은 read 1 cycle 뒤), 출력 `res_valid_o`(1 cycle), `res_acc_o[25]`, `res_wm_o[16]` (MAC_REG) | `LATENCY = 3 + DOT_PIPE`(마지막 word read -> res_valid) | `bank_gemv` BANK_ROW의 bank 하나(행 합 `k_dot8`, wm) |
 | `pim_gb` | `NMAX`, `LB` = 16 | `load_i` + `n_i`, 쓰기 스트림(64b, `wr_ready_o` = busy), `done_o`, read `rd_en_i`/`rd_addr_i` -> `rd_word_o[128]`(n 밖 0) | 1 | `bank_gemv`의 `gbuf` |
 | `pim_ctrl` | `NB`, `LB`, `DEPTH`, `NMAX`, `Y_DEPTH`, `L_BANK` | 명령 스트림 in, rd/wr 명령, LDW 스트림, gb load/read, bank write port, MAC read(mask, word, first/last), gather(`g_sel`, `g_last`, xm, sh), `y_pop_i`, 사건 펄스 | - | `bimg_pack`(bank 쓰기), `bank_stat_t`(사건 수) |
-| `rms_front` | `N_MAX` | x stream + g stream in, cfg(`ge`, `epsc`, `fy`) -> y stream out(32b) to `actq_core` | 가변(3n + rsqrt) | A4 (k, u, rm, re, y) |
-| `swi_front` | - | h1, h3 stream in -> g stream out(32b) | 고정 | A5 (g) |
+| `rms_front` | `N_MAX` | cfg(`n`, `ge`, `epsc`, `fy`); 원소 스트림(x n개, g n개, valid/ready); buffer 포트(RAM은 vec_core); y 스트림(valid만) -> `actq_core` | 마지막 y = start + 3n + 28 | A4 (amax, k, ss, u, rm, re, sh, y) |
+| `swi_front` | `N_MAX`, `LUT_PIPE` | `n`; 원소 스트림(h1 n개, h3 n개); buffer 포트(silu 저장); g 스트림(valid만) | 마지막 g = start + 2n + 8 | A5 (g) |
 
 ### 3.4 L2 (kernel core)
 
@@ -165,7 +170,7 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 | `attn_core` | `KL` = `VL` = 8, `HS_MAX`, `TMAX`, PIPE 4개, `OUT_DEPTH` | start + cfg(`T`, `hs`, `kb`, `qm`, `qe`, `p_en`), q stream(ceil(hs/8) beat), KV pass 요청(`kvreq`, 0 K / 1 V) + KV stream(K beat + 위치 마지막 beat의 ks, vs / V beat) | 출력 stream(p[T] (p_en), o[hs], `last`, `is_o`), `done`, `kv_stall_o` | `(T+1) ceil(hs/8) + T + T ceil(hs/8) + hs + C0`, `C0 = 54 + DOT + SH + RS + LUT PIPE` (기본 60, S4-6 측정으로 확정) | K_ATTN2 |
 | `kv_store` | `NKV`, `NL`, `SEQ`, `KL`, `KW`, `VW`, `H_PAR`, `FIFO_D` | 쓰기(kv head, layer, pos, K/V 16b lane, ks, vs), 포트 p의 pass 요청(kv head j mod H_PAR = p, layer, T) | 포트별 KV pass stream | 1 위치/cycle (요청 후 T + 3 이내) | `fwd_h.c`의 `kc/vc/kcs/vcs` 배치를 KVW로 옮긴 것 |
 | `kv_rd` | `KL` = 8, `HS_MAX`, `TMAX`, `CH` | pass 요청(pass, T, hs, ths = T x hs(요청자가 계산, S4-6b), ek, ev, kv head의 K/V/KS/VS base) | `axi_rd_eng` 명령, KV pass stream | DDR beat 수에 묶임: K pass 위치당 hs ek / 8 + 2 beat, V pass hs ev / 8 beat | 같음 (golden 배치 그대로) |
-| `vec_core` | `N_MAX` | op + cfg, 입력 stream(들) | q stream + scale, 또는 idx | RMSNORM `4n + C`, SWIGLU `2n + C`, ACTQ `2n + C`, ARGMAX `n` | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX |
+| `vec_core` | `N_MAX`, `IDX_W`, `LUT_PIPE`, `Q_DEPTH` | op + cfg, read beat 스트림(명령 IN0, IN1 순서) | q stream + scale, 또는 idx/max | RMSNORM `4n + 87`, SWIGLU `3n + 67`, ACTQ `2n + 59`, ARGMAX `n + 1`(S4-7 측정, `vec.md` 6.1) | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX |
 
 L3의 레지스터 맵과 kernel 호출 순서는 `arch.md` 7절.
 
@@ -272,6 +277,14 @@ L3 top/CSR과 `pim_ctrl`, `kv_rd`의 runtime 곱셈(주소 계산, descriptor �
 - `kv_rd`: 요청에 `ths`(T x hs) 입력 추가. K 행 명령 주소는 chunk마다 CH hs ek를 더하고, 마지막 chunk 길이는 T hs ek - 누적 offset, V pass 길이는 T hs ev. cycle은 그대로.
 - `kv_store`(layer x SEQ, SEQ parameter)와 `gemv_acc_top`(P x RB, P parameter)은 상수 곱이라 폭만 정리하거나 그대로 두었다.
 
+### 3.11 S4-7에서 고정한 세부 (2026-11-20)
+`rsqrt_nr`, `lut_lerp`(SIGM), `actq_core`, `rms_front`, `swi_front`, `vec_core`, `vec_csr`, `vec_top`(상태: 시뮬레이션 통과). 데이터 배치, 레지스터 맵, 실행 규칙, cycle 식, 검증 내용은 `spec/vec.md`가 원본이고 아래는 계층 관점의 요약이다. 시뮬레이션 모델의 값이며 보드 값이 아니다.
+
+- 구성: `vec_top` = `axil_slave` + `vec_csr` + 읽기 명령 순서기(IN0, IN1) + `axi_rd_eng` + `vec_core` + 쓰기 명령 순서기(OUT, SCL) + packer + `axi_wr_eng`(HP 포트 하나). `vec_core` = unpacker(int32 2개/beat, int16 4개/beat) + `rms_front` + `swi_front` + 공유 front buffer(`ram_sdp` N_MAX x 32) + `actq_core` + `argmax_red`. 기존 모듈은 수정 없이 인스턴스만 했고, `lut_lerp`에 SIGM을 추가했다(EXP2N 동작 불변, 회귀 확인).
+- 초안과 다른 점: front의 buffer를 `vec_core`에 하나 두고 op에 따라 `rms_front`(x)나 `swi_front`(silu)가 쓴다(front마다 하나 두는 것보다 BRAM36 1개 적음). `swi_front`는 h1을 받는 동안 silu까지 계산해 buffer에 둔다(HP 포트 하나라 h1 명령 뒤에 h3 명령이 온다). `rsqrt_nr`의 rm은 17비트(초안 32비트; 전수 확인 rm <= 65535). `actq_core`의 `e_o`는 e + f를 SH_W 폭으로 낸다(초안 E_W: f가 8비트 signed 전체 범위면 넘친다).
+- 호출: op RMSNORM, SWIGLU, ACTQ, ARGMAX(D10). descriptor 검사는 shift와 덧셈뿐이라 1 cycle(v = s + 1). runtime 곱셈기와 나눗셈기는 control에 없다(leaf 데이터패스의 곱만).
+- cycle: core `RMSNORM 4n + 87`, `SWIGLU 3n + 67`, `ACTQ 2n + 59`, `ARGMAX n + 1`. top CYCLES는 core + 1 + 쓰기 꼬리(보통 11 + max(L_last, 2), ARGMAX 13). token당 합(stall 없는 모델): 260K 약 15,680(RMSNORM 3,993, SWIGLU 3,005, ACTQ 8,155(85 호출), ARGMAX 527), 15M 약 85,741(16,321, 14,386, 23,019(114 호출), 32,015).
+
 ## 4. golden에 경계가 없어 `model/`에 추가해야 하는 것
 
 kernel 단위(K_GEMV, K_ACTQ, K_RMSNORM, K_ATTN2, K_SWIGLU, K_ARGMAX)는 기존 덤프 레코드로 검증할 수 있다. 아래는 leaf와 L1 단위의 경계가 없거나, kernel 덤프만으로는 부족한 것이다. 원칙: **kern.c의 kernel 함수가 스스로 호출하는 stage 함수로 쪼개서 export한다**(별도 재구현 금지). 바꾼 뒤 `make test` PASS와 기존 덤프 `cmp` 동일로 golden이 변하지 않았음을 확인한다.
@@ -281,10 +294,10 @@ kernel 단위(K_GEMV, K_ACTQ, K_RMSNORM, K_ATTN2, K_SWIGLU, K_ARGMAX)는 기존 
 | A1 | `dotp`, `mac_row` | 행별 int32 `acc`(scale 전). `k_gemv`를 `k_gemv_acc`(행 하나의 그룹 합) + `k_gemv_out`으로 분리 | **완료**. `k_dot8`(그룹 합), `k_gemv_row`(행의 S), `k_gemv_st`(행별 S trace). `k_gemv`가 이 함수들로 계산 |
 | A2 | `gemv_scale` | `(acc, wm, xm, sh) -> y` | **완료**. `k_gemv_out(S, xm, sh)`, S = acc x wm (gs = n). DPI `kd_gemv_out` |
 | A3 | `attn_score`, `exp_unit`, `attn_vacc` | score 배열(softmax 전), `mx`, 분자 배열, `sum`, `R`, `emin`, `mmax`, `G`, 위치별 `w` | **완료**. `k_attn2_st`(`k_attn_st_t`: dot, s, e, w, acc 배열과 d0, mx, sum, R, emin, mmax, G). S4-6: stage 함수 `k_attn_score`, `k_attn_exp`, `k_attn_pn`, `k_attn_w`, `k_attn_out` export(`attn_core`가 이 함수로 계산, 기존 덤프 4종 `cmp` 동일, `make test` mismatch 0), DPI `kd_attn_*`, `kd_att_*` |
-| A4 | `rms_front`, `rsqrt_nr` 연결 | `k`, `ss`, `u`, `rm`, `re`, `sh`, 양자화 전 y 배열, `ymax` | **완료**. `k_rmsnorm_st`(`k_rms_st_t`). DPI 노출은 S4-7에서 |
-| A5 | `swi_front` | 양자화 전 `g` 배열과 `amax` | **완료**. `k_swiglu_st`(`k_swi_st_t`). DPI 노출은 S4-7에서 |
+| A4 | `rms_front`, `rsqrt_nr` 연결 | `k`, `ss`, `u`, `rm`, `re`, `sh`, 양자화 전 y 배열, `ymax` | **완료**. `k_rmsnorm_st`(`k_rms_st_t`). DPI `kd_vec_*`(S4-7) |
+| A5 | `swi_front` | 양자화 전 `g` 배열과 `amax` | **완료**. `k_swiglu_st`(`k_swi_st_t`). DPI `kd_vec_*`(S4-7) |
 | A6 | `pim_core` bank image | bank RAM의 144비트 word image 생성기(가중치 + parity bit의 행 가수, `arch.md` 3.3)와 그 image로 `bank_gemv`를 돌려 `k_gemv`와 같음을 보이는 시험 | **완료**. `bimg_pack`/`bimg_unpack`(`src/bank.c`), `vt` job bimg -> `build/vec/pim/bank0..3.hex`(word = tag 16 + lane 128, 4,072/4,096 word). `make test` `m1 PIM bank image`, DPI `kd_rec_bimg` |
-| A7 | `actq_core` 내부(선택) | `aq_setup`(amax, mode, qmax -> M, R, e)과 `aq_one` export | **완료**. `k_aq_setup`, `k_aq_one`(`k_aq_t`), `k_actq_st`. DPI 노출은 S4-7에서 |
+| A7 | `actq_core` 내부(선택) | `aq_setup`(amax, mode, qmax -> M, R, e)과 `aq_one` export | **완료**. `k_aq_setup`, `k_aq_one`(`k_aq_t`), `k_actq_st`. DPI `kd_aq_setup`, `kd_aq_one`, `kd_vec_*`(S4-7) |
 | A8 | leaf 벡터 생성 | `rshr_sat`, `udiv_seq`, `lut_lerp`, `rsqrt_nr`용 random/전수 벡터. DPI-C로 kern.c를 TB에 직접 링크하는 방식을 권고(파일 없이 random 생성) | **S4-2 분 완료**: DPI-C(`tb/dpi/kdpi.c`)로 `kd_rshr`, `kd_sat32`, `kd_dot8`, `kd_gemv_out`, `kd_exp2neg`, `kd_sigmoid`, `kd_rsqrt`. `udiv_seq`는 C `/` 그대로라 DPI 함수 없이 TB의 64비트 `/`로 대조(S4-6) |
 | A9 | 덤프 설정 | K12V8 덤프(260K `d3`, 15M `d4`). 위치 필터(예: 0..7, 63, 127, 255, 511)로 attention의 긴 T를 포함하되 파일 크기 제한 | **완료**. `cfg/d3.cfg`(260K 위치 0..7, 63, 127, 255, 511, 2,388 레코드), `cfg/d4.cfg`(15M 위치 0..3, 127, 255, 1,428 레코드), 키 `pos`, `noeos` |
 | A10 | 범위 집계 | 덤프 전체의 지수(`we`, `e`), shift, `T`, `n`의 최소/최대 표 -> `E_W`, `SH_W` 확정 | **집계 완료**(`model/results/range_k12v8.txt`). 지수 0..33(signed 7비트), shift -1..40(signed 7비트). 확정은 오케스트레이터(3.1 표의 비고) |

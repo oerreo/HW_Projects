@@ -15,7 +15,7 @@
 //   0x1C WR_STALL R     cycles of the last call in which the output packer was held by the writer
 //   0x20 OPS      R     ops completed since reset (ATTN + KVW)
 //   0x24 CONFIG2  R     [7:0] HS_MAX, [15:8] NKV, [23:16] NL (BRAM KV; 0 for DDR)
-//   0x28 CONFIG3  R     [7:0] KW, [15:8] VW (BRAM word element bits), [31:16] SEQ_B (BRAM positions)
+//   0x28 CONFIG3  R     [7:0] KW, [15:8] VW (BRAM word element bits), [31:16] TMAX (BRAM positions per layer)
 //   0x40 Q_ADDR, 0x44 O_ADDR, 0x48 P_ADDR, 0x4C K_ADDR, 0x50 V_ADDR, 0x54 KS_ADDR, 0x58 VS_ADDR  RW
 //   0x5C T [15:0]   0x60 HS [7:0]   0x64 FMT [4:0] kb, [12:8] vb, [16] p_en
 //   0x68 HEAD [7:0] HEAD0, [15:8] NHEAD, [23:16] KVMUL      0x6C LAYER [7:0]

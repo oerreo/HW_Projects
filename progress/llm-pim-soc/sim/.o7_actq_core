@@ -1,0 +1,18 @@
+### actq_core: compile (RTL_DIR=../../rtl)
+### actq_core: compile done in 1 s
+### actq_core/q_cyc: vsim tb_actq_core +SEED=1 +VEC1=../../model/build/vec/m1 +VEC2=../../model/build/vec/m2 +MAXREC=200 +NSYN=200 +CYC=1 +B2B=1 (expect pass)
+actq_core/q_cyc: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [q]: checks=91380 mismatches=0 CHECKS [scale]: checks=600 mismatches=0 CHECKS [stage]: checks=1744 mismatches=0 CHECKS [handshake]: checks=217880 mismatches=0 CHECKS [record]: checks=400 mismatches=0 CHECKS [cycles]: checks=600 mismatches=0 
+### actq_core/q_stall: vsim tb_actq_core +SEED=2 +VEC2=../../model/build/vec/m2 +MAXREC=100 +NSYN=200 +GAP=20 +QSTALL=30 +QBLK=1 (expect pass)
+actq_core/q_stall: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [q]: checks=88070 mismatches=0 CHECKS [scale]: checks=300 mismatches=0 CHECKS [stage]: checks=848 mismatches=0 CHECKS [handshake]: checks=414570 mismatches=0 CHECKS [record]: checks=100 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### actq_core/rec_cyc: vsim tb_actq_core +SEED=3 +VEC1=../../model/build/vec/m1 +VEC2=../../model/build/vec/m2 +CYC=1 (expect pass)
+actq_core/rec_cyc: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [q]: checks=52992 mismatches=0 CHECKS [scale]: checks=1704 mismatches=0 CHECKS [stage]: checks=5112 mismatches=0 CHECKS [handshake]: checks=209948 mismatches=0 CHECKS [record]: checks=1704 mismatches=0 CHECKS [cycles]: checks=1704 mismatches=0 
+### actq_core/rec_stall: vsim tb_actq_core +SEED=4 +VEC1=../../model/build/vec/m1 +VEC2=../../model/build/vec/m2 +GAP=30 +QSTALL=40 +QBLK=1 (expect pass)
+actq_core/rec_stall: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [q]: checks=52992 mismatches=0 CHECKS [scale]: checks=1704 mismatches=0 CHECKS [stage]: checks=5112 mismatches=0 CHECKS [handshake]: checks=479965 mismatches=0 CHECKS [record]: checks=1704 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### actq_core/syn_cyc: vsim tb_actq_core +SEED=5 +NSYN=3000 +CYC=1 (expect pass)
+actq_core/syn_cyc: PASS (rc=0 errors=0 RANGE=0 wall=3s) CHECKS [q]: checks=1162051 mismatches=0 CHECKS [scale]: checks=3000 mismatches=0 CHECKS [stage]: checks=8262 mismatches=0 CHECKS [handshake]: checks=2487523 mismatches=0 CHECKS [cycles]: checks=3000 mismatches=0 
+### actq_core/syn_stall: vsim tb_actq_core +SEED=6 +NSYN=3000 +GAP=10 +QSTALL=50 +QBLK=1 (expect pass)
+actq_core/syn_stall: PASS (rc=0 errors=0 RANGE=0 wall=5s) CHECKS [q]: checks=1157365 mismatches=0 CHECKS [scale]: checks=3000 mismatches=0 CHECKS [stage]: checks=8230 mismatches=0 CHECKS [handshake]: checks=6635025 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### actq_core/nmax64_qd5: vsim tb_actq_core -gN_MAX=64 -gQ_DEPTH=5 +SEED=7 +NSYN=2000 +GAP=10 +QSTALL=60 +QBLK=1 (expect pass)
+actq_core/nmax64_qd5: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [q]: checks=51564 mismatches=0 CHECKS [scale]: checks=2000 mismatches=0 CHECKS [stage]: checks=5518 mismatches=0 CHECKS [handshake]: checks=561594 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### actq_core/bad_qdepth: vsim tb_actq_core -gQ_DEPTH=4 (expect elab_fail:actq_core: Q_DEPTH=4 must be >= 5)
+actq_core/bad_qdepth: PASS (rc=2 errors=1 RANGE=0 wall=0s) 

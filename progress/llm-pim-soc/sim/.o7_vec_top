@@ -1,0 +1,6 @@
+### vec_top: compile (RTL_DIR=../../rtl)
+### vec_top: compile done in 1 s
+### vec_top/q_err: vsim tb_vec_top +SEED=3 +ERR=1 +NSYN=30 +RND=1 +MAXD=2 (expect pass)
+vec_top/q_err: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [err]: checks=66 mismatches=0 CHECKS [guard]: checks=512 mismatches=0 CHECKS [csr_model]: checks=38451 mismatches=0 CHECKS [csr_read]: checks=6713 mismatches=0 CHECKS [q]: checks=6226 mismatches=0 CHECKS [scale]: checks=24 mismatches=0 CHECKS [argmax]: checks=8 mismatches=0 
+### vec_top/nmax64_idx8: vsim tb_vec_top -gN_MAX=64 -gIDX_W=8 +SEED=12 +NSYN=1000 +AMAXN=256 +ERR=1 +CYC=1 (expect pass)
+vec_top/nmax64_idx8: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [err]: checks=1036 mismatches=0 CHECKS [guard]: checks=16032 mismatches=0 CHECKS [csr_model]: checks=194676 mismatches=0 CHECKS [csr_read]: checks=41052 mismatches=0 CHECKS [q]: checks=20141 mismatches=0 CHECKS [scale]: checks=741 mismatches=0 CHECKS [argmax]: checks=261 mismatches=0 CHECKS [cycles]: checks=1002 mismatches=0 

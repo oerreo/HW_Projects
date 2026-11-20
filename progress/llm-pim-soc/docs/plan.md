@@ -20,7 +20,7 @@
 | S4-5 | `pim_bank`, `pim_gb`, `pim_ctrl`, `pim_core`, `pim_top` (GEMV PIM형 IP) | 260K 전 행렬 K_GEMV mismatch 0, `bank.c` 명령 수 일치 | 완료 (2026-11-19). 6개 모듈 단독 G4, `sim/run.sh all` 262 run fails 0 (수퍼바이저 재실행), mutation 28/28 검출(동치 1개 제외). 명령과 레지스터 맵 `spec/pim.md`. RDROW 미구현 |
 | S4-6 | `udiv_seq`, `lut_lerp`(EXP2N), `exp_unit`, `attn_score`, `attn_vacc`, `attn_core`, `kv_store`, `kv_rd`, `attn_top` | K_ATTN2(T 1..512, p와 o) mismatch 0 | 기능 완료 (2026-11-20). 9개 모듈 G4, `sim/run.sh all` 345 run fails 0, `make test` 16,669,793 항목 mismatch 0 (수퍼바이저 재실행), mutation 42/42 검출. `spec/attn.md`. 남은 것은 S4-6b |
 | S4-6b | 합성 품질 정리: L3 top과 CSR의 runtime 곱셈(주소 계산, descriptor 범위 검사)을 좁은 폭, 증분 덧셈, 순차 계산으로 교체(`attn_csr`, `attn_top`, `kv_rd`, `kv_store`, `pim_ctrl`, `pim_csr`, `gemv_acc_csr`, `gemv_acc_top`). `attn_csr` 단독 TB 추가 | 기능 불변(회귀 전 run PASS), 남은 곱셈기 목록과 폭 [계산] | 완료 (2026-11-20). runtime 곱셈기 0(상수 곱만 남음), 순차 `umul_seq`로 교체, `sim/run.sh all` 368 run fails 0 (수퍼바이저 재실행), mutation 42/42. 검사 구간만큼 호출 timing 증가(spec 문서 반영) |
-| S4-7 | `rsqrt_nr`, `lut_lerp`(SIGM), `actq_core`, `rms_front`, `swi_front`, `vec_core`, `vec_top` | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX mismatch 0 | 대기 |
+| S4-7 | `rsqrt_nr`, `lut_lerp`(SIGM), `actq_core`, `rms_front`, `swi_front`, `vec_core`, `vec_top` | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX mismatch 0 | 완료 (2026-11-20). 7개 모듈 G4 + `lut_lerp` SIGM, `sim/run.sh all` 424 run fails 0 (수퍼바이저 재실행), mutation 33/33 검출(동치 2개 제외). `spec/vec.md` |
 | S4-8 | 전체 회귀(Questa. irun 교차는 라이선스 정책상 하지 않음, 2026-11-19), 다이어그램(`visual-docs.md`), viewer 확장 | `sim/run.sh all` 전 run PASS, 로그 보관 | 대기 |
 | S5 | 시스템 통합과 FPGA 환경(G5): kernel별 오프로드 빌드 | AXI BFM 시뮬레이션 통과 | 대기 |
 | S6 | 보드 측정(G6, 사용자): kernel별 가속비, end-to-end, 추정과 실측 비교 | 결과 mismatch 0, 측정 표 | 대기 |

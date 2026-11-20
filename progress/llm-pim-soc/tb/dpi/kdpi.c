@@ -557,3 +557,201 @@ long long kd_att_get(int what, int i) {
   default: return 0;
   }
 }
+
+/* ---- S4-7: vec IP (rsqrt, sigmoid tables, actq / rmsnorm / swiglu / argmax) ---- */
+/* golden tables */
+int kd_sig_lut8(int i) { return (i >= 0 && i <= 256) ? (int)k_sig_lut(8)[i] : -1; }
+int kd_rsq_lut(int i) { return (i >= 0 && i < K_RSQ_N) ? (int)k_rsq_lut[i] : -1; }
+
+/* k_aq_setup (MANT) for amax > 0 and k_aq_one with the last setup */
+static k_aq_t AQS;
+int kd_aq_setup(int amax, int qmax, int *M, long long *R, int *e) {
+  if ((uint32_t)amax == 0) return -1;
+  k_aq_setup(&AQS, (uint32_t)amax, ACT_MANT, qmax);
+  *M = AQS.M;
+  *R = AQS.R;
+  *e = AQS.e;
+  return 0;
+}
+int kd_aq_one(int v) { return k_aq_one(&AQS, v); }
+
+/* one vec kernel call (K_ACTQ, K_RMSNORM, K_SWIGLU, K_ARGMAX) in a scratch area: inputs from the
+   TB (kd_vec_set) or from the current record (kd_vec_from_rec), kd_vec_run runs the kernel's
+   trace version (k_actq_st / k_rmsnorm_st / k_swiglu_st, MANT, LUT k_sig_lut(8); k_argmax) */
+static int VK, VN, VP[4], VOK, VIDX;
+static int32_t *VI0, *VI1, *VQ, *VY;
+static kscl_t VS;
+static k_actq_st_t VAST;
+static k_rms_st_t VRST;
+static k_swi_st_t VSST;
+
+static void vec_free(void) {
+  free(VI0); free(VI1); free(VQ); free(VY);
+  VI0 = VI1 = VQ = VY = NULL;
+  VOK = 0;
+}
+
+/* kid with prm: K_ACTQ (f, qmax), K_RMSNORM (ge, epsc, fy), K_SWIGLU (sb), K_ARGMAX () */
+int kd_vec_begin(int kid, int n, int p0, int p1, int p2) {
+  vec_free();
+  if (n < 1 || n > 65536) return -1;
+  if (kid != K_ACTQ && kid != K_RMSNORM && kid != K_SWIGLU && kid != K_ARGMAX) return -1;
+  VK = kid; VN = n; VP[0] = p0; VP[1] = p1; VP[2] = p2;
+  VI0 = calloc((size_t)n, 4); VI1 = calloc((size_t)n, 4);
+  VQ = calloc((size_t)n, 4); VY = calloc((size_t)n, 4);
+  VOK = VI0 && VI1 && VQ && VY;
+  memset(&VAST, 0, sizeof(VAST)); memset(&VRST, 0, sizeof(VRST)); memset(&VSST, 0, sizeof(VSST));
+  VS.m = VS.e = 0; VIDX = 0;
+  return VOK ? 0 : -1;
+}
+
+/* b 0: x / h1 / v (int32), b 1: g (int16, rmsnorm) or h3 (int32, swiglu) */
+int kd_vec_set(int b, int i, int v) {
+  if (!VOK || i < 0 || i >= VN) return -1;
+  if (b == 0) VI0[i] = v;
+  else if (b == 1) VI1[i] = VK == K_RMSNORM ? (int16_t)v : v;
+  else return -1;
+  return 0;
+}
+
+/* current record into the scratch area: returns its kid, -1 not a vec kernel or bad shape,
+   -2 a SWIGLU record whose LUT is not k_sig_lut(8), -3 not MANT */
+int kd_vec_from_rec(void) {
+  int n = RC.prm[0], i;
+  switch (RC.kid) {
+  case K_ACTQ:
+    if (RC.np != 4 || RC.nb != 3) return -1;
+    if (RC.prm[2] != ACT_MANT) return -3;
+    if (kd_vec_begin(K_ACTQ, n, RC.prm[1], RC.prm[3], 0)) return -1;
+    for (i = 0; i < n; i++) VI0[i] = ((const int32_t *)RC.b[0].p)[i];
+    return K_ACTQ;
+  case K_RMSNORM:
+    if (RC.np != 6 || RC.nb != 4) return -1;
+    if (RC.prm[5] != ACT_MANT) return -3;
+    if (kd_vec_begin(K_RMSNORM, n, RC.prm[2], RC.prm[3], RC.prm[4])) return -1;
+    for (i = 0; i < n; i++) {
+      VI0[i] = ((const int32_t *)RC.b[0].p)[i];
+      VI1[i] = ((const int16_t *)RC.b[1].p)[i];
+    }
+    return K_RMSNORM;
+  case K_SWIGLU:
+    if (RC.np != 3 || RC.nb != 5) return -1;
+    if (RC.prm[2] != ACT_MANT) return -3;
+    if (RC.prm[1] != 8 || RC.b[2].n != 257) return -2;
+    for (i = 0; i < 257; i++)
+      if (((const uint32_t *)RC.b[2].p)[i] != k_sig_lut(8)[i]) return -2;
+    if (kd_vec_begin(K_SWIGLU, n, 8, 0, 0)) return -1;
+    for (i = 0; i < n; i++) {
+      VI0[i] = ((const int32_t *)RC.b[0].p)[i];
+      VI1[i] = ((const int32_t *)RC.b[1].p)[i];
+    }
+    return K_SWIGLU;
+  case K_ARGMAX:
+    if (RC.np != 1 || RC.nb != 2) return -1;
+    if (kd_vec_begin(K_ARGMAX, n, 0, 0, 0)) return -1;
+    for (i = 0; i < n; i++) VI0[i] = ((const int32_t *)RC.b[0].p)[i];
+    return K_ARGMAX;
+  default:
+    return -1;
+  }
+}
+
+/* runs the kernel on the scratch inputs; q is kept as int32 (int8 / int16 values) */
+int kd_vec_run(void) {
+  int i;
+  void *qb;
+  int16_t *g16;
+  if (!VOK) return -1;
+  switch (VK) {
+  case K_ACTQ:
+    qb = malloc((size_t)VN * 2);
+    k_actq_st(VI0, VN, VP[0], ACT_MANT, VP[1], qb, &VS, &VAST);
+    for (i = 0; i < VN; i++) VQ[i] = VP[1] <= 127 ? ((int8_t *)qb)[i] : ((int16_t *)qb)[i];
+    free(qb);
+    return 0;
+  case K_RMSNORM:
+    qb = malloc((size_t)VN);
+    g16 = malloc((size_t)VN * 2);
+    for (i = 0; i < VN; i++) g16[i] = (int16_t)VI1[i];
+    VRST.y = VY;
+    k_rmsnorm_st(VI0, VN, 16, g16, VP[0], VP[1], VP[2], ACT_MANT, qb, &VS, &VRST);
+    for (i = 0; i < VN; i++) VQ[i] = ((int8_t *)qb)[i];
+    free(qb);
+    free(g16);
+    return 0;
+  case K_SWIGLU:
+    qb = malloc((size_t)VN);
+    VSST.g = VY;
+    k_swiglu_st(VI0, VI1, VN, 8, k_sig_lut(8), ACT_MANT, qb, &VS, &VSST);
+    for (i = 0; i < VN; i++) VQ[i] = ((int8_t *)qb)[i];
+    free(qb);
+    return 0;
+  case K_ARGMAX:
+    VIDX = k_argmax(VI0, VN);
+    return 0;
+  default:
+    return -1;
+  }
+}
+
+/* outputs of the last kd_vec_run differing from the current record's recorded outputs */
+int kd_vec_rec_cmp(void) {
+  int i, bad = 0;
+  if (RC.kid != VK) return -1;
+  switch (VK) {
+  case K_ACTQ:
+    for (i = 0; i < VN; i++)
+      bad += VQ[i] != (VP[1] <= 127 ? ((const int8_t *)RO[1])[i] : ((const int16_t *)RO[1])[i]);
+    bad += VS.m != ((const int32_t *)RO[2])[0];
+    bad += VS.e != ((const int32_t *)RO[2])[1];
+    return bad;
+  case K_RMSNORM:
+  case K_SWIGLU: {
+    int bq = VK == K_RMSNORM ? 2 : 3, bs = bq + 1;
+    for (i = 0; i < VN; i++) bad += VQ[i] != ((const int8_t *)RO[bq])[i];
+    bad += VS.m != ((const int32_t *)RO[bs])[0];
+    bad += VS.e != ((const int32_t *)RO[bs])[1];
+    return bad;
+  }
+  case K_ARGMAX:
+    return VIDX != ((const int32_t *)RO[1])[0];
+  default:
+    return -1;
+  }
+}
+
+/* what: 0 in0[i], 1 in1[i], 2 q[i], 3 y[i] (rmsnorm pre-quantization y / swiglu g); scalars
+   10 kid, 11 n, 12 p0, 13 p1, 14 p2, 20 s.m, 21 s.e, 22 argmax idx, 30 amax (actq: max |v|,
+   rmsnorm: max |x|, swiglu: max |g|), 31 ymax (rmsnorm), 32 k, 33 re, 34 sh, 35 ss, 36 u, 37 rm,
+   40 aq.M, 41 aq.R, 42 aq.e (valid when the quantizer amax > 0) */
+long long kd_vec_get(int what, int i) {
+  const k_aq_t *a = VK == K_ACTQ ? &VAST.aq : VK == K_RMSNORM ? &VRST.aq : &VSST.aq;
+  if (!VOK) return 0;
+  if (what < 10 && (i < 0 || i >= VN)) return 0;
+  switch (what) {
+  case 0: return VI0[i];
+  case 1: return VI1[i];
+  case 2: return VQ[i];
+  case 3: return VY[i];
+  case 10: return VK;
+  case 11: return VN;
+  case 12: return VP[0];
+  case 13: return VP[1];
+  case 14: return VP[2];
+  case 20: return VS.m;
+  case 21: return VS.e;
+  case 22: return VIDX;
+  case 30: return VK == K_ACTQ ? VAST.amax : VK == K_RMSNORM ? VRST.amax : VSST.amax;
+  case 31: return VRST.ymax;
+  case 32: return VRST.k;
+  case 33: return VRST.re;
+  case 34: return VRST.sh;
+  case 35: return (long long)VRST.ss;
+  case 36: return (long long)VRST.u;
+  case 37: return VRST.rm;
+  case 40: return a->M;
+  case 41: return a->R;
+  case 42: return a->e;
+  default: return 0;
+  }
+}

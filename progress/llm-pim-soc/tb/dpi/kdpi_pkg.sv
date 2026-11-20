@@ -95,4 +95,26 @@ package kdpi_pkg;
                  AG_G = 36, AG_HAVE = 37;
   localparam int AS_Q = 0, AS_K = 1, AS_V = 2, AS_KSM = 3, AS_KSE = 4, AS_VSM = 5, AS_VSE = 6;
 
+  // ---- S4-7: vec IP (src/kern.c k_actq_st, k_rmsnorm_st, k_swiglu_st, k_argmax, k_aq_*) ----
+  import "DPI-C" pure function int kd_sig_lut8(input int i);                 // k_sig_lut(8)[i]
+  import "DPI-C" pure function int kd_rsq_lut(input int i);                  // k_rsq_lut[i]
+  // k_aq_setup(amax, ACT_MANT, qmax) (amax != 0, unsigned 32 bits), k_aq_one with that setup
+  import "DPI-C" function int kd_aq_setup(input int amax, input int qmax, output int m,
+                                          output longint r, output int e);
+  import "DPI-C" function int kd_aq_one(input int v);
+  // scratch call: begin (kid, n, prm: ACTQ f, qmax; RMSNORM ge, epsc, fy; SWIGLU sb), set inputs
+  // (b 0 x / h1 / v, b 1 g / h3), or load the current record (returns kid; -1 not a vec kernel,
+  // -2 SWIGLU LUT is not k_sig_lut(8), -3 not MANT); run the trace kernel; get values
+  import "DPI-C" function int kd_vec_begin(input int kid, input int n, input int p0, input int p1,
+                                           input int p2);
+  import "DPI-C" function int kd_vec_set(input int b, input int i, input int v);
+  import "DPI-C" function int kd_vec_from_rec();
+  import "DPI-C" function int kd_vec_run();
+  import "DPI-C" function int kd_vec_rec_cmp();   // outputs differing from the record's
+  import "DPI-C" function longint kd_vec_get(input int what, input int i);
+  localparam int VG_IN0 = 0, VG_IN1 = 1, VG_Q = 2, VG_Y = 3, VG_KID = 10, VG_N = 11, VG_P0 = 12,
+                 VG_P1 = 13, VG_P2 = 14, VG_SM = 20, VG_SE = 21, VG_IDX = 22, VG_AMAX = 30,
+                 VG_YMAX = 31, VG_K = 32, VG_RE = 33, VG_SH = 34, VG_SS = 35, VG_U = 36, VG_RM = 37,
+                 VG_M = 40, VG_R = 41, VG_E = 42;
+
 endpackage

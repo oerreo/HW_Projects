@@ -1,0 +1,18 @@
+### vec_core: compile (RTL_DIR=../../rtl)
+### vec_core: compile done in 0 s
+### vec_core/q_cyc: vsim tb_vec_core +SEED=1 +VEC1=../../model/build/vec/m1 +VEC2=../../model/build/vec/m2 +MAXREC=12 +NSYN=100 +CYC=1 (expect pass)
+vec_core/q_cyc: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [q]: checks=48983 mismatches=0 CHECKS [scale]: checks=151 mismatches=0 CHECKS [argmax]: checks=39 mismatches=0 CHECKS [handshake]: checks=394244 mismatches=0 CHECKS [record]: checks=90 mismatches=0 CHECKS [cycles]: checks=190 mismatches=0 
+### vec_core/q_stall: vsim tb_vec_core +SEED=2 +VEC1=../../model/build/vec/m1 +MAXREC=20 +NSYN=100 +GAP=20 +QSTALL=30 +QBLK=1 (expect pass)
+vec_core/q_stall: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [q]: checks=33580 mismatches=0 CHECKS [scale]: checks=131 mismatches=0 CHECKS [argmax]: checks=41 mismatches=0 CHECKS [handshake]: checks=266478 mismatches=0 CHECKS [record]: checks=72 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### vec_core/rec_cyc: vsim tb_vec_core +SEED=3 +VEC1=../../model/build/vec/m1 +VEC2=../../model/build/vec/m2 +CYC=1 (expect pass)
+vec_core/rec_cyc: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [q]: checks=121872 mismatches=0 CHECKS [scale]: checks=2010 mismatches=0 CHECKS [argmax]: checks=18 mismatches=0 CHECKS [handshake]: checks=671072 mismatches=0 CHECKS [record]: checks=2028 mismatches=0 CHECKS [cycles]: checks=2028 mismatches=0 
+### vec_core/rec_stall: vsim tb_vec_core +SEED=4 +VEC1=../../model/build/vec/m1 +VEC2=../../model/build/vec/m2 +GAP=30 +QSTALL=40 +QBLK=1 (expect pass)
+vec_core/rec_stall: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [q]: checks=121872 mismatches=0 CHECKS [scale]: checks=2010 mismatches=0 CHECKS [argmax]: checks=18 mismatches=0 CHECKS [handshake]: checks=1280334 mismatches=0 CHECKS [record]: checks=2028 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### vec_core/syn_cyc: vsim tb_vec_core +SEED=5 +NSYN=2000 +CYC=1 +AMAXN=65536 (expect pass)
+vec_core/syn_cyc: PASS (rc=0 errors=0 RANGE=0 wall=12s) CHECKS [q]: checks=576291 mismatches=0 CHECKS [scale]: checks=1514 mismatches=0 CHECKS [argmax]: checks=486 mismatches=0 CHECKS [handshake]: checks=13832560 mismatches=0 CHECKS [cycles]: checks=2000 mismatches=0 
+### vec_core/syn_stall: vsim tb_vec_core +SEED=6 +NSYN=2000 +GAP=15 +QSTALL=50 +QBLK=1 (expect pass)
+vec_core/syn_stall: PASS (rc=0 errors=0 RANGE=0 wall=4s) CHECKS [q]: checks=573444 mismatches=0 CHECKS [scale]: checks=1486 mismatches=0 CHECKS [argmax]: checks=514 mismatches=0 CHECKS [handshake]: checks=4936101 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### vec_core/nmax64_idx8: vsim tb_vec_core -gN_MAX=64 -gIDX_W=8 -gQ_DEPTH=5 +SEED=7 +NSYN=2000 +AMAXN=256 +GAP=10 +QSTALL=30 +QBLK=1 (expect pass)
+vec_core/nmax64_idx8: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [q]: checks=39591 mismatches=0 CHECKS [scale]: checks=1469 mismatches=0 CHECKS [argmax]: checks=531 mismatches=0 CHECKS [handshake]: checks=449952 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### vec_core/bad_idx: vsim tb_vec_core -gN_MAX=1024 -gIDX_W=9 (expect elab_fail:vec_core: 2^IDX_W must be >= N_MAX)
+vec_core/bad_idx: PASS (rc=2 errors=1 RANGE=0 wall=0s) 

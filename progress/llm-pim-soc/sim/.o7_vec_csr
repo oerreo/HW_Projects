@@ -1,0 +1,14 @@
+### vec_csr: compile (RTL_DIR=../../rtl)
+### vec_csr: compile done in 0 s
+### vec_csr/q_def: vsim tb_vec_csr +SEED=1 +N_CYC=300000 +PDONE=5 +PEV=20 (expect pass)
+vec_csr/q_def: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [read]: checks=301569 mismatches=0 CHECKS [control]: checks=603138 mismatches=0 CHECKS [latched]: checks=301559 mismatches=0 CHECKS [state]: checks=301569 mismatches=0 CHECKS [coverage]: checks=117 mismatches=0 
+### vec_csr/long: vsim tb_vec_csr +SEED=2 +N_CYC=2000000 +PDONE=2 +PEV=10 (expect pass)
+vec_csr/long: PASS (rc=0 errors=0 RANGE=0 wall=4s) CHECKS [read]: checks=2001566 mismatches=0 CHECKS [control]: checks=4003132 mismatches=0 CHECKS [latched]: checks=2001556 mismatches=0 CHECKS [state]: checks=2001566 mismatches=0 CHECKS [coverage]: checks=117 mismatches=0 
+### vec_csr/busy: vsim tb_vec_csr +SEED=3 +N_CYC=1000000 +PDONE=1 +PEV=40 (expect pass)
+vec_csr/busy: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [read]: checks=1001551 mismatches=0 CHECKS [control]: checks=2003102 mismatches=0 CHECKS [latched]: checks=1001541 mismatches=0 CHECKS [state]: checks=1001551 mismatches=0 CHECKS [coverage]: checks=117 mismatches=0 
+### vec_csr/nmax64_idx8: vsim tb_vec_csr -gN_MAX=64 -gIDX_W=8 +SEED=4 +N_CYC=500000 +PDONE=5 +PEV=20 (expect pass)
+vec_csr/nmax64_idx8: PASS (rc=0 errors=0 RANGE=0 wall=3s) CHECKS [read]: checks=501561 mismatches=0 CHECKS [control]: checks=1003122 mismatches=0 CHECKS [latched]: checks=501551 mismatches=0 CHECKS [state]: checks=501561 mismatches=0 CHECKS [coverage]: checks=117 mismatches=0 
+### vec_csr/nmax1000: vsim tb_vec_csr -gN_MAX=1000 -gIDX_W=10 +SEED=5 +N_CYC=500000 +PDONE=5 +PEV=20 (expect pass)
+vec_csr/nmax1000: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [read]: checks=501558 mismatches=0 CHECKS [control]: checks=1003116 mismatches=0 CHECKS [latched]: checks=501548 mismatches=0 CHECKS [state]: checks=501558 mismatches=0 CHECKS [coverage]: checks=117 mismatches=0 
+### vec_csr/bad_idx: vsim tb_vec_csr -gN_MAX=1024 -gIDX_W=9 (expect elab_fail:vec_csr: IDX_W=9 must be 1..30 with 2^IDX_W >= N_MAX)
+vec_csr/bad_idx: PASS (rc=2 errors=1 RANGE=0 wall=0s) 

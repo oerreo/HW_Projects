@@ -120,3 +120,16 @@
 - 한계: 합성하지 않았으므로 DSP 감소와 100 MHz 타이밍 효과는 [계산]/[추정]. 무작위 주소 run의 CYCLES 차이가 정확히 검사 cycle만큼이 아닌 경우는 BFM 난수열 밀림으로 판단(호출 단위 대조는 안 함).
 - 프로세스 노출(agent 보고): 대기용 감시 명령에 프로젝트 경로가 들어가 약 15분씩 두 번 보였다. `process-privacy.md`에 대기 명령 규칙 추가.
 - 다음: S4-7(vec IP).
+
+## 2026-11-20: S4-7 vec IP  [notion: pending]
+- 한 일(hw-worker): L0 `rsqrt_nr`, `lut_lerp`에 SIGM 모드, L1 `actq_core`, `rms_front`, `swi_front`, L2 `vec_core`, L3 `vec_csr`, `vec_top`과 TB, `docs/spec/vec.md`. `lut_pkg.sv`에 SIGM, RSQ 표 추가(EXP2N 표는 불변). `model/src`는 변경 없음.
+- 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 424 run, fails 0(기존 368 + `lut_lerp` SIGM 4 + 신규 52).
+- agent 보고(재실행 안 함): 두 모델의 K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX 레코드 전부에서 mismatch 0(`vec_top`은 forward 순서로 260K 1,224 호출, 15M 804 호출). `actq_core`를 rmsnorm, swiglu가 공유해도 bit-exact임을 실행으로 확인(S4-0의 코드 대조 판단). mutation 35개 중 33개 검출, 2개 동치. 첫 회차 생존 중 2개는 TB 공백(특정 amax에서만 드러나는 clamp)이라 방향성 벡터 추가. lint 경고 0. top과 CSR에 runtime 곱셈 없음(descriptor 검사는 shift와 덧셈, 검사 1 cycle).
+- cycle [측정, 시뮬레이션, latency 1 모델]: `vec_core` RMSNORM 4n + 87, SWIGLU 3n + 67, ACTQ 2n + 59, ARGMAX n + 1(S4-0 추정: 4n + 130, 2n + 110, 2n + 54 + L). SWIGLU가 3n인 것은 HP 포트 하나로 h1, h3를 차례로 읽기 때문.
+- token당 합 [측정, 시뮬레이션]: 260K RMSNORM 3,993 / SWIGLU 3,005 / ACTQ 8,155(85 호출) / ARGMAX 527, 합 약 15,680. 15M 16,321 / 14,386 / 23,019(114 호출) / 32,015, 합 약 85,741. head별 ACTQ가 호출 수의 대부분이고 호출마다 나눗셈 두 번(약 52 cycle)이 지배한다.
+- 자원 [계산, 합성 안 함]: DSP 약 16(S4-0 추정 14), BRAM36 2(추정 0.5~1). 260K PIM형 시스템 BRAM36 합계 127 -> 129/140.
+- 관찰(오케스트레이터): 260K 시스템의 token당 cycle(시뮬레이션)은 PIM형 GEMV 약 4,500, attention 위치 512에서 약 32,500, vec 약 15,700이다. GEMV를 PIM으로 줄이면 병목이 attention과 양자화로 옮겨 간다. head별 ACTQ를 attention 앞단에 융합하는 것은 S5의 검토 대상(arch.md 5.1의 권고와 같은 방향).
+- 수정(오케스트레이터): `attn_csr` 헤더 주석의 CONFIG3 필드 이름을 코드와 같게(TMAX). `pim.md`의 가속기형 대비 비율 문장을 S4-6b 재측정값으로.
+- 한계: 100 MHz 타이밍, LUT 수, DSP 매핑 미확인. CYCLES는 latency 1 모델 값. `rsqrt_nr`의 Newton 중간값 폭은 해석적 상한과 시뮬레이션 검사로만 확인.
+- 프로세스 노출(agent 보고): 1초 미만 명령 두 건에 테스트 이름과 경로가 보임. TB 버그로 4.8 GB 로그가 생겨 즉시 중단하고 삭제, 이후 job에 파일 크기 제한을 넣음.
+- 다음: S4-8(전체 정리, viewer), S5(시스템 통합) 계획.

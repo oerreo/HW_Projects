@@ -1,0 +1,14 @@
+### rsqrt_nr: compile (RTL_DIR=../../rtl)
+### rsqrt_nr: compile done in 1 s
+### rsqrt_nr/q_def: vsim tb_rsqrt_nr +SEED=1 +N=20000 +NPER=100 (expect pass)
+rsqrt_nr/q_def: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [table]: checks=48 mismatches=0 CHECKS [value]: checks=27313 mismatches=0 CHECKS [handshake]: checks=901122 mismatches=0 CHECKS [hold]: checks=40864 mismatches=0 
+### rsqrt_nr/full: vsim tb_rsqrt_nr +SEED=2 +N=1000000 +NPER=4000 (expect pass)
+rsqrt_nr/full: PASS (rc=0 errors=0 RANGE=0 wall=12s) CHECKS [table]: checks=48 mismatches=0 CHECKS [value]: checks=1171113 mismatches=0 CHECKS [handshake]: checks=38648638 mismatches=0 CHECKS [hold]: checks=1757622 mismatches=0 
+### rsqrt_nr/uw20: vsim tb_rsqrt_nr -gU_W=20 +SEED=3 +N=200000 +NPER=4000 (expect pass)
+rsqrt_nr/uw20: PASS (rc=0 errors=0 RANGE=0 wall=4s) CHECKS [table]: checks=48 mismatches=0 CHECKS [value]: checks=281485 mismatches=0 CHECKS [handshake]: checks=9288770 mismatches=0 CHECKS [hold]: checks=422108 mismatches=0 
+### rsqrt_nr/uw62: vsim tb_rsqrt_nr -gU_W=62 +SEED=4 +N=300000 +NPER=2000 (expect pass)
+rsqrt_nr/uw62: PASS (rc=0 errors=0 RANGE=0 wall=4s) CHECKS [table]: checks=48 mismatches=0 CHECKS [value]: checks=428593 mismatches=0 CHECKS [handshake]: checks=14142048 mismatches=0 CHECKS [hold]: checks=642127 mismatches=0 
+### rsqrt_nr/q_neg: vsim tb_rsqrt_nr +SEED=5 +N=3000 +NPER=10 +NEG=1 (expect assert:RSQ_START=3)
+rsqrt_nr/q_neg: PASS (rc=0 errors=3 RANGE=0 RSQ_START=3 wall=2s) CHECKS [table]: checks=48 mismatches=0 CHECKS [value]: checks=6533 mismatches=0 CHECKS [handshake]: checks=215608 mismatches=0 CHECKS [hold]: checks=9807 mismatches=0 
+### rsqrt_nr/bad_uw: vsim tb_rsqrt_nr -gU_W=63 (expect elab_fail:rsqrt_nr: U_W=63 must be 1..62)
+rsqrt_nr/bad_uw: PASS (rc=2 errors=1 RANGE=0 wall=0s) 

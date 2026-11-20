@@ -1,0 +1,14 @@
+### rms_front: compile (RTL_DIR=../../rtl)
+### rms_front: compile done in 1 s
+### rms_front/q_cyc: vsim tb_rms_front +SEED=1 +VEC1=../../model/build/vec/m1 +VEC2=../../model/build/vec/m2 +NSYN=100 +CYC=1 (expect pass)
+rms_front/q_cyc: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [y]: checks=75145 mismatches=0 CHECKS [q]: checks=75145 mismatches=0 CHECKS [scale]: checks=310 mismatches=0 CHECKS [stage]: checks=2153 mismatches=0 CHECKS [handshake]: checks=620 mismatches=0 CHECKS [record]: checks=210 mismatches=0 CHECKS [cycles]: checks=310 mismatches=0 
+### rms_front/q_stall: vsim tb_rms_front +SEED=2 +VEC1=../../model/build/vec/m1 +NSYN=100 +GAP=20 +QSTALL=30 +QBLK=1 (expect pass)
+rms_front/q_stall: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [y]: checks=43548 mismatches=0 CHECKS [q]: checks=43548 mismatches=0 CHECKS [scale]: checks=232 mismatches=0 CHECKS [stage]: checks=1604 mismatches=0 CHECKS [handshake]: checks=464 mismatches=0 CHECKS [record]: checks=132 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### rms_front/rec_stall: vsim tb_rms_front +SEED=3 +VEC1=../../model/build/vec/m1 +VEC2=../../model/build/vec/m2 +GAP=30 +QSTALL=40 +QBLK=1 (expect pass)
+rms_front/rec_stall: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [y]: checks=30912 mismatches=0 CHECKS [q]: checks=30912 mismatches=0 CHECKS [scale]: checks=210 mismatches=0 CHECKS [stage]: checks=1470 mismatches=0 CHECKS [handshake]: checks=420 mismatches=0 CHECKS [record]: checks=210 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### rms_front/syn_cyc: vsim tb_rms_front +SEED=4 +NSYN=1500 +CYC=1 (expect pass)
+rms_front/syn_cyc: PASS (rc=0 errors=0 RANGE=0 wall=3s) CHECKS [y]: checks=545960 mismatches=0 CHECKS [q]: checks=545960 mismatches=0 CHECKS [scale]: checks=1500 mismatches=0 CHECKS [stage]: checks=10213 mismatches=0 CHECKS [handshake]: checks=3000 mismatches=0 CHECKS [cycles]: checks=1500 mismatches=0 
+### rms_front/syn_stall: vsim tb_rms_front +SEED=5 +NSYN=1500 +GAP=10 +QSTALL=50 +QBLK=1 (expect pass)
+rms_front/syn_stall: PASS (rc=0 errors=0 RANGE=0 wall=4s) CHECKS [y]: checks=576174 mismatches=0 CHECKS [q]: checks=576174 mismatches=0 CHECKS [scale]: checks=1500 mismatches=0 CHECKS [stage]: checks=10242 mismatches=0 CHECKS [handshake]: checks=3000 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### rms_front/nmax64: vsim tb_rms_front -gN_MAX=64 +SEED=6 +NSYN=2000 +GAP=10 +QSTALL=30 +QBLK=1 (expect pass)
+rms_front/nmax64: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [y]: checks=51490 mismatches=0 CHECKS [q]: checks=51490 mismatches=0 CHECKS [scale]: checks=2000 mismatches=0 CHECKS [stage]: checks=13617 mismatches=0 CHECKS [handshake]: checks=4000 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 

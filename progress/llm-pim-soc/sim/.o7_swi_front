@@ -1,0 +1,14 @@
+### swi_front: compile (RTL_DIR=../../rtl)
+### swi_front: compile done in 1 s
+### swi_front/q_cyc: vsim tb_swi_front +SEED=1 +VEC1=../../model/build/vec/m1 +VEC2=../../model/build/vec/m2 +NSYN=100 +CYC=1 (expect pass)
+swi_front/q_cyc: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [g]: checks=76905 mismatches=0 CHECKS [silu]: checks=76905 mismatches=0 CHECKS [q]: checks=76905 mismatches=0 CHECKS [scale]: checks=196 mismatches=0 CHECKS [stage]: checks=365 mismatches=0 CHECKS [handshake]: checks=392 mismatches=0 CHECKS [record]: checks=96 mismatches=0 CHECKS [cycles]: checks=196 mismatches=0 
+### swi_front/q_stall: vsim tb_swi_front +SEED=2 +VEC1=../../model/build/vec/m1 +NSYN=100 +GAP=20 +QSTALL=30 +QBLK=1 (expect pass)
+swi_front/q_stall: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [g]: checks=47959 mismatches=0 CHECKS [silu]: checks=47959 mismatches=0 CHECKS [q]: checks=47959 mismatches=0 CHECKS [scale]: checks=160 mismatches=0 CHECKS [stage]: checks=296 mismatches=0 CHECKS [handshake]: checks=320 mismatches=0 CHECKS [record]: checks=60 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### swi_front/rec_stall: vsim tb_swi_front +SEED=3 +VEC1=../../model/build/vec/m1 +VEC2=../../model/build/vec/m2 +GAP=30 +QSTALL=40 +QBLK=1 (expect pass)
+swi_front/rec_stall: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [g]: checks=37968 mismatches=0 CHECKS [silu]: checks=37968 mismatches=0 CHECKS [q]: checks=37968 mismatches=0 CHECKS [scale]: checks=96 mismatches=0 CHECKS [stage]: checks=192 mismatches=0 CHECKS [handshake]: checks=192 mismatches=0 CHECKS [record]: checks=96 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### swi_front/syn_cyc: vsim tb_swi_front +SEED=4 +NSYN=1500 +CYC=1 (expect pass)
+swi_front/syn_cyc: PASS (rc=0 errors=0 RANGE=0 wall=3s) CHECKS [g]: checks=602898 mismatches=0 CHECKS [silu]: checks=602898 mismatches=0 CHECKS [q]: checks=602898 mismatches=0 CHECKS [scale]: checks=1500 mismatches=0 CHECKS [stage]: checks=2629 mismatches=0 CHECKS [handshake]: checks=3000 mismatches=0 CHECKS [cycles]: checks=1500 mismatches=0 
+### swi_front/syn_stall: vsim tb_swi_front +SEED=5 +NSYN=1500 +GAP=10 +QSTALL=50 +QBLK=1 (expect pass)
+swi_front/syn_stall: PASS (rc=0 errors=0 RANGE=0 wall=3s) CHECKS [g]: checks=561785 mismatches=0 CHECKS [silu]: checks=561785 mismatches=0 CHECKS [q]: checks=561785 mismatches=0 CHECKS [scale]: checks=1500 mismatches=0 CHECKS [stage]: checks=2629 mismatches=0 CHECKS [handshake]: checks=3000 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### swi_front/nmax64: vsim tb_swi_front -gN_MAX=64 +SEED=6 +NSYN=2000 +GAP=10 +QSTALL=30 +QBLK=1 (expect pass)
+swi_front/nmax64: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [g]: checks=52855 mismatches=0 CHECKS [silu]: checks=52855 mismatches=0 CHECKS [q]: checks=52855 mismatches=0 CHECKS [scale]: checks=2000 mismatches=0 CHECKS [stage]: checks=3472 mismatches=0 CHECKS [handshake]: checks=4000 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
