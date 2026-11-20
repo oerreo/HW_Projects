@@ -154,7 +154,7 @@ pim_core:
 | 같은 것, 레코드마다 WRGB + MACAB 한 run(36 run) | 약 6,950 | |
 | LDW 36개(가중치 전체 적재) 한 run | 36,629 (S4-6: 36,305) | 행 레코드 288,704 B = 36,088 beat + 오버헤드, 초기화 1회. S4-6b: LDW마다 LDW_CYC 9 = +324 |
 
-- GEMV 가속기형 P = 1의 같은 260K token은 37,596 CYCLES(`gemv_acc.md` 5절, 같은 메모리 모델)다. 비율: MAC cycle만 36,446 / 4,072 = 8.95배(`arch.md` 3.4 [계산]), run CYCLES 37,596 / 4,504 = **8.35배**(token 한 run), 37,596 / 4,670 = 8.05배(layer마다 run) [측정, 시뮬레이션].
+- GEMV 가속기형 P = 1의 같은 260K token은 37,903~37,938 CYCLES(S4-6b 재측정, `gemv_acc.md` 5절, 같은 메모리 모델. S4-6까지는 37,596)다. 비율: MAC cycle만 36,446 / 4,072 = 8.95배(`arch.md` 3.4 [계산]), run CYCLES 37,903~37,938 / 4,499~4,506 = **8.41~8.43배**(token 한 run), / 4,663~4,676 = 8.11~8.14배(layer마다 run) [측정, 시뮬레이션].
 - 호출당 고정 항: token 한 run에서 MAC 외 432 cycle / token(WRGB 21회의 x 적재(8~22 beat + engine 왕복)와 MACAB 36회의 1 cycle, run 종료의 y 쓰기 꼬리). 보드의 DDR latency와 ARM 쪽 비용(push 4~5회 AXI-Lite 쓰기 x 57)은 포함되지 않았다.
 
 ### 6.3 `pim_top` MACAB 하나의 run (stall 없음, latency 1)

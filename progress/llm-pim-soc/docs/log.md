@@ -110,7 +110,7 @@
 - 프로세스 노출(agent 보고): mutant 번호(숫자)를 명령행 환경 대입으로 넣은 것, 1초 미만의 패치 명령에 TB 경로가 보인 것 두 건.
 - 다음: S4-6b, 이어서 S4-7(vec IP).
 
-## 2026-11-20: S4-6b 합성 품질 정리(runtime 곱셈 제거)  [notion: pending]
+## 2026-11-20: S4-6b 합성 품질 정리(runtime 곱셈 제거)  [notion: synced]
 - 한 일(hw-worker): L0 `umul_seq`(순차 shift-add 곱셈기) 추가. `attn_csr`, `attn_top`, `kv_rd`, `kv_store`, `pim_ctrl`, `pim_csr`, `pim_top`, `gemv_acc_csr`의 주소 계산과 descriptor 범위 검사를 상수 shift, 증분 덧셈, 순차 계산으로 교체. `attn_csr`의 runtime 나눗셈(`kvmax`)도 상수 곱 비교 또는 `udiv_seq`로 교체. `attn_csr` 단독 TB 추가. spec 문서(`attn.md`, `gemv_acc.md`, `pim.md`, `hierarchy.md` 3.10) 갱신.
 - 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 368 run, fails 0(기존 345 + `umul_seq` 13 + `attn_csr` 10). RTL 재검색에서 top과 CSR에 남은 곱셈은 상수 곱과 시뮬레이션 전용 검사뿐(수퍼바이저 확인).
 - agent 보고(재실행 안 함): 판정(ERR 조건), 주소, 데이터는 그대로. mutation 42/42 검출, lint 경고 0. 순차 유닛 수: `attn_csr` umul 5개(BRAM KV) 또는 6개 + udiv 1(DDR KV), `gemv_acc_csr` 1, `pim_csr` 2, `pim_ctrl` 1.

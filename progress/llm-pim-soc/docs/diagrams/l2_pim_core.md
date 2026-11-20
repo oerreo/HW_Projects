@@ -1,7 +1,8 @@
 # L2 pim_core: block, data flow, control flow, cycle 식
 
-- 원본과 확인일: 확인일 2026-11-19. `rtl/l2/pim_core.sv`(포트, 인스턴스, router, gather mux), `rtl/l1/pim_ctrl.sv`(FSM `state_t`, round 발행, gather delay line), `rtl/l1/pim_bank.sv`, `rtl/l1/pim_gb.sv`, `docs/spec/pim.md` 5, 6절. 신호 이름, 비트폭, 전이 조건은 RTL 선언 그대로다.
+- 원본과 확인일: 확인일 2026-11-19, S4-6b 반영 2026-11-20(LDW 읽기 명령 지연만). `rtl/l2/pim_core.sv`(포트, 인스턴스, router, gather mux), `rtl/l1/pim_ctrl.sv`(FSM `state_t`, round 발행, gather delay line), `rtl/l1/pim_bank.sv`, `rtl/l1/pim_gb.sv`, `docs/spec/pim.md` 5, 6절. 신호 이름, 비트폭, 전이 조건은 RTL 선언 그대로다.
 - 상태: S4-5에서 단독 G4 통과(260K K_GEMV 레코드 432개 42,144행 y mismatch 0, `log.md` S4-5, `./sim/run.sh all` 262 run, fails 0 [측정, 수퍼바이저 재실행]). 합성, 타이밍, 보드는 미확인.
+- S4-6b 변경(이 문서의 갱신 범위): `pim_ctrl`이 LDW 읽기 길이 `rows x 8 (1 + ceil(n/8))`를 runtime 조합 곱 대신 `umul_seq`(`u_lmul`, `ROWS_W` x `LB8_W`)로 구해, LDW 읽기 명령이 명령 handshake cycle h보다 `LDW_CYC`(= `LB8_W` + 1, `NMAX` 1024에서 `LB8_W` 8이라 9) cycle 늦은 h + 1 + `LDW_CYC`에 나온다. WRGB는 h + 1 그대로, MACAB와 FSM, bank, gather, 아래 cycle 식(6.1)은 바뀌지 않았다. 재검증 `pim_core` 12 run, `pim_ctrl` 14 run 통과(`pim.md` 7절), `./sim/run.sh all` 368 run, fails 0 [측정, 수퍼바이저 재실행, `log.md` S4-6b].
 - 기준 parameter: `NB` 4, `LB` 16, `DEPTH` 4096(bank당 word), `NMAX` 1024, `DOT_PIPE` 2, `SCALE_PIPE` 3, `Y_DEPTH` 32, `ROWS_W` 16. 이때 `AA` = 12, `NW` = 11, `GA` = 6, `BI_W` = 2, `ACC_W` = 25, `W_WORD` = 144, `L_BANK` = 5. 다른 parameter 값의 폭은 같은 식으로 달라진다.
 - **이 문서는 RTL을 읽어서 그린 것이다. 시뮬레이션 파형이 아니고, 파형은 그리지 않았다.** cycle 식만 `pim.md` 6.1의 시뮬레이션 확인(stall 없는 모든 MACAB에서 일치)을 따른다.
 
@@ -106,7 +107,7 @@ flowchart LR
 ```
 
 - 행 r의 bank는 `lrow_q[BI_W-1:0]`(= r mod 4), word 주소는 `rbase_q + l_w`. `rbase_q`는 `lrow_q mod 4 == NB - 1`인 행의 마지막 beat에서 `nw_q`만큼 증가한다(round 하나가 끝날 때).
-- 읽기 길이 `rd_cmd_bytes_o`는 `rows x (nb8 + 1) x 8` byte(`rdc_bytes_q`)다.
+- 읽기 길이 `rd_cmd_bytes_o`는 `rows x (nb8 + 1) x 8` byte(`rdc_bytes_q`)다. S4-6b부터 `u_lmul`(`umul_seq`, A = `cmd_rows_i`, B = `((cmd_n_i + 7) >> 3) + 1`, `LB8_W`비트)이 명령 handshake cycle h에 시작하고, 그 `done_o`(`lm_done`, cycle h + `LDW_CYC`)에 `rdc_bytes_q <= {lprod, 3'b000}`과 `rdc_q` <= 1이 되어 `rd_cmd_valid_o`는 h + 1 + `LDW_CYC`부터 선다. 그동안 FSM은 S_LDATA에서 데이터를 기다린다(`ld_ready_o` = 1, 읽기 명령이 나가기 전에는 데이터가 오지 않는다). 읽기 주소 `rdc_addr_q`는 h에 latch한다. WRGB의 읽기 명령(`rdc_bytes_q` = n)은 h + 1에 선다.
 
 ### 2.2 WRGB: x -> global buffer
 

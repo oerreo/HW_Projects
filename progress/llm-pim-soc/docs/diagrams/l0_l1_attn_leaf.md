@@ -194,4 +194,4 @@ flowchart LR
 | 합 (`attn_core` 1개) | | 33 |
 
 - 개수와 합은 `attn.md` 8절의 [계산]과 같고, 이 문서는 RTL의 곱셈식 위치와 폭이 그 표와 맞는지 확인했다. H_PAR 2면 engine 2개라 66개, 상수곱과 `lut_lerp`의 곱을 LUT로 옮기면 줄 수 있으나 어느 쪽이 되는지는 합성하지 않아 알 수 없다.
-- 주소 계산과 descriptor 검사의 곱셈(`attn_csr`, `attn_top`, `kv_rd`, `kv_store`)은 이 표에 없다. S4-6b에서 정리 중이며 정리 뒤의 곱셈기 목록은 그 결과를 따른다(`log.md` S4-6의 "문제").
+- 주소 계산과 descriptor 검사의 곱셈(`attn_csr`, `attn_top`, `kv_rd`, `kv_store`)은 이 표에 없다. S4-6b에서 순차 곱(`umul_seq`)과 증분 덧셈으로 바꿨고 control 쪽 runtime 곱셈기와 나눗셈기는 남지 않았다(남은 곱은 상수 곱뿐, `attn.md` 8절 [계산]). `umul_seq`는 `l0_umul_seq.md`, 순차 검사 단계는 `l3_attn_top.md` 3.4절.

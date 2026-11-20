@@ -244,6 +244,7 @@ C0 = 54 + DOT_PIPE + SH_PIPE + RS_PIPE + LUT_PIPE      (기본 PIPE 2/1/1/2에�
 | 15M, KV DDR, H_PAR 1 | 5,514 | - | - | 101,526 | **198,294** | - | T 256에서 196,416 |
 | 15M, KV DDR, H_PAR 2 | 3,102 | - | - | 51,108 | **99,496** | - | - |
 
+- **S4-6b 갱신 알림(2026-11-20)**: 이 표와 아래 KVW 값은 S4-6 시점의 값이다. S4-6b에서 `attn_csr`의 검사 구간(BRAM 빌드 10 cycle, DDR 빌드 18 cycle)이 op마다 붙어 값이 바뀌었다(예: 260K H_PAR 2 T 512 32,420 -> 32,470, 15M H_PAR 1 T 256 198,294 -> 198,403, KVW op 38 -> 48). 재측정 표는 `l3_attn_top.md` 5절. `attn_core` 자체(위 cycle 식 `C`)는 바뀌지 않았다.
 - KVW(KV_SRC 0, kv head 4개를 쓰는 op 하나): 평균 38 cycle(2,560 op), 260K token당 layer 5개 = 190 cycle. `attn_core`와 무관한 `kv_store` 쓰기 경로.
 - 포함하지 않은 것: 보드의 DDR와 HP latency, ARM 쪽 비용(AXI-Lite 쓰기, cache flush와 invalidate, polling), 100 MHz 타이밍.
 - 15M DDR H_PAR 1의 head당 값(`198,294 / 36 = 5,508 = 21T + 132`)과 260K H_PAR 2의 절편 분해는 `attn.md` 6.2의 추정이며 이 문서에서 다시 유도하지 않았다.
