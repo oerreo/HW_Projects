@@ -86,7 +86,7 @@
 - 한계: 100 MHz 타이밍, LUT 수 미확인. CYCLES 식은 기본 parameter와 stall 없는 모델에서만 확인. P = 2의 15M 전체는 stall 있는 run만. irun 교차는 S4-8. hierarchy.md에 `argmax_red`의 `max_o`와 S4-4 세부 반영 필요.
 - 다음: S4-5(GEMV PIM형 IP).
 
-## 2026-11-19: S4-5 GEMV PIM형 IP  [notion: pending]
+## 2026-11-19: S4-5 GEMV PIM형 IP  [notion: synced]
 - 한 일(hw-worker): `rtl/l1/pim_gb.sv`, `pim_bank.sv`, `pim_ctrl.sv`, `rtl/l2/pim_core.sv`, `rtl/l3/pim_csr.sv`, `pim_top.sv`(직접 작성 RTL)와 모듈별 TB, `docs/spec/pim.md`(명령 형식, 레지스터 맵, 실행 규칙, cycle 식). 기존 RTL은 수정 없음.
 - 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 262 run, fails 0(기존 201 + 신규 61).
 - agent 보고(재실행 안 함): 260K K_GEMV 레코드 432개(42,144행) 전부 y mismatch 0(layer 순서 실행, token 한 run, 레코드별 run). LDW 뒤 bank 메모리 == `bimg_pack` image. 명령 수 카운터 == `bank_stat_t`. mutation 29개 중 28개 검출, 1개는 동치(FLUSH는 core가 idle일 때만 시작). lint 경고 0.

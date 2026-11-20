@@ -1,5 +1,6 @@
-# 계층 트리와 구현 상태 (S4-4 시점)
+# 계층 트리와 구현 상태 (S4-5 시점)
 
+- S4-5 갱신: `pim_gb`, `pim_bank`, `pim_ctrl`, `pim_core`, `pim_csr`, `pim_top`을 "통과"로 바꿨다. 근거 `docs/log.md` S4-5, `./sim/run.sh all` 262 run, fails 0 [측정, 수퍼바이저 재실행]. 합성, 타이밍, 보드는 미확인. 다이어그램 `l2_pim_core.md`, `l3_pim_top.md`, 비교 `pim_vs_accel.md`.
 - S4-4 갱신: `argmax_red`, `gemv_acc_csr`, `gemv_acc_top`을 "통과"로 바꿨다. 근거 `docs/log.md` S4-4, `./sim/run.sh all` 201 run, fails 0 [측정, 수퍼바이저 재실행]. 합성, 타이밍, 보드는 미확인. 아래 첫 항목의 "S4-3 시점" 근거 문장은 S4-3까지의 내용이다.
 - 원본과 확인일: 확인일 2026-11-19. 계층과 모듈 목록은 `docs/spec/hierarchy.md` 1절, 상태는 `docs/log.md`의 S4-2 항목과 `docs/plan.md`, RTL 파일 존재(`rtl/pkg/`, `rtl/l0/`, `rtl/l1/`, `rtl/l2/`)로 확인했다.
 - 표기:
@@ -19,7 +20,9 @@ flowchart TD
     sysa["L4 sys_a_top<br/>15M 가속기형 시스템 (S5)"]:::plan
 
     acc["L3 gemv_acc_top<br/>통과 (S4-4)<br/>AXI-Lite CSR + HP master + gemv_core x P"]:::done
-    pim["L3 pim_top<br/>CSR + 명령 FIFO + HP master + pim_core<br/>(하위는 아래 표)"]:::plan
+    pim["L3 pim_top<br/>통과 (S4-5)<br/>CSR + 명령 FIFO + HP master + pim_core"]:::done
+    pimcore["L2 pim_core<br/>통과 (S4-5)"]:::done
+    pimsub["L1 pim_ctrl, pim_gb, pim_bank<br/>L3 pim_csr<br/>통과 (S4-5)"]:::done
     attn["L3 attn_top<br/>(하위는 아래 표)"]:::plan
     vec["L3 vec_top<br/>(하위는 아래 표)"]:::plan
 
@@ -54,7 +57,15 @@ flowchart TD
     core -->|"u_yfifo"| fifo
     mac -->|"u_dotp"| dotp
     scale -->|"u_rshr"| rshr
-    pim -.->|"mac_row, gemv_scale, ram_sdp, sync_fifo 재사용 (계획)"| mac
+    pim --> pimcore
+    pim --> pimsub
+    pim --> axil
+    pim --> rde
+    pim --> wre
+    pimcore -->|"u_bank의 u_mac"| mac
+    pimcore -->|"u_scale"| scale
+    pimcore -->|"u_yfifo"| fifo
+    pimsub -->|"pim_bank u_ram, pim_gb u_lo u_hi"| ram
 
     classDef done fill:#d8f0d8,stroke:#2e7d32,stroke-width:2px,color:#000
     classDef plan fill:#eeeeee,stroke:#777777,stroke-width:2px,stroke-dasharray:5 5,color:#000
@@ -72,10 +83,10 @@ flowchart TD
 | `axil_slave` | L1 | RTL | 통과 (S4-3, `pqc-ntt-ip`에서 복사) | `rtl/l1/axil_slave.sv`, `hierarchy.md` 3.6 |
 | `bw_top` | L3 | RTL (측정 top) | 시뮬레이션 통과 (S4-3), 보드 미실행. 다이어그램 `l3_bw_top.md` | `rtl/l3/bw_top.sv`, `log.md` S4-3 |
 | `gemv_acc_csr`, `gemv_acc_top`, `argmax_red` | L3, L0 | RTL | 통과 (S4-4), 다이어그램 `l3_gemv_acc_top.md` | `rtl/l3/gemv_acc_csr.sv`, `rtl/l3/gemv_acc_top.sv`, `rtl/l0/argmax_red.sv`, `log.md` S4-4 |
-| `pim_bank`, `pim_gb`, `pim_ctrl`, `pim_core`, `pim_csr`, `pim_top` | L1 에서 L3 | RTL | 계획 (S4-5) | 같음 |
+| `pim_bank`, `pim_gb`, `pim_ctrl`, `pim_core`, `pim_csr`, `pim_top` | L1 에서 L3 | RTL | 통과 (S4-5), 260K K_GEMV 432 레코드 y mismatch 0. 다이어그램 `l2_pim_core.md`, `l3_pim_top.md` | `rtl/l1/pim_*.sv`, `rtl/l2/pim_core.sv`, `rtl/l3/pim_csr.sv`, `rtl/l3/pim_top.sv`, `log.md` S4-5 |
 | `udiv_seq`, `lut_lerp`, `exp_unit`, `attn_score`, `attn_vacc`, `attn_ctrl`, `attn_core`, `kv_store`, `kv_rd`, `attn_csr`, `attn_top` | L0 에서 L3 | RTL | 계획 (S4-6) | 같음 |
 | `rsqrt_nr`, `actq_core`, `rms_front`, `swi_front`, `vec_core`, `vec_top` | L0 에서 L3 | RTL | 계획 (S4-7) | 같음 |
 | `sys_p_top`, `sys_a_top` | L4 | RTL | 계획 (S5) | 같음 |
 
 - 트리의 `gemv_core` 내부 인스턴스 이름(`u_xbuf`, `u_mac`, `u_scale`, `u_yfifo`, `u_dotp`, `u_rshr`)은 RTL에서 확인한 이름이다.
-- `pim_core` 쪽의 `mac_row`(LANES = 16), `gemv_scale`, `ram_sdp` 재사용은 스펙의 계획이다. 이 문서는 `gemv_core`에서 쓰는 구성(LANES = 8)만 RTL로 확인했다.
+- `pim_core` 쪽 재사용은 RTL로 확인했다: `pim_bank`가 `ram_sdp`와 `mac_row`(LANES = 16), `pim_core`가 `gemv_scale`과 `sync_fifo`(y FIFO), `pim_top`이 `axil_slave`, `axi_rd_eng`, `axi_wr_eng`, `sync_fifo`(명령 FIFO)를 인스턴스한다. `pim_gb`는 `ram_sdp` 두 개를 쓴다.
