@@ -1,4 +1,6 @@
-# 계층 트리와 구현 상태 (S4-6b 시점)
+# 계층 트리와 구현 상태 (S4-7 시점)
+
+- S4-7 갱신(2026-11-20): `rsqrt_nr`, `lut_lerp`(SIGM 모드 추가), `actq_core`, `rms_front`, `swi_front`, `vec_core`, `vec_csr`, `vec_top`을 "통과"로 바꿨다. 근거 `docs/log.md` S4-7, `./sim/run.sh all` **424 run, fails 0** [측정, 수퍼바이저 재실행](기존 368 + `lut_lerp` SIGM 4 + 신규 52). 두 모델의 K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX 레코드 전부 mismatch 0, mutation 35개 중 33개 검출(2개 동치), lint 경고 0은 agent 보고(재실행 안 함). 합성, 타이밍, 보드는 미확인. 다이어그램 `l2_vec_core.md`, `l0_l1_vec_leaf.md`, `l3_vec_top.md`, 통합 개요 `system_overview.md`(S5 계획 포함).
 
 - S4-6b 갱신(2026-11-20): `attn_top`, `attn_csr`, `kv_rd`, `kv_store`를 "통과"로 바꿨다(합성 품질 정리: 주소 계산과 descriptor 검사의 runtime 곱셈을 순차 곱 `umul_seq`와 증분 덧셈으로 교체). 새 leaf `umul_seq`(L0)를 추가했다. 근거 `docs/log.md` S4-6b, `./sim/run.sh all` **368 run, fails 0** [측정, 수퍼바이저 재실행](기존 345 + `umul_seq` 13 + `attn_csr` 10). `gemv_acc_csr`, `pim_csr`, `pim_ctrl`, `pim_top`, `gemv_acc_top`도 S4-6b에서 같은 방식으로 바뀌었고 재통과했다(상태 표기는 이미 "통과"). mutation 42/42 검출과 lint 경고 0은 agent 보고(재실행 안 함). 합성, 타이밍, 보드는 미확인. 다이어그램 `l3_attn_top.md`, `l0_umul_seq.md`.
 
@@ -28,7 +30,13 @@ flowchart TD
     pimcore["L2 pim_core<br/>통과 (S4-5)"]:::done
     pimsub["L1 pim_ctrl, pim_gb, pim_bank<br/>L3 pim_csr<br/>통과 (S4-5)"]:::done
     attn["L3 attn_top<br/>통과 (S4-6, S4-6b)"]:::done
-    vec["L3 vec_top<br/>(하위는 아래 표)"]:::plan
+    vec["L3 vec_top<br/>통과 (S4-7)"]:::done
+    veccsr["L3 vec_csr<br/>통과 (S4-7)"]:::done
+    veccore["L2 vec_core<br/>통과 (S4-7)"]:::done
+    actq["L1 actq_core<br/>통과 (S4-7)"]:::done
+    rmsf["L1 rms_front<br/>통과 (S4-7)"]:::done
+    swif["L1 swi_front<br/>통과 (S4-7)"]:::done
+    rsq["L0 rsqrt_nr<br/>통과 (S4-7)"]:::done
 
     attncsr["L3 attn_csr<br/>통과 (S4-6b, 단독 TB)"]:::done
     attncore["L2 attn_core<br/>통과 (S4-6)"]:::done
@@ -105,6 +113,24 @@ flowchart TD
     avacc -->|"u_w, u_o"| rshr
     kvst -->|"u_ram"| ram
     kvst -->|"u_f"| fifo
+    vec -->|"u_axil"| axil
+    vec -->|"u_rd"| rde
+    vec -->|"u_wr"| wre
+    vec -->|"u_csr"| veccsr
+    vec -->|"u_core"| veccore
+    veccore -->|"u_rms"| rmsf
+    veccore -->|"u_swi"| swif
+    veccore -->|"u_aq"| actq
+    veccore -->|"u_am"| accsub
+    veccore -->|"u_buf"| ram
+    actq -->|"u_div"| udiv
+    actq -->|"u_num, u_q"| rshr
+    actq -->|"u_buf"| ram
+    actq -->|"u_qf"| fifo
+    rmsf -->|"u_rsq"| rsq
+    rmsf -->|"u_xs, u_eps, u_y"| rshr
+    swif -->|"u_sig (FUNC 1 SIGM)"| lut
+    swif -->|"u_silu, u_g"| rshr
 
     classDef done fill:#d8f0d8,stroke:#2e7d32,stroke-width:2px,color:#000
     classDef wip fill:#fff3c4,stroke:#b58900,stroke-width:2px,color:#000
@@ -130,9 +156,11 @@ flowchart TD
 | `attn_core` | L2 | RTL | 통과 (S4-6), 260K 480 레코드와 15M 216 레코드 p, o mismatch 0(agent 보고). 다이어그램 `l2_attn_core.md`. pass FSM이 `attn_core` 안에 있어 `attn_ctrl`은 별도 모듈로 두지 않았다 | `rtl/l2/attn_core.sv`, `log.md` S4-6, `hierarchy.md` 3.9 |
 | `kv_store`, `kv_rd` | L2 | RTL | 통과 (S4-6, S4-6b에서 주소 계산 정리 뒤 재통과). 상세는 `l3_attn_top.md`(top 안에서의 사용) | `rtl/l2/kv_store.sv`, `rtl/l2/kv_rd.sv`, `log.md` S4-6, S4-6b |
 | `attn_csr`, `attn_top` | L3 | RTL | 통과 (S4-6, S4-6b). `attn_csr` 단독 TB를 S4-6b에서 추가(10 run). 다이어그램 `l3_attn_top.md` | `rtl/l3/attn_csr.sv`, `rtl/l3/attn_top.sv`, `log.md` S4-6, S4-6b |
-| `rsqrt_nr`, `actq_core`, `rms_front`, `swi_front`, `vec_core`, `vec_top` | L0 에서 L3 | RTL | 계획 (S4-7) | 같음 |
+| `rsqrt_nr`, `actq_core`, `rms_front`, `swi_front`, `vec_core`, `vec_csr`, `vec_top` | L0 에서 L3 | RTL | 통과 (S4-7), 두 모델의 vec kernel 레코드 전부 mismatch 0(agent 보고). `lut_lerp`은 SIGM 모드 추가 후 재통과(EXP2N 불변). 다이어그램 `l2_vec_core.md`, `l0_l1_vec_leaf.md`, `l3_vec_top.md` | `rtl/l0/rsqrt_nr.sv`, `rtl/l1/actq_core.sv`, `rtl/l1/rms_front.sv`, `rtl/l1/swi_front.sv`, `rtl/l2/vec_core.sv`, `rtl/l3/vec_csr.sv`, `rtl/l3/vec_top.sv`, `log.md` S4-7 |
 | `sys_p_top`, `sys_a_top` | L4 | RTL | 계획 (S5) | 같음 |
 
 - 트리의 `gemv_core` 내부 인스턴스 이름(`u_xbuf`, `u_mac`, `u_scale`, `u_yfifo`, `u_dotp`, `u_rshr`)은 RTL에서 확인한 이름이다.
 - `pim_core` 쪽 재사용은 RTL로 확인했다: `pim_bank`가 `ram_sdp`와 `mac_row`(LANES = 16), `pim_core`가 `gemv_scale`과 `sync_fifo`(y FIFO), `pim_top`이 `axil_slave`, `axi_rd_eng`, `axi_wr_eng`, `sync_fifo`(명령 FIFO)를 인스턴스한다. `pim_gb`는 `ram_sdp` 두 개를 쓴다.
 - 트리의 `attn_top`과 `attn_core`, `kv_store`, `attn_score`, `exp_unit`, `attn_vacc`의 인스턴스 이름(`u_axil`, `u_csr`, `u_rd`, `u_core`, `u_kvr`, `u_kvs`, `u_wr` / `u_score`, `u_exp`, `u_div`, `u_vacc`, `u_pbuf`, `u_vbuf`, `u_ofifo` / `u_ram`, `u_f` / `u_dot`, `u_rd0`, `u_rs` / `u_lut` / `u_w`, `u_o`)은 RTL의 인스턴스 선언에서 확인한 이름이다. `kv_rd`의 하위는 확인하지 않아 그리지 않았다. `u_kvr`는 `KV_SRC` 1, `u_kvs`는 `KV_SRC` 0 구성에서 생성되는 것으로 `attn_top.sv` 헤더 주석과 `KV_SRC` generate 분기에서 확인했다.
+- 트리의 `vec_top`, `vec_core`, `actq_core`, `rms_front`, `swi_front`의 인스턴스 이름(`u_axil`, `u_csr`, `u_rd`, `u_core`, `u_wr` / `u_buf`, `u_rms`, `u_swi`, `u_aq`, `u_am` / `u_buf`, `u_num`, `u_div`, `u_q`, `u_qf` / `u_xs`, `u_eps`, `u_y`, `u_rsq` / `u_sig`, `u_silu`, `u_g`)은 RTL의 인스턴스 선언에서 확인한 이름이다. `vec_core`가 `argmax_red`를 `u_am`으로 인스턴스하므로 트리에서는 `argmax_red`가 든 박스(`gemv_acc_csr`, `argmax_red`)로 연결했다.
+- 시스템 통합(L4 `sys_p_top`, `sys_a_top`)은 계획(S5)이고 RTL이 없다. 통과한 L3 IP 4종의 한 장 개요는 `system_overview.md`.

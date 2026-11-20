@@ -121,7 +121,7 @@
 - 프로세스 노출(agent 보고): 대기용 감시 명령에 프로젝트 경로가 들어가 약 15분씩 두 번 보였다. `process-privacy.md`에 대기 명령 규칙 추가.
 - 다음: S4-7(vec IP).
 
-## 2026-11-20: S4-7 vec IP  [notion: pending]
+## 2026-11-20: S4-7 vec IP  [notion: synced]
 - 한 일(hw-worker): L0 `rsqrt_nr`, `lut_lerp`에 SIGM 모드, L1 `actq_core`, `rms_front`, `swi_front`, L2 `vec_core`, L3 `vec_csr`, `vec_top`과 TB, `docs/spec/vec.md`. `lut_pkg.sv`에 SIGM, RSQ 표 추가(EXP2N 표는 불변). `model/src`는 변경 없음.
 - 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 424 run, fails 0(기존 368 + `lut_lerp` SIGM 4 + 신규 52).
 - agent 보고(재실행 안 함): 두 모델의 K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX 레코드 전부에서 mismatch 0(`vec_top`은 forward 순서로 260K 1,224 호출, 15M 804 호출). `actq_core`를 rmsnorm, swiglu가 공유해도 bit-exact임을 실행으로 확인(S4-0의 코드 대조 판단). mutation 35개 중 33개 검출, 2개 동치. 첫 회차 생존 중 2개는 TB 공백(특정 amax에서만 드러나는 clamp)이라 방향성 벡터 추가. lint 경고 0. top과 CSR에 runtime 곱셈 없음(descriptor 검사는 shift와 덧셈, 검사 1 cycle).
