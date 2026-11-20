@@ -98,7 +98,7 @@
 - 한계: 100 MHz 타이밍(bank 깊이 mux와 gather mux가 scale 앞 조합), LUT 수, parity 추론 미확인. `pim_top`은 NB = 4만 실행(NB 2/8은 `pim_ctrl`에서만). mutation 실행 방식의 cmdline 샘플 확인은 이번에 하지 않음(agent 보고).
 - 다음: S4-6(attention IP).
 
-## 2026-11-20: S4-6 attention IP  [notion: pending]
+## 2026-11-20: S4-6 attention IP  [notion: synced]
 - 한 일(hw-worker): `rtl/pkg/lut_pkg.sv`, L0 `udiv_seq`, `lut_lerp`(EXP2N), L1 `exp_unit`, `attn_score`, `attn_vacc`, L2 `attn_core`, `kv_store`(BRAM KV), `kv_rd`(DDR KV), L3 `attn_csr`, `attn_top`와 TB, `docs/spec/attn.md`. golden에 attention stage 함수 5개 export(`k_attn_score`, `k_attn_exp`, `k_attn_pn`, `k_attn_w`, `k_attn_out`), `attn_core`가 이 함수들로 계산.
 - 결과 [측정, 수퍼바이저 재실행]: `make test` TOTAL 16,669,793 항목 mismatch 0. `./sim/run.sh all` 345 run, fails 0(기존 262 + 신규 83).
 - agent 보고(재실행 안 함): K_ATTN2 레코드 260K 480개(T 1..512, hs 8)와 15M 216개(hs 48) 전부에서 p, o mismatch 0, stage trace 대조. 추가 형식 HB(K8V8), HD(K16V16) 덤프도 벡터로 사용. `attn_top`은 260K forward 순서(위치마다 layer 0..4에 KVW 후 ATTN, KVW 2,560개), KV_SRC 0/1, H_PAR 1/2. 기존 덤프 4종은 golden 변경 전과 `cmp` 동일. mutation 42/42 검출(첫 회차 생존 3개는 TB 공백이라 방향성 벡터 추가). lint 경고 0.
