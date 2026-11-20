@@ -394,3 +394,166 @@ int kd_argmax(const svOpenArrayHandle v, int n) {
   free(pv);
   return r;
 }
+
+/* ---- S4-6: attention (k_attn2_st and the A3 stage functions of src/kern.c) ---- */
+
+/* stage functions */
+int kd_attn_score(long long dot, int qm, int km, int qe, int ke, int d0) {
+  return k_attn_score(dot, qm, km, qe, ke, d0);
+}
+int kd_attn_exp(int s, int mx) { return (int)k_attn_exp(s, mx, 8, k_exp_lut(8)); }
+int kd_attn_pn(int e, long long R) { return k_attn_pn((uint32_t)e, (uint64_t)R); }
+long long kd_attn_w(int p, int vm, int ve, int emin, int G) { return k_attn_w(p, vm, ve, emin, G); }
+int kd_attn_out(long long acc, int emin, int G) { return k_attn_out(acc, emin, G); }
+/* exp LUT entry of the golden model (k_exp_lut(8)[i]) */
+int kd_exp_lut8(int i) { return (i >= 0 && i <= 256) ? (int)k_exp_lut(8)[i] : -1; }
+
+/* one attention call held in a scratch area: inputs come from the TB (kd_att_set) or from
+   the current K_ATTN2 / K_ATTN record (kd_att_from_rec), kd_att_run runs k_attn2_st (LUT
+   k_exp_lut(8)) with every trace array; kd_att_get reads inputs, outputs and the trace. */
+static int AT_T, AT_HS, AT_KB, AT_VB, AT_QM, AT_QE, AT_OK;
+static int16_t AQ[K_HSMAX], *AK, *AV;
+static kscl_t *AKS, *AVS;
+static int32_t *AP, *AS, AO[K_HSMAX];
+static uint32_t *AE;
+static int64_t *ADOT, *AWT, AACC[K_HSMAX];
+static k_attn_st_t AST;
+
+static void att_free(void) {
+  free(AK); free(AV); free(AKS); free(AVS); free(AP); free(AS); free(AE); free(ADOT); free(AWT);
+  AK = AV = NULL; AKS = AVS = NULL; AP = AS = NULL; AE = NULL; ADOT = AWT = NULL;
+  AT_OK = 0;
+}
+
+int kd_att_begin(int T, int hs, int kb, int vb, int qm, int qe) {
+  att_free();
+  if (T < 1 || T > K_TMAX || hs < 1 || hs > K_HSMAX) return -1;
+  AT_T = T; AT_HS = hs; AT_KB = kb; AT_VB = vb; AT_QM = qm; AT_QE = qe;
+  AK = calloc((size_t)T * hs, 2); AV = calloc((size_t)T * hs, 2);
+  AKS = calloc((size_t)T, sizeof(kscl_t)); AVS = calloc((size_t)T, sizeof(kscl_t));
+  AP = calloc((size_t)T, 4); AS = calloc((size_t)T, 4); AE = calloc((size_t)T, 4);
+  ADOT = calloc((size_t)T, 8); AWT = calloc((size_t)T, 8);
+  memset(AQ, 0, sizeof(AQ));
+  AT_OK = AK && AV && AKS && AVS && AP && AS && AE && ADOT && AWT;
+  return AT_OK ? 0 : -1;
+}
+
+/* what: 0 q[i], 1 K[i] (i = t hs + lane), 2 V[i], 3 ks[i].m, 4 ks[i].e, 5 vs[i].m, 6 vs[i].e */
+int kd_att_set(int what, int i, int v) {
+  int n = AT_T * AT_HS;
+  if (!AT_OK || i < 0) return -1;
+  switch (what) {
+  case 0: if (i >= AT_HS) return -1; AQ[i] = (int16_t)v; return 0;
+  case 1: if (i >= n) return -1; AK[i] = (int16_t)v; return 0;
+  case 2: if (i >= n) return -1; AV[i] = (int16_t)v; return 0;
+  case 3: if (i >= AT_T) return -1; AKS[i].m = v; return 0;
+  case 4: if (i >= AT_T) return -1; AKS[i].e = v; return 0;
+  case 5: if (i >= AT_T) return -1; AVS[i].m = v; return 0;
+  case 6: if (i >= AT_T) return -1; AVS[i].e = v; return 0;
+  default: return -1;
+  }
+}
+
+/* current record (K_ATTN2, or K_ATTN with kb = vb = 8 esz) into the scratch area; returns 0,
+   -1 if it is not an attention record, -2 if its LUT is not k_exp_lut(8) */
+int kd_att_from_rec(void) {
+  int T, hs, kb, vb, qm, qe, eb, ek, ev, i, t;
+  if (RC.kid == K_ATTN2 && RC.np == 7 && RC.nb == 8) {
+    T = RC.prm[0]; hs = RC.prm[1]; kb = RC.prm[2]; vb = RC.prm[3]; qm = RC.prm[4]; qe = RC.prm[5];
+    eb = RC.prm[6];
+  } else if (RC.kid == K_ATTN && RC.np == 6 && RC.nb == 8) {
+    T = RC.prm[0]; hs = RC.prm[1]; kb = vb = 8 * RC.prm[2]; qm = RC.prm[3]; qe = RC.prm[4];
+    eb = RC.prm[5];
+  } else
+    return -1;
+  if (eb != 8 || RC.b[5].n != 257) return -2;
+  for (i = 0; i < 257; i++)
+    if (((const uint32_t *)RC.b[5].p)[i] != k_exp_lut(8)[i]) return -2;
+  if (kd_att_begin(T, hs, kb, vb, qm, qe)) return -1;
+  ek = kb > 8 ? 2 : 1;
+  ev = vb > 8 ? 2 : 1;
+  for (i = 0; i < hs; i++) AQ[i] = (int16_t)(ek == 2 ? ((const int16_t *)RC.b[0].p)[i] : ((const int8_t *)RC.b[0].p)[i]);
+  for (i = 0; i < T * hs; i++) {
+    AK[i] = (int16_t)(ek == 2 ? ((const int16_t *)RC.b[1].p)[i] : ((const int8_t *)RC.b[1].p)[i]);
+    AV[i] = (int16_t)(ev == 2 ? ((const int16_t *)RC.b[3].p)[i] : ((const int8_t *)RC.b[3].p)[i]);
+  }
+  for (t = 0; t < T; t++) {
+    AKS[t] = ((const kscl_t *)RC.b[2].p)[t];
+    AVS[t] = ((const kscl_t *)RC.b[4].p)[t];
+  }
+  return 0;
+}
+
+/* k_attn2_st on the scratch inputs (q, K, V narrowed to int8 for widths 8) */
+int kd_att_run(void) {
+  int n = AT_T * AT_HS, i, ek = AT_KB > 8 ? 2 : 1, ev = AT_VB > 8 ? 2 : 1;
+  int8_t q8[K_HSMAX], *K8 = NULL, *V8 = NULL;
+  kscl_t qs;
+  if (!AT_OK) return -1;
+  if (ek == 1 || ev == 1) {
+    K8 = malloc((size_t)n + 1);
+    V8 = malloc((size_t)n + 1);
+    for (i = 0; i < n; i++) { K8[i] = (int8_t)AK[i]; V8[i] = (int8_t)AV[i]; }
+  }
+  for (i = 0; i < AT_HS; i++) q8[i] = (int8_t)AQ[i];
+  qs.m = AT_QM;
+  qs.e = AT_QE;
+  memset(&AST, 0, sizeof(AST));
+  AST.dot = ADOT; AST.s = AS; AST.e = AE; AST.w = AWT; AST.acc = AACC;
+  k_attn2_st(AT_T, AT_HS, AT_KB, AT_VB, ek == 2 ? (const void *)AQ : (const void *)q8, qs,
+             ek == 2 ? (const void *)AK : (const void *)K8, AKS,
+             ev == 2 ? (const void *)AV : (const void *)V8, AVS, 8, k_exp_lut(8), AP, AO, &AST);
+  free(K8);
+  free(V8);
+  return 0;
+}
+
+/* number of p and o elements of the last kd_att_run differing from the current record's
+   recorded outputs (after kd_att_from_rec), -1 if the record is not an attention record */
+int kd_att_rec_cmp(void) {
+  int i, bad = 0;
+  if ((RC.kid != K_ATTN2 && RC.kid != K_ATTN) || RC.nb != 8) return -1;
+  for (i = 0; i < AT_T; i++) bad += AP[i] != ((const int32_t *)RO[6])[i];
+  for (i = 0; i < AT_HS; i++) bad += AO[i] != ((const int32_t *)RO[7])[i];
+  return bad;
+}
+
+/* what: 0 p[i], 1 o[i], 2 dot[i], 3 s[i], 4 e[i], 5 w[i], 6 acc[i], 7 q[i], 8 K[i], 9 V[i],
+   10 ks.m, 11 ks.e, 12 vs.m, 13 vs.e (index t); scalars 20 T, 21 hs, 22 kb, 23 vb, 24 qm, 25 qe,
+   30 d0, 31 mx, 32 sum, 33 R, 34 emin, 35 mmax, 36 G, 37 have */
+long long kd_att_get(int what, int i) {
+  int n = AT_T * AT_HS;
+  if (!AT_OK) return 0;
+  if (what < 20 && i < 0) return 0;
+  switch (what) {
+  case 0: return i < AT_T ? AP[i] : 0;
+  case 1: return i < AT_HS ? AO[i] : 0;
+  case 2: return i < AT_T ? ADOT[i] : 0;
+  case 3: return i < AT_T ? AS[i] : 0;
+  case 4: return i < AT_T ? (long long)AE[i] : 0;
+  case 5: return i < AT_T ? AWT[i] : 0;
+  case 6: return i < AT_HS ? AACC[i] : 0;
+  case 7: return i < AT_HS ? AQ[i] : 0;
+  case 8: return i < n ? AK[i] : 0;
+  case 9: return i < n ? AV[i] : 0;
+  case 10: return i < AT_T ? AKS[i].m : 0;
+  case 11: return i < AT_T ? AKS[i].e : 0;
+  case 12: return i < AT_T ? AVS[i].m : 0;
+  case 13: return i < AT_T ? AVS[i].e : 0;
+  case 20: return AT_T;
+  case 21: return AT_HS;
+  case 22: return AT_KB;
+  case 23: return AT_VB;
+  case 24: return AT_QM;
+  case 25: return AT_QE;
+  case 30: return AST.d0;
+  case 31: return AST.mx;
+  case 32: return (long long)AST.sum;
+  case 33: return (long long)AST.R;
+  case 34: return AST.emin;
+  case 35: return AST.mmax;
+  case 36: return AST.G;
+  case 37: return AST.have;
+  default: return 0;
+  }
+}

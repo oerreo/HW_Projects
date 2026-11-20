@@ -83,6 +83,16 @@ int64_t k_gemv_row(const int8_t *w, const uint16_t *wm, const int8_t *x, int n, 
 /* A2 gemv_scale: y = sat32(rshr(S * xm, sh)), sh = we + xe - fo */
 int32_t k_gemv_out(int64_t S, int32_t xm, int sh);
 
+/* A3 attention stages (S4-6; attn_core of k_attn / k_attn2 is built from these) */
+/* attn_score: sat32(rshr(rshr(dot, d0) * qm * km, qe + ke - d0 - 16)) */
+int32_t k_attn_score(int64_t dot, int32_t qm, int32_t km, int qe, int ke, int d0);
+/* exp_unit: d = max(s - mx, -2^30), w = rshr(d * 47274, 15), k_exp2neg(-w) */
+uint32_t k_attn_exp(int32_t s, int32_t mx, int eb, const uint32_t *elut);
+/* attn_vacc: p = (e R + 2^31) >> 32, w = rshr(p vm, ve - emin - G), o = sat32(rshr(acc, emin + G)) */
+int32_t k_attn_pn(uint32_t e, uint64_t R);
+int64_t k_attn_w(int32_t p, int32_t vm, int ve, int emin, int G);
+int32_t k_attn_out(int64_t acc, int emin, int G);
+
 /* A7 activation quantizer (actq_core): setup from amax > 0, then one value */
 typedef struct {
   int mode, qmax, k, e;

@@ -24,3 +24,6 @@ sim/.mut*/
 sim/.lint*/
 fpga/bw/build/
 fpga/bw/test/build/
+sim/.out*
+sim/.env*
+model/.job*

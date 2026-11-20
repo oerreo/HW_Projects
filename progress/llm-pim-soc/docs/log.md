@@ -97,3 +97,15 @@
 - 자원 [계산, 합성 안 함]: 8x8 곱 64개 + scale 3 = 67, bank BRAM36 64개(tag 16비트가 parity에 들어간다는 전제, Vivado 추론 미확인). 관찰(오케스트레이터): `pim_ctrl`이 LDW 읽기 길이를 `rows x 레코드 크기` 곱으로 구해 합성 시 곱셈기 하나가 더 들 수 있다.
 - 한계: 100 MHz 타이밍(bank 깊이 mux와 gather mux가 scale 앞 조합), LUT 수, parity 추론 미확인. `pim_top`은 NB = 4만 실행(NB 2/8은 `pim_ctrl`에서만). mutation 실행 방식의 cmdline 샘플 확인은 이번에 하지 않음(agent 보고).
 - 다음: S4-6(attention IP).
+
+## 2026-11-20: S4-6 attention IP  [notion: pending]
+- 한 일(hw-worker): `rtl/pkg/lut_pkg.sv`, L0 `udiv_seq`, `lut_lerp`(EXP2N), L1 `exp_unit`, `attn_score`, `attn_vacc`, L2 `attn_core`, `kv_store`(BRAM KV), `kv_rd`(DDR KV), L3 `attn_csr`, `attn_top`와 TB, `docs/spec/attn.md`. golden에 attention stage 함수 5개 export(`k_attn_score`, `k_attn_exp`, `k_attn_pn`, `k_attn_w`, `k_attn_out`), `attn_core`가 이 함수들로 계산.
+- 결과 [측정, 수퍼바이저 재실행]: `make test` TOTAL 16,669,793 항목 mismatch 0. `./sim/run.sh all` 345 run, fails 0(기존 262 + 신규 83).
+- agent 보고(재실행 안 함): K_ATTN2 레코드 260K 480개(T 1..512, hs 8)와 15M 216개(hs 48) 전부에서 p, o mismatch 0, stage trace 대조. 추가 형식 HB(K8V8), HD(K16V16) 덤프도 벡터로 사용. `attn_top`은 260K forward 순서(위치마다 layer 0..4에 KVW 후 ATTN, KVW 2,560개), KV_SRC 0/1, H_PAR 1/2. 기존 덤프 4종은 golden 변경 전과 `cmp` 동일. mutation 42/42 검출(첫 회차 생존 3개는 TB 공백이라 방향성 벡터 추가). lint 경고 0.
+- cycle [측정, 시뮬레이션, stall 없는 latency 1 모델]: head 하나 `C = (T+1) x ceil(hs/8) + T + T x ceil(hs/8) + hs + C0`, `C0` 기본 60. 260K(hs 8)는 3T + 69(S4-0 추정 3T + 80). token당 ATTN CYCLES: 260K H_PAR 2, T 512에서 32,420(계산 32,320), H_PAR 1은 64,685. 15M DDR KV, T 256에서 H_PAR 1 198,294(계산 196,416), H_PAR 2 99,496. KVW는 260K token당 190 cycle. `p_en` = 1이면 260K T 512에서 34,983.
+- 정한 세부(attn.md): op ATTN과 KVW 두 가지(명령 FIFO 없음), q 레코드 형식, p의 head 간격은 8 x ceil(T/2) B(write engine이 8 B 정렬 주소만 받음), top은 hs가 8의 배수만, `attn_ctrl`을 두지 않고 pass FSM을 `attn_core` 안에 둠, vs buffer 추가, `lut_lerp`는 EXP2N만(SIGM은 S4-7).
+- 자원 [계산, 합성 안 함]: DSP engine당 33(H_PAR 2면 66), kv_store BRAM36 60, engine당 BRAM18 2개(vs buffer로 arch.md보다 engine당 0.5 증가). 260K PIM형 시스템 BRAM36 합계 126 -> 127/140.
+- 문제(오케스트레이터 확인): `attn_csr`의 descriptor 범위 검사와 `attn_top`, `kv_rd`의 주소 계산이 조합 곱셈이다(일부 64비트 폭 표현). `pim_ctrl`, `pim_csr`, `gemv_acc_csr`, `gemv_acc_top`, `kv_store`에도 소수 있다. 기능은 맞지만 합성 시 DSP 추가 사용과 100 MHz 타이밍 위험이 있어 S4-6b로 정리한다. `attn_csr` 단독 TB가 없는 것(방법론 일탈)도 S4-6b에서 보완.
+- 한계: 100 MHz 타이밍, LUT 수, 210비트 word의 BRAM 추론 미확인. CYCLES는 latency 1 모델 값. irun 교차는 라이선스 정책상 하지 않음.
+- 프로세스 노출(agent 보고): mutant 번호(숫자)를 명령행 환경 대입으로 넣은 것, 1초 미만의 패치 명령에 TB 경로가 보인 것 두 건.
+- 다음: S4-6b, 이어서 S4-7(vec IP).

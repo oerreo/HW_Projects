@@ -67,4 +67,32 @@ package kdpi_pkg;
                                           input int xe, input int fo, input int nb,
                                           inout int y[], inout longint st[]);
 
+  // ---- S4-6: attention (src/kern.c k_attn2_st and the A3 stage functions) ----
+  import "DPI-C" pure function int kd_attn_score(input longint dot, input int qm, input int km,
+                                                 input int qe, input int ke, input int d0);
+  import "DPI-C" pure function int kd_attn_exp(input int s, input int mx);    // eb 8
+  import "DPI-C" pure function int kd_attn_pn(input int e, input longint r);
+  import "DPI-C" pure function longint kd_attn_w(input int p, input int vm, input int ve,
+                                                 input int emin, input int g);
+  import "DPI-C" pure function int kd_attn_out(input longint acc, input int emin, input int g);
+  import "DPI-C" pure function int kd_exp_lut8(input int i);                 // k_exp_lut(8)[i]
+  // scratch call: begin (T, hs, kb, vb, qm, qe), set inputs, or load the current K_ATTN2 /
+  // K_ATTN record (-1 not attention, -2 LUT is not k_exp_lut(8)); run k_attn2_st; get values
+  // (what: 0 p, 1 o, 2 dot, 3 s, 4 e, 5 w, 6 acc, 7 q, 8 K, 9 V, 10 ks.m, 11 ks.e, 12 vs.m,
+  //  13 vs.e; scalars 20 T, 21 hs, 22 kb, 23 vb, 24 qm, 25 qe, 30 d0, 31 mx, 32 sum, 33 R,
+  //  34 emin, 35 mmax, 36 G, 37 have)
+  import "DPI-C" function int kd_att_begin(input int t, input int hs, input int kb, input int vb,
+                                           input int qm, input int qe);
+  import "DPI-C" function int kd_att_set(input int what, input int i, input int v);
+  import "DPI-C" function int kd_att_from_rec();
+  import "DPI-C" function int kd_att_run();
+  import "DPI-C" function int kd_att_rec_cmp();  // p/o differing from the record's outputs
+  import "DPI-C" function longint kd_att_get(input int what, input int i);
+  localparam int AG_P = 0, AG_O = 1, AG_DOT = 2, AG_S = 3, AG_E = 4, AG_W = 5, AG_ACC = 6,
+                 AG_Q = 7, AG_K = 8, AG_V = 9, AG_KSM = 10, AG_KSE = 11, AG_VSM = 12, AG_VSE = 13,
+                 AG_T = 20, AG_HS = 21, AG_KB = 22, AG_VB = 23, AG_QM = 24, AG_QE = 25,
+                 AG_D0 = 30, AG_MX = 31, AG_SUM = 32, AG_R = 33, AG_EMIN = 34, AG_MMAX = 35,
+                 AG_G = 36, AG_HAVE = 37;
+  localparam int AS_Q = 0, AS_K = 1, AS_V = 2, AS_KSM = 3, AS_KSE = 4, AS_VSM = 5, AS_VSE = 6;
+
 endpackage

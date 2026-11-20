@@ -266,6 +266,36 @@ void k_rope(const int32_t *v, int n, int hs, const int16_t *cs, int32_t *o) {
 /* ---------------- attention: score, softmax, weighted V sum (one head) ---------------- */
 #define LOG2E_Q15 47274 /* round(log2(e) * 2^15) */
 
+/* stage functions of attn_core (S4-6, golden of attn_score, exp_unit, attn_vacc) */
+/* score of one position: sat32(rshr(rshr(dot, d0) * qm * km, qe + ke - d0 - K_FS)) */
+int32_t k_attn_score(int64_t dot, int32_t qm, int32_t km, int qe, int ke, int d0) {
+  int64_t c = (int64_t)qm * km; /* c < 2^34 */
+  /* |dot| < 2^21 (int8), 2^29 (12 bit, d0 = 7) or 2^37 (int16, d0 = 15) */
+  return sat32(k_rshr(k_rshr(dot, d0) * c, qe + ke - d0 - K_FS));
+}
+
+/* softmax numerator of one score: 2^((s - mx) * log2 e), Q16 */
+uint32_t k_attn_exp(int32_t s, int32_t mx, int eb, const uint32_t *elut) {
+  int64_t d = (int64_t)s - mx; /* <= 0 */
+  int64_t w;
+  if (d < -((int64_t)1 << 30)) d = -((int64_t)1 << 30);
+  w = k_rshr(d * LOG2E_Q15, 15 + K_FS - 16); /* Q16 exponent of 2, <= 0 */
+  return k_exp2neg((uint32_t)(-w), eb, elut);
+}
+
+/* normalized probability: (e * R + 2^31) >> 32 */
+int32_t k_attn_pn(uint32_t e, uint64_t R) {
+  return (int32_t)(((uint64_t)e * R + ((uint64_t)1 << 31)) >> 32);
+}
+
+/* aligned V weight of one position with vs.m != 0 */
+int64_t k_attn_w(int32_t p, int32_t vm, int ve, int emin, int G) {
+  return k_rshr((int64_t)p * vm, ve - emin - G); /* <= 2^33 */
+}
+
+/* output element from its V accumulator */
+int32_t k_attn_out(int64_t acc, int emin, int G) { return sat32(k_rshr(acc, 16 + emin + G - K_FX)); }
+
 /* ek, ev: element bytes of (q, K) and V; d0: right shift of the q.K dot product
    (keeps |dot >> d0| < 2^22 so that the product with c < 2^34 stays < 2^56) */
 static void attn_core(int T, int hs, int ek, int d0, const void *q, kscl_t qs, const void *K,
@@ -276,11 +306,10 @@ static void attn_core(int T, int hs, int ek, int d0, const void *q, kscl_t qs, c
   uint64_t sum = 0, R;
   /* scores, Q(K_FS) */
   for (t = 0; t < T; t++) {
-    int64_t dot = 0, c = (int64_t)qs.m * ks[t].m; /* c < 2^34 */
+    int64_t dot = 0;
     const int base = t * hs;
     for (i = 0; i < hs; i++) dot += (int64_t)ld(q, ek, i) * ld(K, ek, base + i);
-    /* |dot| < 2^21 (int8), 2^29 (12 bit, d0 = 7) or 2^37 (int16, d0 = 15) */
-    p[t] = sat32(k_rshr(k_rshr(dot, d0) * c, qs.e + ks[t].e - d0 - K_FS));
+    p[t] = k_attn_score(dot, qs.m, ks[t].m, qs.e, ks[t].e, d0);
     if (st && st->dot) st->dot[t] = dot;
     if (st && st->s) st->s[t] = p[t];
   }
@@ -289,11 +318,7 @@ static void attn_core(int T, int hs, int ek, int d0, const void *q, kscl_t qs, c
   for (t = 1; t < T; t++)
     if (p[t] > mx) mx = p[t];
   for (t = 0; t < T; t++) {
-    int64_t d = (int64_t)p[t] - mx; /* <= 0 */
-    int64_t w;
-    if (d < -((int64_t)1 << 30)) d = -((int64_t)1 << 30);
-    w = k_rshr(d * LOG2E_Q15, 15 + K_FS - 16); /* Q16 exponent of 2, <= 0 */
-    p[t] = (int32_t)k_exp2neg((uint32_t)(-w), eb, elut);
+    p[t] = (int32_t)k_attn_exp(p[t], mx, eb, elut);
     sum += (uint32_t)p[t]; /* <= T * 2^16 */
     if (st && st->e) st->e[t] = (uint32_t)p[t];
   }
@@ -305,7 +330,7 @@ static void attn_core(int T, int hs, int ek, int d0, const void *q, kscl_t qs, c
     st->sum = sum;
     st->R = R;
   }
-  for (t = 0; t < T; t++) p[t] = (int32_t)(((uint64_t)p[t] * R + ((uint64_t)1 << 31)) >> 32);
+  for (t = 0; t < T; t++) p[t] = k_attn_pn((uint32_t)p[t], R);
   /* weighted sum of V; per-t scale aligned to the coarsest exponent, with guard bits
      G so that the aligned weight keeps about 33 bits (G = 16 for pow2 scales) */
   {
@@ -337,11 +362,11 @@ static void attn_core(int T, int hs, int ek, int d0, const void *q, kscl_t qs, c
       for (t = 0; t < T; t++) {
         int64_t w;
         if (vs[t].m == 0) continue;
-        w = k_rshr((int64_t)p[t] * vs[t].m, vs[t].e - emin - G); /* <= 2^33 */
+        w = k_attn_w(p[t], vs[t].m, vs[t].e, emin, G);
         if (st && st->w) st->w[t] = w;
         for (i = 0; i < hs; i++) acc[i] += w * ld(V, ev, t * hs + i); /* < 2^60, T <= 4096 */
       }
-      for (i = 0; i < hs; i++) o[i] = sat32(k_rshr(acc[i], 16 + emin + G - K_FX));
+      for (i = 0; i < hs; i++) o[i] = k_attn_out(acc[i], emin, G);
       if (st && st->acc)
         for (i = 0; i < hs; i++) st->acc[i] = acc[i];
     }
