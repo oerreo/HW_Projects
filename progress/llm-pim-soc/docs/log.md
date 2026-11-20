@@ -133,3 +133,13 @@
 - 한계: 100 MHz 타이밍, LUT 수, DSP 매핑 미확인. CYCLES는 latency 1 모델 값. `rsqrt_nr`의 Newton 중간값 폭은 해석적 상한과 시뮬레이션 검사로만 확인.
 - 프로세스 노출(agent 보고): 1초 미만 명령 두 건에 테스트 이름과 경로가 보임. TB 버그로 4.8 GB 로그가 생겨 즉시 중단하고 삭제, 이후 job에 파일 크기 제한을 넣음.
 - 다음: S4-8(전체 정리, viewer), S5(시스템 통합) 계획.
+
+## 2026-11-20: S5-0 시스템 통합 스펙  [notion: pending]
+- 한 일(hw-worker): `spec/system.md`(빌드 목록, HP/GP 배정과 주소 맵, 자원, SW 실행기와 오프로드 mask, 드라이버, golden 배치와 IP 배치의 차이, 호스트와 RTL 검증 방안, 측정과 추정 계획, 융합 후보), `spec/s5calc.py`, plan의 S5-1~S5-6.
+- 구조: bitstream 2개. A = `gemv_acc` P 1 + `attn`(DDR KV, H_PAR 1) + `vec`, 15M 주 대상이고 260K도 실행 가능(가속기형 대 PIM 비교를 같은 빌드로). P = `pim` + `attn`(BRAM KV, H_PAR 2) + `vec`, 260K. kernel별 오프로드는 한 bitstream 안에서 SW의 런타임 mask로 켜고 끈다(kernel 경계가 DDR 버퍼이고 forward가 순차라서 가능).
+- 자원 [계산, LUT는 추정]: A는 DSP 60/220, BRAM36 약 3. P는 DSP 149/220, BRAM36 128/140(S4-7 로그의 129는 이중 계산, 정정). P의 BRAM은 bank(144비트)와 kv_store(210비트)가 parity 비트를 데이터로 쓰는 매핑을 전제로 하며, 안 되면 180/140으로 넘친다. 대안 순서: primitive wrapper, vec N_MAX 256, KV를 DDR로 옮긴 빌드, 빌드 분할.
+- PL 시간 [계산, 100 MHz 가정, 입력은 latency 1 시뮬레이션 cycle, ARM 쪽 비용 제외]: 빌드 P 전부 오프로드 375.6~400.1 us/token(위치 평균). 빌드 A(15M) 21.08 ms/token, 그중 GEMV 92.6%, HP 포트 하나의 이론 대역폭 하한 19.48 ms.
+- 검증 방안: (i) C 수준: spec 기반 IP 레지스터 모델과 cache 모사(flush/invalidate 누락 검출), 결함 주입 10종. (ii) RTL 수준: 시스템 top + 공유 메모리에 같은 드라이버 C 코드를 DPI로 연결해 forward를 돌리고 token과 logits hash를 PC 기대값과 비교(G5 기준).
+- 결정(오케스트레이터): 열린 결정 O1~O13을 권고대로 확정(`spec/system.md` 10절). 융합은 v1에 분류기 + argmax만.
+- 미확인: 보드 수치 전부(ARM baseline, HP 대역폭, 호출 비용, timing, LUT), parity 매핑, Questa에서 시간을 쓰는 DPI exported task, 빌드 A 구성의 260K attention과 vec N_MAX 256 구성(시뮬레이션 안 함), Xilinx cache 관련 세부.
+- 다음: S5-1(시스템 SW와 호스트 모델), S5-2(`axil_xbar`, 시스템 top).

@@ -23,6 +23,13 @@
 | S4-7 | `rsqrt_nr`, `lut_lerp`(SIGM), `actq_core`, `rms_front`, `swi_front`, `vec_core`, `vec_top` | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX mismatch 0 | 완료 (2026-11-20). 7개 모듈 G4 + `lut_lerp` SIGM, `sim/run.sh all` 424 run fails 0 (수퍼바이저 재실행), mutation 33/33 검출(동치 2개 제외). `spec/vec.md` |
 | S4-8 | 전체 회귀(Questa. irun 교차는 라이선스 정책상 하지 않음, 2026-11-19), 다이어그램(`visual-docs.md`), viewer 확장 | `sim/run.sh all` 전 run PASS, 로그 보관 | 대기 |
 | S5 | 시스템 통합과 FPGA 환경(G5): kernel별 오프로드 빌드 | AXI BFM 시뮬레이션 통과 | 대기 |
+| S5-0 | 시스템 통합 스펙: `spec/system.md`(빌드 A/P, HP/GP 배정, 주소 맵, 자원, 실행기와 오프로드 mask, 드라이버, 배치 차이, 호스트/RTL 검증, 측정 계획, 융합 후보), `spec/s5calc.py`. 아래 S5-1~S5-6은 S5-0의 제안(2026-11-20) | 오케스트레이터 검토, 열린 결정 O1~O13(`spec/system.md` 9절) 확정 | 완료 (2026-11-20). O1~O13 권고대로 확정 (`spec/system.md` 10절) |
+| S5-1 | `model/src` 실행기 끼움점(`lm_h_forward_x`), 시스템 SW(`fpga/sys/sw`: 실행기, 드라이버 4개, 초기화, KSPLIT/KCMP 로그), 호스트 IP 모델과 cache 모사, 파서 확장, 호스트 테스트 | `make test` PASS와 덤프 `cmp` 동일, 호스트 테스트 전 mask/opt/run 조합 mismatch 0, COH 0, fallback 0, 결함 주입 10종 검출, xilstub 문법 검사 | 대기 |
+| S5-2 | `axil_xbar`(+ 단독 TB), `sys_a_top`, `sys_p_top`(인스턴스와 배선만) | xbar mismatch 0, lint 경고 0, 두 빌드 elaboration | 대기 |
+| S5-3 | 시스템 TB 기반: `axi_mem_slave` EXT_STORE(공유 C 메모리), DPI HAL(exported AXI-Lite task), DPI 빌드, smoke | 기존 회귀 PASS, smoke(모든 slot ID, IP마다 호출 하나) mismatch 0 | 대기 |
+| S5-4 | 시스템 TB forward(G5): 빌드 P 260K(초기화, 위치 0..3, warm start 511, mask 단독, opt 변형, K 모드), 빌드 A 15M(위치 0, 255)과 260K, 오류 주입 | 시뮬레이션 위치의 token/logits hash가 PC 기대값과 일치, K 모드 mismatch 0, COH 0, IPERR 0(주입 run은 주입한 것만), `sim/run.sh all` PASS | 대기 |
+| S5-5 | Vivado/Vitis 스크립트(`fpga/sys/`: BD Tcl BUILD=A/P, build, XDC, XSCT)와 README(실행 순서, 돌려받을 것) | Tcl/XSCT stub 검사 PASS, 호스트 테스트 PASS, 사용자 빌드 요청 | 대기 |
+| S5-6 | 사용자 빌드 리포트 분석(utilization, timing, BRAM parity 매핑) | 두 빌드 WNS >= 0, BRAM36 <= 140, DSP가 [계산]과 맞음. 아니면 `spec/system.md` 1.6 대안으로 S5-2로 되돌림 | 대기 |
 | S6 | 보드 측정(G6, 사용자): kernel별 가속비, end-to-end, 추정과 실측 비교 | 결과 mismatch 0, 측정 표 | 대기 |
 | S7 | 정리(G7) | 문서, `done/` 이동 | 대기 |
 
