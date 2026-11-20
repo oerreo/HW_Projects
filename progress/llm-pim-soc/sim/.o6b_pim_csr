@@ -1,0 +1,12 @@
+### pim_csr: compile (RTL_DIR=../../rtl)
+### pim_csr: compile done in 0 s
+### pim_csr/q_rnd: vsim tb_pim_csr +SEED=1 +N_CYC=300000 +PDONE=5 +PEV=30 (expect pass)
+pim_csr/q_rnd: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [read_data]: checks=300003 mismatches=0 CHECKS [start_busy]: checks=300003 mismatches=0 CHECKS [push]: checks=300003 mismatches=0 CHECKS [coverage]: checks=19 mismatches=0 
+### pim_csr/rnd_long: vsim tb_pim_csr +SEED=2 +N_CYC=2000000 +PDONE=2 +PEV=10 (expect pass)
+pim_csr/rnd_long: PASS (rc=0 errors=0 RANGE=0 wall=4s) CHECKS [read_data]: checks=2000003 mismatches=0 CHECKS [start_busy]: checks=2000003 mismatches=0 CHECKS [push]: checks=2000003 mismatches=0 CHECKS [coverage]: checks=19 mismatches=0 
+### pim_csr/nb8_d1k: vsim tb_pim_csr -gNB=8 -gDEPTH=1024 -gNMAX=256 +SEED=3 +N_CYC=500000 +PDONE=10 +PEV=30 (expect pass)
+pim_csr/nb8_d1k: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [read_data]: checks=500003 mismatches=0 CHECKS [start_busy]: checks=500003 mismatches=0 CHECKS [push]: checks=500003 mismatches=0 CHECKS [coverage]: checks=19 mismatches=0 
+### pim_csr/cd1: vsim tb_pim_csr -gCMD_DEPTH=1 +SEED=4 +N_CYC=300000 +PDONE=20 +PEV=40 (expect pass)
+pim_csr/cd1: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [read_data]: checks=300003 mismatches=0 CHECKS [start_busy]: checks=300003 mismatches=0 CHECKS [push]: checks=300003 mismatches=0 CHECKS [coverage]: checks=19 mismatches=0 
+### pim_csr/bad_nmax: vsim tb_pim_csr -gNMAX=4096 (expect elab_fail:pim_csr: NMAX=4096 must be 1..4095)
+pim_csr/bad_nmax: PASS (rc=2 errors=1 RANGE=0 wall=0s) 

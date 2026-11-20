@@ -1,0 +1,10 @@
+### umul_seq: compile (RTL_DIR=../../rtl)
+### umul_seq: compile done in 0 s
+### umul_seq/q_def: vsim tb_umul_seq +SEED=1 +N=20000 (expect pass)
+umul_seq/q_def: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [directed]: checks=2449 mismatches=0 CHECKS [timing]: checks=22449 mismatches=0 CHECKS [hold]: checks=8385 mismatches=0 CHECKS [random]: checks=20000 mismatches=0 
+### umul_seq/q_exh_6_5: vsim tb_umul_seq -gA_W=6 -gB_W=5 +SEED=2 +N=1000 +EXH=1 (expect pass)
+umul_seq/q_exh_6_5: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [directed]: checks=418 mismatches=0 CHECKS [timing]: checks=3466 mismatches=0 CHECKS [hold]: checks=540 mismatches=0 CHECKS [random]: checks=1000 mismatches=0 CHECKS [exhaustive]: checks=2048 mismatches=0 
+### umul_seq/q_neg_busy: vsim tb_umul_seq +SEED=3 +N=100 +NEG=1 (expect assert:UMUL_START=1)
+umul_seq/q_neg_busy: PASS (rc=0 errors=1 RANGE=0 UMUL_START=1 wall=1s) CHECKS [directed]: checks=2450 mismatches=0 CHECKS [timing]: checks=2550 mismatches=0 CHECKS [hold]: checks=977 mismatches=0 CHECKS [random]: checks=100 mismatches=0 
+### umul_seq/q_neg_x: vsim tb_umul_seq +SEED=4 +N=100 +NEG=2 (expect assert:UMUL_X=1)
+umul_seq/q_neg_x: PASS (rc=0 errors=1 RANGE=0 UMUL_X=1 wall=0s) CHECKS [directed]: checks=2449 mismatches=0 CHECKS [timing]: checks=2549 mismatches=0 CHECKS [hold]: checks=948 mismatches=0 CHECKS [random]: checks=100 mismatches=0 

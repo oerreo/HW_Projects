@@ -5,7 +5,12 @@
 // strobe with random address / data, read strobe with random address), random FIFO status
 // (fifo_ready_i, fifo_level_i) and random events (done_i only while the model is busy, AXI errors,
 // stalls, MAC / WRGB / RDMAC events, command done pulses one at a time). At negedge it compares:
-// rd_data_o of the presented read address, start_o, busy_o, run_flush_o, push_o and push_data_o.
+// rd_data_o of the presented read address, start_o, busy_o, run_flush_o, push_o and push_data_o,
+// push_busy_o. Push timing (pim.md 4.1, S4-6b): a CMD_PUSH write in c without a check in progress
+// takes a copy of CMD0..3; the verdict on the copy (push_o or BAD_CMD / BAD_DESC / MISALIGN /
+// FIFO_OVF with fifo_ready_i of that cycle) is in p = c + PCHK, PCHK = max(bits(ceil(NMAX/16)),
+// bits(ceil(NMAX/8) + 1)) + 1; a CMD_PUSH in c + 1 .. p sets PUSH_BUSY (bit 8) and is ignored;
+// STATUS bit3 = check in progress.
 // Command words draw from legal and illegal values: op 0..15 (mostly 1..3), n 0 / 1 / NMAX /
 // NMAX + 1 / 4095, rows 0 / 1 / 65535, base so that the bank range ends exactly at DEPTH (+- 1),
 // addresses unaligned and with the DDR range ending exactly at 2^32 (+- 8) for the op's length.
@@ -39,7 +44,7 @@ module tb_pim_csr #(
   logic [ADDR_W-1:0] wr_addr = 0, rd_addr = 0;
   logic [31:0]       wr_data = 0, rd_data;
   logic [LV_W-1:0]   fifo_level = 0;
-  logic              push, start, busy, flush;
+  logic              push, start, busy, flush, push_busy;
   logic [127:0]      push_data;
 
   pim_csr #(.ADDR_W(ADDR_W), .NB(NB), .LB(16), .DEPTH(DEPTH), .NMAX(NMAX), .CMD_DEPTH(CMD_DEPTH),
@@ -48,7 +53,7 @@ module tb_pim_csr #(
     .wr_en_i(wr_en), .wr_addr_i(wr_addr), .wr_data_i(wr_data),
     .rd_en_i(rd_en), .rd_addr_i(rd_addr), .rd_data_o(rd_data),
     .push_o(push), .push_data_o(push_data), .fifo_ready_i(fifo_ready), .fifo_level_i(fifo_level),
-    .start_o(start), .busy_o(busy), .run_flush_o(flush), .done_i(done_i),
+    .start_o(start), .busy_o(busy), .push_busy_o(push_busy), .run_flush_o(flush), .done_i(done_i),
     .rd_err_i(rd_err), .wr_err_i(wr_err), .rd_stall_i(rd_stall), .wr_stall_i(wr_stall),
     .ev_mac_i(ev_mac), .ev_wrgb_i(ev_wrgb), .ev_rdmac_i(ev_rdmac), .done_ldw_i(dn_ldw),
     .done_wrgb_i(dn_wrgb), .done_mac_i(dn_mac));
@@ -57,13 +62,16 @@ module tb_pim_csr #(
              c_cov = new("coverage");
 
   // ---------------- model ----------------
-  logic [31:0] m_cmd[4];
+  localparam int PCHK = (($clog2((NMAX + 15) / 16 + 1) > $clog2((NMAX + 7) / 8 + 2)) ?
+                         $clog2((NMAX + 15) / 16 + 1) : $clog2((NMAX + 7) / 8 + 2)) + 1;
+  logic [31:0] m_cmd[4], p_cmd[4], ck[4];   // registers, copy of the checked push, view of the checks
+  int          m_pchk = 0;
   bit          m_busy, m_done, m_flush;
-  logic [7:0]  m_err;
+  logic [8:0]  m_err;
   logic [31:0] m_cyc, m_rdst, m_wrst, m_ops, m_stw, m_stm, m_str, m_nl, m_nx, m_nm;
 
   function automatic void model_reset();
-    m_cmd = '{0, 0, 0, 0};
+    m_cmd = '{0, 0, 0, 0}; p_cmd = '{0, 0, 0, 0}; ck = '{0, 0, 0, 0}; m_pchk = 0;
     m_busy = 0; m_done = 0; m_flush = 0; m_err = 0;
     m_cyc = 0; m_rdst = 0; m_wrst = 0; m_ops = 0; m_stw = 0; m_stm = 0; m_str = 0;
     m_nl = 0; m_nx = 0; m_nm = 0;
@@ -74,7 +82,7 @@ module tb_pim_csr #(
     case (a & ~3)
       A_ID:      return 32'h5049_0001;
       A_CONFIG:  return {16'(NMAX), 4'd4, 4'(NB), 8'd100};
-      A_STATUS:  return {8'd0, 16'(fifo_level), 5'd0, m_err != 0, m_done, m_busy};
+      A_STATUS:  return {8'd0, 16'(fifo_level), 4'd0, m_pchk != 0, m_err != 0, m_done, m_busy};
       A_ERR:     return 32'(m_err);
       A_CYCLES:  return m_cyc;
       A_RDSTALL: return m_rdst;
@@ -95,11 +103,11 @@ module tb_pim_csr #(
     endcase
   endfunction
 
-  // command fields and checks (pim.md)
-  function automatic int f_op();   return m_cmd[0][3:0]; endfunction
-  function automatic int f_n();    return m_cmd[0][15:4]; endfunction
-  function automatic int f_rows(); return m_cmd[0][31:16]; endfunction
-  function automatic int f_base(); return m_cmd[1][31:17]; endfunction
+  // command fields and checks (pim.md) of the command in ck
+  function automatic int f_op();   return ck[0][3:0]; endfunction
+  function automatic int f_n();    return ck[0][15:4]; endfunction
+  function automatic int f_rows(); return ck[0][31:16]; endfunction
+  function automatic int f_base(); return ck[1][31:17]; endfunction
   function automatic longint unsigned ddr_len();
     case (f_op())
       1: return longint'(f_rows()) * 8 * (1 + (f_n() + 7) / 8);
@@ -117,17 +125,18 @@ module tb_pim_csr #(
     b[0] = f_n() == 0 || f_n() > NMAX;
     b[1] = f_op() != 2 && f_rows() == 0;
     b[2] = f_op() != 2 && longint'(f_base()) + used() > DEPTH;
-    b[3] = longint'(m_cmd[2]) + ddr_len() > 64'h1_0000_0000;
+    b[3] = longint'(ck[2]) + ddr_len() > 64'h1_0000_0000;
     return b;
   endfunction
-  function automatic bit align_ok(); return m_cmd[2][2:0] == 0; endfunction
+  function automatic bit align_ok(); return ck[2][2:0] == 0; endfunction
 
   longint n_start = 0, n_flush = 0, n_busy_start = 0, n_badop_busy = 0, n_ctrl_done0 = 0,
-          n_ctrl_done1 = 0, n_w1c_set = 0, n_push = 0, n_err[8], n_desc[4], n_edge_ddr[3], n_edge_base = 0;
+          n_ctrl_done1 = 0, n_w1c_set = 0, n_push = 0, n_err[9], n_desc[4], n_edge_ddr[3], n_edge_base = 0,
+          n_push_reg_diff = 0;
 
   always @(negedge clk) if (rst_n) begin
-    bit ctrl, start_req, idle, op_ok, st, w1c, preq, pok;
-    logic [7:0] set, clr;
+    bit ctrl, start_req, idle, op_ok, st, w1c, preq, pok, pacc, pverd;
+    logic [8:0] set, clr;
     logic [3:0] db;
     logic [31:0] e;
     e = model_read(int'(rd_addr));
@@ -141,20 +150,26 @@ module tb_pim_csr #(
     if (start !== st || busy !== m_busy || (m_busy && flush !== m_flush))
       c_ctl.fail($sformatf("start_o %b busy_o %b flush %b, model %b %b %b", start, busy, flush, st, m_busy, m_flush));
     else c_ctl.pass();
-    // push
-    preq = wr_en && wr_addr < 256 && (wr_addr & ~3) == A_PUSH;
-    db   = desc_bad();
-    pok  = preq && is_op() && db == 0 && align_ok() && fifo_ready;
-    if (push !== pok || (pok && push_data !== {m_cmd[3], m_cmd[2], m_cmd[1], m_cmd[0]}))
-      c_push.fail($sformatf("push %b data %h, model %b %h", push, push_data, pok, {m_cmd[3], m_cmd[2], m_cmd[1], m_cmd[0]}));
+    // push: accepted in c, verdict on the copy in p
+    preq  = wr_en && wr_addr < 256 && (wr_addr & ~3) == A_PUSH;
+    pacc  = preq && m_pchk == 0;
+    pverd = m_pchk == 1;
+    ck    = p_cmd;
+    db    = desc_bad();
+    pok   = pverd && is_op() && db == 0 && align_ok() && fifo_ready;
+    if (push !== pok || (pok && push_data !== {p_cmd[3], p_cmd[2], p_cmd[1], p_cmd[0]}) ||
+        push_busy !== (m_pchk != 0))
+      c_push.fail($sformatf("push %b data %h push_busy %b, model %b %h %b", push, push_data, push_busy, pok,
+                            {p_cmd[3], p_cmd[2], p_cmd[1], p_cmd[0]}, m_pchk != 0));
     else c_push.pass();
     // coverage
     if (pok) begin
       n_push++;
-      if (longint'(m_cmd[2]) + ddr_len() == 64'h1_0000_0000) n_edge_ddr[f_op() - 1]++;
+      if (longint'(p_cmd[2]) + ddr_len() == 64'h1_0000_0000) n_edge_ddr[f_op() - 1]++;
       if (f_op() != 2 && longint'(f_base()) + used() == DEPTH) n_edge_base++;
     end
-    if (preq && is_op()) for (int i = 0; i < 4; i++) if (db[i] && (db & ~(4'b1 << i)) == 0) n_desc[i]++;
+    if (pverd && is_op()) for (int i = 0; i < 4; i++) if (db[i] && (db & ~(4'b1 << i)) == 0) n_desc[i]++;
+    if (pverd && {m_cmd[3], m_cmd[2], m_cmd[1], m_cmd[0]} != {p_cmd[3], p_cmd[2], p_cmd[1], p_cmd[0]}) n_push_reg_diff++;
     if (st) begin n_start++; if (wr_data[7:4] == 2) n_flush++; end
     if (start_req && !idle) n_busy_start++;
     if (start_req && !idle && !op_ok) n_badop_busy++;
@@ -163,16 +178,17 @@ module tb_pim_csr #(
     set = '0;
     set[0] = start_req && !idle;
     set[1] = start_req && !op_ok;
-    set[2] = preq && !is_op();
-    set[3] = preq && is_op() && db != 0;
-    set[4] = preq && is_op() && !align_ok();
+    set[2] = pverd && !is_op();
+    set[3] = pverd && is_op() && db != 0;
+    set[4] = pverd && is_op() && !align_ok();
     set[5] = rd_err;
     set[6] = wr_err;
-    set[7] = preq && is_op() && db == 0 && align_ok() && !fifo_ready;
+    set[7] = pverd && is_op() && db == 0 && align_ok() && !fifo_ready;
+    set[8] = preq && m_pchk != 0;
     w1c = wr_en && wr_addr < 256 && (wr_addr & ~3) == A_ERR;
-    clr = w1c ? wr_data[7:0] : '0;
+    clr = w1c ? wr_data[8:0] : '0;
     if ((set & clr) != 0) n_w1c_set++;
-    for (int b = 0; b < 8; b++) if (set[b]) n_err[b]++;
+    for (int b = 0; b < 9; b++) if (set[b]) n_err[b]++;
     // next state
     if (ctrl && idle && !(wr_data[0] && !op_ok)) m_done = 0;
     else if (done_i) m_done = 1;
@@ -188,6 +204,8 @@ module tb_pim_csr #(
     m_nl += dn_ldw; m_nx += dn_wrgb; m_nm += dn_mac;
     if (st) begin m_busy = 1; m_flush = wr_data[7:4] == 2; end
     else if (done_i) m_busy = 0;
+    if (pacc) begin m_pchk = PCHK; p_cmd = m_cmd; end
+    else if (m_pchk != 0) m_pchk--;
     if (wr_en && wr_addr < 256 && (wr_addr & ~3) >= A_CMD0 && (wr_addr & ~3) <= A_CMD3)
       m_cmd[((wr_addr & ~3) - A_CMD0) / 4] = wr_data;
   end
@@ -200,6 +218,7 @@ module tb_pim_csr #(
 
   function automatic logic [31:0] rnd_val(int a);
     int k = $urandom_range(11);
+    ck = m_cmd;                       // edge values from the current registers
     case (a)
       A_CMD0: begin
         int op = k < 9 ? $urandom_range(3, 1) : $urandom_range(15);
@@ -223,7 +242,7 @@ module tb_pim_csr #(
         endcase
       A_CTRL: return k < 6 ? {24'($urandom_range(31)), 4'($urandom_range(2, 1)), 3'($urandom), 1'b1} :
                      (k < 8 ? {24'($urandom), 4'($urandom), 3'($urandom), 1'($urandom)} : 32'h10);
-      A_ERR: return k < 6 ? 32'hFF : $urandom;
+      A_ERR: return k < 6 ? 32'h1FF : $urandom;
       default: return $urandom;
     endcase
   endfunction
@@ -279,8 +298,9 @@ module tb_pim_csr #(
     repeat (2) @(posedge clk);
     $display("coverage: starts %0d (flush %0d), pushes %0d, START_BUSY %0d (bad op %0d), CTRL at done %0d/%0d, W1C vs set %0d",
              n_start, n_flush, n_push, n_busy_start, n_badop_busy, n_ctrl_done0, n_ctrl_done1, n_w1c_set);
-    $display("ERR sets %p, BAD_DESC single reasons (n, rows, bank, ddr) %p, accepted edges ddr (LDW, WRGB, MACAB) %p bank %0d",
-             n_err, n_desc, n_edge_ddr, n_edge_base);
+    $display("ERR sets %p, BAD_DESC single reasons (n, rows, bank, ddr) %p, accepted edges ddr (LDW, WRGB, MACAB) %p bank %0d, CMD written during the push check %0d",
+             n_err, n_desc, n_edge_ddr, n_edge_base, n_push_reg_diff);
+    if (n_push_reg_diff == 0) c_cov.fail("no CMD write during a push check"); else c_cov.pass();
     if (n_start < 20 || n_flush == 0 || n_push < 20 || n_busy_start == 0 || n_badop_busy == 0 ||
         n_ctrl_done0 == 0 || n_ctrl_done1 == 0 || n_w1c_set == 0)
       c_cov.fail("a run / push / collision case did not happen");

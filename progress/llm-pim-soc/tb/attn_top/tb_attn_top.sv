@@ -12,9 +12,10 @@
 //   KV_SRC 1 (DDR): ATTN per group on the DDR cache (+ random head split).
 // Checks: o of every head (and p if p_en, random per op) == record outputs; 16-byte guards before
 // and after every o / p region unwritten; ERR == 0 after each op; CYCLES == e - s (STATUS model).
-// CSR reference model (every cycle): descriptor registers, ERR (W1C, set wins), done_sticky,
-// busy, start acceptance with an independent descriptor check, CYCLES / RD_STALL / WR_STALL / OPS,
-// and the read data of every register read.
+// CSR reference model (every cycle, docs/spec/attn.md 4): descriptor registers, ERR (W1C, set
+// wins), done_sticky, busy (check s + 1 .. v and op), call acceptance in s and the verdict in
+// v = s + CHK_CYC with an independent descriptor check of the descriptor latched in s,
+// CYCLES / RD_STALL / WR_STALL / OPS, and the read data of every register read.
 // +ERR=1: error paths and recovery: BAD_OP (op 0, 3, 15; KVW with KV_SRC 1), BAD_DESC (each
 // reason alone), MISALIGN, START_BUSY, SLVERR / DECERR on a q record read (RD_RESP) and on an o
 // write (WR_RESP); after each, a correct op must still give the golden result.
@@ -185,8 +186,12 @@ module tb_attn_top;
     longint unsigned qa, oa, pa, ka, va, ksa, vsa;
     int t, hs, kb, vb, pen, h0, nh, km, ly, seq, pos, kv0, nkv;
   } desc_t;
-  desc_t md;
-  int    m_err = 0, m_done = 0, m_busy = 0, m_kvw = 0;
+  desc_t md, mdl;                 // registers, descriptor latched by the accepted call
+  int    m_err = 0, m_done = 0, m_busy = 0, m_kvw = 0, m_chk = 0;
+  // check cycles (attn.md 4.1): KV_SRC 1: 18; KV_SRC 0: max(10, w(hs) + 1, w(kv) + w(hs) + 2),
+  // w(hs) = bits of min(KL, HS_MAX) = 8, w(kv) = bits of NKV - 1 (at least 1)
+  localparam int W_HS = $clog2(9), W_KV = (NKV > 1) ? $clog2(NKV) : 1;
+  localparam int CHK  = KV_SRC ? 18 : ((W_KV + W_HS + 2 > 10) ? W_KV + W_HS + 2 : 10);
   longint unsigned m_cyc = 0, m_rdst = 0, m_wrst = 0, m_ops = 0;
   logic [31:0] m_rd_exp;
   bit    m_rd_pend = 0;
@@ -225,7 +230,7 @@ module tb_attn_top;
     case (a & 'hFC)
       A_ID: return 32'h4154_0001;
       A_CONFIG: return {16'(TMAX), 4'd3, 1'(KV_SRC), 3'(H_PAR), 8'd100};
-      A_STATUS: return {29'd0, m_err != 0, 1'(m_done), 1'(m_busy)};
+      A_STATUS: return {29'd0, m_err != 0, 1'(m_done), 1'(m_busy || m_chk != 0)};
       A_ERR: return 32'(m_err);
       A_CYCLES: return 32'(m_cyc);
       A_RDST: return 32'(m_rdst);
@@ -251,9 +256,10 @@ module tb_attn_top;
       automatic int wa = int'(32'(dut.u_csr.wr_addr_i)), w = wa & 'hFC;
       automatic logic [31:0] wd = dut.u_csr.wr_data_i;
       automatic bit done = dut.run_done;
-      automatic bit idle = !m_busy || done;
+      automatic bit idle = (!m_busy && m_chk == 0) || done;
+      automatic bit verdict = m_chk == 1, was_busy = m_busy || m_chk != 0;
       automatic int set = 0, op = int'(wd[7:4]);
-      automatic bit sreq, op_ok, ok_d = 0, ok_a = 0, st;
+      automatic bit sreq, op_ok, acc, ok_d = 0, ok_a = 0, st;
       automatic logic [31:0] got;
       wr_hit = we && (wa >> 8) == 0;
       // read data of this cycle (state before the write of the same cycle)
@@ -266,40 +272,46 @@ module tb_attn_top;
       end
       // state compare (before this cycle's update)
       if (int'(dut.u_csr.err_q) !== m_err || int'(dut.u_csr.done_q) !== m_done ||
-          int'(dut.u_csr.busy_q) !== m_busy || longint'(dut.u_csr.cyc_q) !== m_cyc ||
+          int'(dut.u_csr.busy_q) !== m_busy || int'(dut.u_csr.chk_q) !== int'(m_chk != 0) ||
+          longint'(dut.u_csr.cyc_q) !== m_cyc ||
           longint'(dut.u_csr.rdst_q) !== m_rdst || longint'(dut.u_csr.wrst_q) !== m_wrst ||
           longint'(dut.u_csr.ops_q) !== m_ops)
         c_csr.fail($sformatf("state err %0h/%0h done %0d/%0d busy %0d/%0d cyc %0d/%0d ops %0d/%0d",
                              dut.u_csr.err_q, m_err, dut.u_csr.done_q, m_done, dut.u_csr.busy_q, m_busy,
                              dut.u_csr.cyc_q, m_cyc, dut.u_csr.ops_q, m_ops));
       else c_csr.pass();
-      // start
+      // call acceptance (s) and verdict (v) on the latched descriptor
       sreq  = wr_hit && w == A_CTRL && wd[0];
       op_ok = op == 1 || (op == 2 && KV_SRC == 0);
-      if (op_ok) begin
-        ok_d = d_ok(md, op == 2);
-        ok_a = al_ok(md, op == 2);
+      acc   = sreq && idle && op_ok;
+      if (verdict) begin
+        ok_d = d_ok(mdl, m_kvw);
+        ok_a = al_ok(mdl, m_kvw);
       end
-      st = sreq && idle && op_ok && ok_d && ok_a;
-      if (st !== dut.start) c_csr.fail($sformatf("start %b model %b (op %0d d %0d a %0d)", dut.start, st, op, ok_d, ok_a));
+      st = verdict && ok_d && ok_a;
+      if (st !== dut.start) c_csr.fail($sformatf("start %b model %b (kvw %0d d %0d a %0d)", dut.start, st, m_kvw, ok_d, ok_a));
       if (sreq && !idle) set |= 1;
       if (sreq && !op_ok) set |= 2;
-      if (sreq && idle && op_ok && !ok_d) set |= 4;
-      if (sreq && idle && op_ok && !ok_a) set |= 8;
+      if (verdict && !ok_d) set |= 4;
+      if (verdict && !ok_a) set |= 8;
       if (dut.rd_err_ev) set |= 16;
       if (dut.wr_err_ev) set |= 32;
       if (done && !m_busy) c_csr.fail("done while not busy");
       // update
+      if (acc) begin
+        m_chk = CHK;
+        mdl   = md;
+        m_kvw = op == 2;
+      end else if (m_chk != 0) m_chk--;
       if (st) begin
         m_busy = 1;
-        m_kvw = op == 2;
         n_starts++;
       end else if (done) m_busy = 0;
       if (wr_hit && w == A_CTRL && idle && !(wd[0] && !op_ok)) m_done = 0;
       else if (done) m_done = 1;
       m_err = (m_err & ~((wr_hit && w == A_ERR) ? int'(wd[5:0]) : 0)) | set;
-      if (st) begin m_cyc = 0; m_rdst = 0; m_wrst = 0; end
-      else if (dut.u_csr.busy_q) begin
+      if (acc) begin m_cyc = 0; m_rdst = 0; m_wrst = 0; end
+      else if (was_busy) begin
         m_cyc++;
         if (dut.rd_stall_ev) m_rdst++;
         if (dut.wr_stall_ev) m_wrst++;
@@ -320,7 +332,7 @@ module tb_attn_top;
 
   // ---------------- write-channel blocks and coverage ----------------
   int wblk = 0, split = 1, mstall = 0, pen_mode = 2;   // PEN 0 off, 1 on, 2 random
-  longint kvw_cyc = 0, kvw_n = 0;
+  longint kvw_cyc = 0, kvw_n = 0, kvw_split = 0;
   longint n_wfull = 0, n_credit = 0, n_pkhold = 0, n_pkv = 0, n_blk = 0;
   // a block starts (probability 1/8 per cycle) while the packer holds a beat, at most every
   // 200 cycles, and keeps WREADY at 0 for 100..1200 cycles
@@ -448,10 +460,22 @@ module tb_attn_top;
     logic [31:0] err, cyc;
     for (int j = 0; j < nkv; j++) put_kv(g[j * kvmul], l, j, t);
     csr_w(A_POS, 32'(t));
-    csr_w(A_KVH, {16'd0, 8'(nkv), 8'd0});
-    run_op(2, err, cyc);
-    kvw_cyc += cyc;
-    kvw_n++;
+    if (split && nkv > 1 && $urandom_range(1)) begin
+      // kv heads in two ops (the second with KVH0 > 0)
+      int k = $urandom_range(nkv - 1, 1);
+      csr_w(A_KVH, {16'd0, 8'(k), 8'd0});
+      run_op(2, err, cyc);
+      if (err != 0) c_err.fail($sformatf("KVW layer %0d pos %0d heads 0..%0d: ERR 0x%0h", l, t, k - 1, err));
+      else c_err.pass();
+      csr_w(A_KVH, {16'd0, 8'(nkv - k), 8'(k)});
+      run_op(2, err, cyc);
+      kvw_split++;
+    end else begin
+      csr_w(A_KVH, {16'd0, 8'(nkv), 8'd0});
+      run_op(2, err, cyc);
+      kvw_cyc += cyc;
+      kvw_n++;
+    end
     if (err != 0) c_err.fail($sformatf("KVW layer %0d pos %0d: ERR 0x%0h", l, t, err));
     else c_err.pass();
   endtask
@@ -479,9 +503,11 @@ module tb_attn_top;
   endtask
 
   // ---------------- error paths ----------------
+  // PS rule (attn.md 4.1): after the CTRL write wait for STATUS.busy = 0 (the check), then ERR
   task automatic expect_err(int op, int bits, string what, bit restore = 1);
     logic [31:0] err, cyc, st;
     csr_w(A_CTRL, 32'((op << 4) | 1));
+    do csr_r(A_STATUS, st); while (st[0] !== 1'b0);
     csr_r(A_ERR, err);
     csr_r(A_STATUS, st);
     if (err !== 32'(bits) || st[0] !== 1'b0) c_err.fail($sformatf("%s: ERR 0x%0h exp 0x%0h busy %b", what, err, bits, st[0]));
@@ -685,11 +711,15 @@ module tb_attn_top;
       if (n_wfull > 0 && n_pkhold > 0 && n_credit > 0) c_cov.pass();
       else c_cov.fail($sformatf("blocks did not reach the limits: wfull %0d pk %0d credit %0d", n_wfull, n_pkhold, n_credit));
     end
+    if (KV_SRC == 0 && split && nkv > 1) begin
+      $display("tb_attn_top: KVW split into two ops (second with KVH0 > 0) %0d times", kvw_split);
+      if (kvw_split > 0) c_cov.pass(); else c_cov.fail("KVW with KVH0 > 0 never run");
+    end
     wmem.check_idle();
     begin
       automatic tb_checker_q l = '{c_o, c_guard, c_err, c_csr, c_rd, c_rec};
       if (c_p.n_checks > 0) l.push_back(c_p);
-      if (wblk) l.push_back(c_cov);
+      if (wblk || (KV_SRC == 0 && split && nkv > 1)) l.push_back(c_cov);
       void'(tb_final_report(l));
     end
     $finish;

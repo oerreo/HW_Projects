@@ -4,6 +4,7 @@
 
 - RTL: `rtl/l1/pim_gb.sv`, `rtl/l1/pim_bank.sv`, `rtl/l1/pim_ctrl.sv`, `rtl/l2/pim_core.sv`, `rtl/l3/pim_csr.sv`, `rtl/l3/pim_top.sv`. 재사용(수정 없음): `ram_sdp`, `sync_fifo`, `dotp`, `mac_row`(LANES 16), `gemv_scale`, `rshr_sat`, `axil_slave`, `axi_rd_eng`, `axi_wr_eng`.
 - golden: `model/src/bank.c`의 `bank_pack`/`bank_gemv`(BANK_ROW, nbank 4), `bimg_pack`(bank RAM image), `bank_stat_t`(명령 수), `k_gemv`(K_GEMV 레코드). TB 쪽 DPI는 `tb/dpi/kdpi.c`의 `kd_rec_bank`, `kd_bank_syn`(이번에 추가, 연산은 모두 `bank.c`).
+- S4-6b(2026-11-20): push 검사(`pim_csr`)와 LDW 읽기 길이(`pim_ctrl`)의 runtime 곱셈을 `umul_seq`(순차 shift-add)로 바꿨다. 판정과 데이터는 같고 push 검사와 LDW 읽기 명령의 timing이 바뀌었다(4.1, 5, 6절).
 - 표기: cycle 수는 Questa 시뮬레이션(`axi_mem_slave` 모델, stall 없음, read/B latency 1)의 값이며 보드 값이 아니다.
 
 ## 1. 연산
@@ -43,15 +44,15 @@
 | 0x00 | ID | R | 0x50490001 | [31:16] 0x5049("PI"), [15:0] 버전 1 |
 | 0x04 | CONFIG | R | | [7:0] `FCLK_MHZ`, [11:8] NB(4), [15:12] log2(LB) = 4, [31:16] `NMAX`(1024) |
 | 0x08 | CTRL | W | | bit0 start, [7:4] op(1 = RUN, 2 = FLUSH). 읽으면 0 |
-| 0x0C | STATUS | R | 0 | bit0 busy, bit1 done_sticky, bit2 err_any(ERR != 0), [23:8] 명령 FIFO에 있는 명령 수 |
-| 0x10 | ERR | R/W1C | 0 | bit0 START_BUSY, bit1 BAD_OP, bit2 BAD_CMD, bit3 BAD_DESC, bit4 MISALIGN, bit5 RD_RESP, bit6 WR_RESP, bit7 FIFO_OVF |
+| 0x0C | STATUS | R | 0 | bit0 busy, bit1 done_sticky, bit2 err_any(ERR != 0), bit3 push_busy(push 검사 중, S4-6b), [23:8] 명령 FIFO에 있는 명령 수 |
+| 0x10 | ERR | R/W1C | 0 | bit0 START_BUSY, bit1 BAD_OP, bit2 BAD_CMD, bit3 BAD_DESC, bit4 MISALIGN, bit5 RD_RESP, bit6 WR_RESP, bit7 FIFO_OVF, bit8 PUSH_BUSY(S4-6b) |
 | 0x14 | CYCLES | R | 0 | 마지막 run의 cycle 수(4절) |
 | 0x18 | RD_STALL | R | 0 | 같은 구간에서 core가 read beat를 받을 수 있는데 없던 cycle 수 |
 | 0x1C | WR_STALL | R | 0 | 같은 구간에서 packer의 beat를 `axi_wr_eng`가 받지 못한 cycle 수 |
 | 0x20 | OPS | R | 0 | reset 이후 끝난 명령 수(LDW + WRGB + MACAB) |
 | 0x24 | CONFIG2 | R | | [15:0] DEPTH(bank word 수, 4096), [31:16] CMD_DEPTH(명령 FIFO 깊이, 32) |
 | 0x40..0x4C | CMD0..CMD3 | RW | 0 | 만들고 있는 명령(32비트 그대로 저장) |
-| 0x50 | CMD_PUSH | W | | 쓰면 {CMD3, CMD2, CMD1, CMD0}을 검사해 FIFO에 넣는다(쓴 값은 무시). 읽으면 0 |
+| 0x50 | CMD_PUSH | W | | 쓰면 {CMD3, CMD2, CMD1, CMD0}의 사본을 검사해 FIFO에 넣는다(4.1, 쓴 값은 무시). 읽으면 0 |
 | 0x60 | ST_WRGB | R | 0 | `bank_stat_t.wrgb`: WRGB의 32 B 단위 수(WRGB마다 ceil(n/32)) |
 | 0x64 | ST_MAC | R | 0 | `bank_stat_t.mac`: 전 bank MAC step 수(MACAB마다 ceil(rows/4) x ceil(n/16)) |
 | 0x68 | ST_RDMAC | R | 0 | `bank_stat_t.rdmac`: gather한 결과 수(MACAB마다 rows) |
@@ -63,8 +64,14 @@
 
 ## 4. 실행 규칙
 
-### 4.1 CMD_PUSH 검사 (push가 수행되는 cycle의 CMD0..CMD3)
-| 조건 | 결과 |
+### 4.1 CMD_PUSH 검사 (S4-6b: 순차 검사)
+CMD_PUSH 쓰기가 수행되는 cycle을 c라 한다. 검사 중이 아니면 c에 CMD0..CMD3의 사본을 잡고 `umul_seq` 두 개(`ceil(rows/NB) x ceil(n/16)`, `rows x (1 + ceil(n/8))`)를 시작한다. 판정은 **p = c + PCHK_CYC**에 사본으로 내린다. `PCHK_CYC = max(bits(ceil(NMAX/16)), bits(ceil(NMAX/8) + 1)) + 1`(bits(x) = x를 담는 비트 수, 곱셈기의 multiplier 폭; NMAX 1024에서 max(7, 8) + 1 = **9**, NMAX 256에서 7). 판정 결과는 S4-5의 조합 검사와 bit 단위로 같고 시점만 p로 옮겨졌다(피연산자 폭은 n <= NMAX일 때 정확하고, n > NMAX면 BAD_DESC가 이미 참이다).
+
+- STATUS.push_busy = 1은 c + 1 .. p. 이 구간의 CMD_PUSH 쓰기는 **PUSH_BUSY**(ERR bit8)를 set하고 무시된다(검사도 push도 없음). p 다음 cycle부터 새 CMD_PUSH를 받는다.
+- 사본을 쓰므로 c 이후의 CMD0..CMD3 쓰기는 검사 중인 명령에 영향이 없다.
+- 아래 표의 결과(push 또는 ERR set)는 모두 cycle p에 일어난다(ERR는 p + 1부터, FIFO level은 p + 1부터 보임). FIFO_OVF는 p의 FIFO 상태로 정한다.
+
+| 조건 (p, 사본) | 결과 |
 |---|---|
 | op가 1..3이 아님 | BAD_CMD만. FIFO에 넣지 않음 |
 | BAD_DESC: n이 0 또는 > NMAX; LDW/MACAB에서 rows = 0 또는 base + ceil(rows/4) ceil(n/16) > DEPTH; DDR 범위가 2^32를 넘음(LDW addr + rows 8 (1 + ceil(n/8)), WRGB addr + n, MACAB addr + 4 rows) | BAD_DESC. FIFO에 넣지 않음 |
@@ -86,16 +93,18 @@ CTRL 쓰기가 수행되는 cycle을 s라 한다. "idle"은 busy가 아니거나
 | busy(끝나는 cycle 아님), start = 1 | START_BUSY(op가 틀리면 BAD_OP도). 무시 |
 | busy, start = 0 | 영향 없음 |
 
-- run 종료 e (RUN): busy인 첫 cycle 중 명령 FIFO가 비었고, `pim_core`에 진행 중인 것이 없고(컨트롤러 idle, y가 모두 core를 떠남, 마지막 write 명령이 engine에 넘어감), `axi_wr_eng`에 남은 명령이 없는(마지막 B를 받은 다음 cycle) cycle. run 중에 push한 명령도 같은 run이 실행한다. 빈 FIFO로 RUN하면 CYCLES = 1.
-- FLUSH의 e: busy인 첫 cycle 중 FIFO가 빈 cycle(CYCLES = 버린 명령 수 + 1).
+- run 종료 e (RUN): busy인 첫 cycle 중 push 검사 중이 아니고(STATUS.push_busy = 0, S4-6b), 명령 FIFO가 비었고, `pim_core`에 진행 중인 것이 없고(컨트롤러 idle, y가 모두 core를 떠남, 마지막 write 명령이 engine에 넘어감), `axi_wr_eng`에 남은 명령이 없는(마지막 B를 받은 다음 cycle) cycle. run 중에 push한 명령도 같은 run이 실행한다. 빈 FIFO로 RUN하면 CYCLES = 1.
+- FLUSH의 e: busy인 첫 cycle 중 push 검사 중이 아니고 FIFO가 빈 cycle(push 검사가 없으면 CYCLES = 버린 명령 수 + 1).
+- push 검사 중에 RUN을 시작하면 run은 그 명령의 판정을 기다린다(정상이면 FIFO에 들어가 같은 run이 실행하고, 오류면 run이 끝난다). "run 중에 push한 명령도 같은 run이 실행한다"는 규칙이 push 검사 지연 뒤에도 유지된다.
 - done_sticky: e에 set(e + 1부터 보임), 같은 cycle의 CTRL clear가 이긴다. ERR: W1C, 같은 bit의 set과 clear가 겹치면 set이 남는다. RD_RESP/WR_RESP는 RRESP[1]/BRESP[1]인 beat/응답마다 set되고 데이터는 그대로 쓰인다(run은 끝까지 간다).
 - 카운터: CYCLES = e - s. RD_STALL, WR_STALL은 busy cycle 중 조건이 참인 cycle만 센다.
 
 ### 4.3 PS 호출 순서
-1. (초기화 1회) 행 레코드를 DDR에 만들고 flush. 행렬마다 LDW를 push(36개, FIFO가 차면 RUN 후 STATUS[23:8]을 보며 나머지를 push), `CTRL = 0x11`, done_sticky polling.
+1. (초기화 1회) 행 레코드를 DDR에 만들고 flush. 행렬마다 LDW를 push(36개, FIFO가 차면 RUN 후 STATUS[23:8] + STATUS[3]을 보며 나머지를 push), `CTRL = 0x11`, done_sticky polling.
 2. token마다: x를 쓰고 flush, WRGB/MACAB를 push(layer 하나 11개 또는 token 전체 57개를 FIFO 여유를 보며), `CTRL = 0x11`, done_sticky polling.
 3. `ERR`(0이 아니면 W1C), `CYCLES`, `RD_STALL`, `WR_STALL`, 카운터. y를 invalidate.
 - 잘못 넣은 명령은 `CTRL = 0x21`(FLUSH)로 버린다.
+- push 규칙(S4-6b): CMD_PUSH 사이를 PCHK_CYC + 1 cycle 이상 둔다(CMD0..CMD3 + CMD_PUSH 다섯 번의 AXI-Lite 쓰기는 `axil_slave`에서 최소 2 cycle 간격이라 10 cycle 이상이 되어 NMAX 1024에서는 자동으로 지켜진다. CMD_PUSH만 반복할 때는 STATUS.push_busy를 본다). FIFO 여유는 level + push_busy로 센다. push 오류(ERR)는 push_busy = 0이 된 뒤에 읽는다.
 
 ## 5. 구성
 
@@ -117,7 +126,7 @@ pim_core:
   - 두 round의 마지막 word는 4(NB) cycle 이상 떨어진다(명령 경계 포함). 그래서 gather가 끝나기 전에 다음 round 결과가 MAC_REG를 덮지 않는다. nw >= 4면 round가 빈틈 없이 이어지고, nw < 4(n <= 48)면 round 하나가 4 cycle이다.
   - round 시작 때 그 round의 행 수만큼 y FIFO credit을 잡는다(잡은 수 - y FIFO에서 나간 수 + round 행 수 <= Y_DEPTH). y 쪽 backpressure는 이것으로만 처리하고 bank pipeline에는 backpressure가 없다.
   - MACAB는 앞 MACAB의 write 명령이 engine에 넘어간 뒤에 받는다. 컨트롤러는 MACAB의 마지막 word를 읽은 다음 cycle에 다음 명령을 받을 수 있다(gather와 scale은 뒤에서 이어진다. xm과 sh는 round마다 gather 쪽에 함께 넘어간다).
-- `LDW`: 행 레코드 beat를 둘씩 묶어 word를 만든다(header beat의 wm, 열 >= n은 0, tag는 첫 word만). 마지막 행 뒤에 빈 slot을 0 word로 채운다(ceil(rows/4) x 4 - rows 행 x nw word, 한 cycle에 하나). 컨트롤러는 마지막 bank 쓰기의 다음 cycle에 idle.
+- `LDW`: 읽기 길이 `rows x 8 (1 + ceil(n/8))`를 `umul_seq`로 구한다(S4-6b). 명령 handshake cycle h에 곱셈을 시작하고 읽기 명령은 **h + 1 + LDW_CYC**에 낸다(LDW_CYC = bits(NMAX/8 + 1) + 1, NMAX 1024에서 9; WRGB는 h + 1 그대로). 행 레코드 beat를 둘씩 묶어 word를 만든다(header beat의 wm, 열 >= n은 0, tag는 첫 word만). 마지막 행 뒤에 빈 slot을 0 word로 채운다(ceil(rows/4) x 4 - rows 행 x nw word, 한 cycle에 하나). 컨트롤러는 마지막 bank 쓰기의 다음 cycle에 idle.
 - MAC_REG("double buffer", `arch.md` 3.2): `mac_row`의 누산기(다음 행을 바로 시작)와 그 뒤의 MAC_REG(행 끝에 latch, gather가 읽을 때까지 유지)의 두 단이다. 위의 round 간격 규칙이 있어 bank당 레지스터 하나로 충분하다.
 - y 출력 FIFO는 `hierarchy.md` 1절의 "ram_sdp y buffer" 대신 `sync_fifo`(32 x 33: y + 명령의 마지막 표시)다. 깊이 32는 n = 64 행렬에서 credit이 처리율을 막지 않는 값이다(아래 측정에서 stall 없는 run의 credit 대기 0 cycle).
 - 하위 모듈은 수정 없이 인스턴스만 했다.
@@ -140,16 +149,16 @@ pim_core:
 |---|---|---|
 | sum ceil(rows/4) x ceil(n/16) | 4,072 / token | `arch.md` 3.4의 4,072와 같음 |
 | 컨트롤러 MACAB 점유 합 | 4,108 / token | 4,072 + MACAB 36회 x 1 |
-| `pim_top` run CYCLES 합, token 하나를 한 run(57 명령) | 4,501 ~ 4,506 | `axi_mem_slave` latency 1, stall 없음 |
-| 같은 것, layer마다 한 run(6 run: layer 5 + cls) | 4,658 ~ 4,676 | run 시작/종료(마지막 B) 오버헤드가 run마다 붙음 |
+| `pim_top` run CYCLES 합, token 하나를 한 run(57 명령) | 4,499 ~ 4,506 (S4-6b 재측정; S4-6 4,501 ~ 4,506) | `axi_mem_slave` latency 1, stall 없음. TB는 push 검사가 끝난 뒤 RUN(4.3) |
+| 같은 것, layer마다 한 run(6 run: layer 5 + cls) | 4,663 ~ 4,676 (S4-6: 4,658 ~ 4,676) | run 시작/종료(마지막 B) 오버헤드가 run마다 붙음 |
 | 같은 것, 레코드마다 WRGB + MACAB 한 run(36 run) | 약 6,950 | |
-| LDW 36개(가중치 전체 적재) 한 run | 36,305 | 행 레코드 288,704 B = 36,088 beat + 오버헤드, 초기화 1회 |
+| LDW 36개(가중치 전체 적재) 한 run | 36,629 (S4-6: 36,305) | 행 레코드 288,704 B = 36,088 beat + 오버헤드, 초기화 1회. S4-6b: LDW마다 LDW_CYC 9 = +324 |
 
 - GEMV 가속기형 P = 1의 같은 260K token은 37,596 CYCLES(`gemv_acc.md` 5절, 같은 메모리 모델)다. 비율: MAC cycle만 36,446 / 4,072 = 8.95배(`arch.md` 3.4 [계산]), run CYCLES 37,596 / 4,504 = **8.35배**(token 한 run), 37,596 / 4,670 = 8.05배(layer마다 run) [측정, 시뮬레이션].
 - 호출당 고정 항: token 한 run에서 MAC 외 432 cycle / token(WRGB 21회의 x 적재(8~22 beat + engine 왕복)와 MACAB 36회의 1 cycle, run 종료의 y 쓰기 꼬리). 보드의 DDR latency와 ARM 쪽 비용(push 4~5회 AXI-Lite 쓰기 x 57)은 포함되지 않았다.
 
 ### 6.3 `pim_top` MACAB 하나의 run (stall 없음, latency 1)
-s 기준으로 행 r(round i = r div 4, bank b = r mod 4)의 y가 core 출력에 valid인 cycle은 `ty(r) = 2 + i P + nw - 1 + L_BANK + b + L_S + 1`(명령은 s + 1에 pop). y 쓰기는 `gemv_acc.md` 5절과 같은 규칙: beat j(행 2j, 2j+1)가 write buffer에 들어가는 시각 h_j = ty(min(2j + 1, rows - 1)) + 1, burst k(16 beat와 4 KiB로 나눔)의 첫 W = max(h_jk + 3, we_(k-1) + 1), 마지막 W = we_k. **CYCLES = we_last + 3**(마지막 B는 we_last + 2, write engine이 idle이 되는 다음 cycle이 e). TB(`+CYC`)가 단일 MACAB run 180개(PIPE 3종)에서 모두 일치를 확인했다.
+s 기준으로 행 r(round i = r div 4, bank b = r mod 4)의 y가 core 출력에 valid인 cycle은 `ty(r) = 2 + i P + nw - 1 + L_BANK + b + L_S + 1`(명령은 s + 1에 pop). y 쓰기는 `gemv_acc.md` 5절과 같은 규칙: beat j(행 2j, 2j+1)가 write buffer에 들어가는 시각 h_j = ty(min(2j + 1, rows - 1)) + 1, burst k(16 beat와 4 KiB로 나눔)의 첫 W = max(h_jk + 3, we_(k-1) + 1), 마지막 W = we_k. **CYCLES = we_last + 3**(마지막 B는 we_last + 2, write engine이 idle이 되는 다음 cycle이 e). TB(`+CYC`)가 단일 MACAB run 180개(PIPE 3종)에서 모두 일치를 확인했다. S4-6b부터 이 식은 push 검사가 끝나 명령이 FIFO에 있는 상태에서 RUN할 때의 식이다(TB는 STATUS.push_busy = 0을 확인한 뒤 RUN).
 
 ## 7. 시뮬레이션 검증 (2026-11-19)
 | test | 내용 | run |
@@ -164,10 +173,13 @@ s 기준으로 행 r(round i = r div 4, bank b = r mod 4)의 y가 core 출력에
 - mutation 29개(`sim/.mut5/m.py`): `pim_gb` 2, `pim_bank` 2, `pim_ctrl` 10, `pim_core` 3, `pim_csr` 3, `pim_top` 9. 동치가 아닌 28개 모두 검출(`sim/.mut5/res_first.txt`, `res.txt`). 살아남은 1개(`top_flush`: FIFO pop을 `core_cmd_ready`로만 함)는 동치다: FLUSH는 run이 끝난(core idle) 뒤에만 시작하므로 FLUSH 중 `core_cmd_ready`가 항상 1이다. 대신 FLUSH가 명령을 실행하게 하는 mutant(`top_flushexec`)를 추가해 검출했다.
 - lint: `vlog -lint=full`, `vopt -lint=full`(6개 모듈 + `pim_top` PIPE (0,0), (4,4)) 경고 0.
 
+- S4-6b 재검증(2026-11-20): `pim_csr` 5 run(push 검사 timing, PUSH_BUSY, STATUS bit3, 검사 중 CMD 쓰기, 모든 ERR bit 9개), `pim_ctrl` 14 run(LDW 읽기 명령이 handshake + 1 + LDW_CYC, WRGB는 + 1인지 매 명령 검사 추가), `pim_core` 12 run, `pim_top` 16 run(참조 모델에 push 검사, run 종료 조건 추가; push 검사 중 RUN 4회와 run 종료가 push 검사로 늦춰진 cycle 도달 요구) 모두 통과. token run CYCLES는 MACAB/WRGB 경로가 바뀌지 않아 S4-6과 같은 범위이고(차이는 TB 무작위 y 주소), LDW run은 +324.
+
 ## 8. 자원 관점 [계산, 합성 안 함]
 - 곱셈기: bank당 int8 x int8 16개(`dotp` LANES 16) x 4 = 64, `gemv_scale` 3(25x17, 41x17을 24+17로 나눔) = 67개(`arch.md` 8절 67과 같음). int8 곱을 LUT로 두면 DSP는 3개다(Vivado의 판단 [미확인]).
 - BRAM: bank 하나 = 144비트 x 4096 word = 589,824 비트 = BRAM36(512 x 72) 2개 폭 x 8개 깊이 = 16개, 4 bank 64개(`arch.md` 3.1). 144비트 중 tag 16비트가 두 BRAM36의 parity 비트(각 8비트)에 들어가야 64개가 된다. 추론형 `ram_sdp`가 parity를 데이터로 쓰도록 매핑되는지는 [미확인](`arch.md` D6, 안 되면 `fpga/` wrapper에서 RAMB36E1).
 - 그 밖: `pim_gb` 64비트 x 64 word 두 개(1 KiB, LUTRAM 예상), 명령 FIFO 32 x 128(`sync_fifo`는 레지스터 배열 4,096비트; LUTRAM 추론 여부 [미확인]), y FIFO 32 x 33, AXI engine FIFO(rd 64 x 65, wr 32 x 64).
+- runtime 곱셈(S4-6b): S4-5의 push 검사 `ceil(rows/4) x ceil(n/16)`(15 x 7비트), `rows x (1 + ceil(n/8))`(16 x 8비트)와 `pim_ctrl`의 LDW 길이(16 x 8비트) 조합 곱을 `umul_seq` 3개로 바꿨다. `ceil(rows/NB)`는 상수 나눗셈(NB = 4이면 shift)으로 남았다.
 - 깊이 방향 mux: bank RAM 8개 깊이의 출력 mux와 gather 4:1 mux(41비트)가 `gemv_scale` 첫 곱셈 앞에 조합으로 있다. 100 MHz 타이밍 위험 [추정, 미측정].
 
 ## 9. 정한 세부와 확인하지 못한 것

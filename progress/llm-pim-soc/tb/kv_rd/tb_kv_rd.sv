@@ -30,6 +30,7 @@ module tb_kv_rd;
   logic                  rq_valid_i = 1'b0, rq_ready_o, rq_pass_i = 1'b0, rq_ek2_i = 1'b0, rq_ev2_i = 1'b0;
   logic [TW-1:0]         rq_t_i = '0;
   logic [HS_W-1:0]       rq_hs_i = '0;
+  logic [TW+HS_W-1:0]    rq_ths_i = '0;
   logic [31:0]           rq_kaddr_i = '0, rq_vaddr_i = '0, rq_ksaddr_i = '0, rq_vsaddr_i = '0;
   logic                  rc_valid, rc_ready, d_valid, d_ready, d_last;
   logic [31:0]           rc_addr, rc_bytes;
@@ -40,7 +41,7 @@ module tb_kv_rd;
   logic signed [E_W-1:0] kv_ke_o, kv_ve_o;
 
   kv_rd #(.KL(KL), .HS_MAX(HS_MAX), .TMAX(TMAX), .CH(CH)) dut (
-    .clk, .rst_n, .rq_valid_i, .rq_ready_o, .rq_pass_i, .rq_t_i, .rq_hs_i, .rq_ek2_i, .rq_ev2_i,
+    .clk, .rst_n, .rq_valid_i, .rq_ready_o, .rq_pass_i, .rq_t_i, .rq_hs_i, .rq_ths_i, .rq_ek2_i, .rq_ev2_i,
     .rq_kaddr_i, .rq_vaddr_i, .rq_ksaddr_i, .rq_vsaddr_i,
     .rc_valid_o(rc_valid), .rc_ready_i(rc_ready), .rc_addr_o(rc_addr), .rc_bytes_o(rc_bytes),
     .d_valid_i(d_valid), .d_ready_o(d_ready), .d_data_i(d_data),
@@ -174,12 +175,13 @@ module tb_kv_rd;
     rq_pass_i   <= pass;
     rq_t_i      <= TW'(T);
     rq_hs_i     <= HS_W'(hs);
+    rq_ths_i    <= (TW + HS_W)'(T * hs);   // T x hs, computed by the requester (attn_csr)
     rq_ek2_i    <= ek == 2;
     rq_ev2_i    <= ev == 2;
     rq_kaddr_i  <= 32'(ka); rq_vaddr_i <= 32'(va); rq_ksaddr_i <= 32'(ksa); rq_vsaddr_i <= 32'(vsa);
     @(posedge clk);
     rq_valid_i <= 1'b0;
-    rq_kaddr_i <= $urandom(); rq_t_i <= $urandom();
+    rq_kaddr_i <= $urandom(); rq_t_i <= $urandom(); rq_ths_i <= $urandom();
     // wait until this request is consumed
     while (expq.size() > 0) @(posedge clk);
     c_cnt.pass();

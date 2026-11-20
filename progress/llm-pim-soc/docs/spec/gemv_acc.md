@@ -46,28 +46,31 @@
 
 ## 3. 호출 규칙
 
-CTRL 쓰기가 `axil_slave`에서 수행되는 cycle을 s라 한다. "idle"은 busy가 아니거나, 그 cycle이 호출이 끝나는 cycle(e)인 경우다(끝나는 cycle에 쓴 start는 수락된다, pqc 규칙).
+CTRL 쓰기가 `axil_slave`에서 수행되는 cycle을 s라 한다. "idle"은 busy(검사 중 또는 호출 중)가 아니거나, 그 cycle이 호출이 끝나는 cycle(e)인 경우다(끝나는 cycle에 쓴 start는 수락된다, pqc 규칙).
+
+S4-6b부터 descriptor 검사는 순차 계산이다(`W_ADDR + ROWS x RB`의 곱을 `umul_seq`로 구한다. 조합 곱셈기 없음). 판정 cycle은 **v = s + C_CHK**, `C_CHK = NBW + 1`, `NBW = bits(NMAX/8 + 2)`(곱셈기의 multiplier 폭, 기본 NMAX 1024에서 8, 그래서 **C_CHK = 9**). 판정 결과(어떤 descriptor가 BAD_DESC/MISALIGN인지)는 S4-4의 조합 검사와 bit 단위로 같고, 시점만 v로 옮겨졌다.
 
 | 조건 (CTRL 쓰기) | 결과 |
 |---|---|
-| idle, start = 1, op = 1, descriptor 정상 | 시작. `start_o` = 1(cycle s), descriptor를 내부에 latch(s + 1부터 유효, 진행 중인 호출은 이후의 레지스터 쓰기에 영향받지 않음), done_sticky clear, CYCLES/RD_STALL/WR_STALL = 0 |
-| idle, start = 1, op = 1, descriptor 오류 | 시작 안 함. BAD_DESC 그리고/또는 MISALIGN(독립적으로 set), done_sticky clear |
-| idle, start = 1, op != 1 | BAD_OP만. done_sticky 불변(pqc 규칙: 정의되지 않은 op는 아무것도 바꾸지 않음) |
+| idle, start = 1, op = 1 | 수락. descriptor를 latch(s + 1부터 유효, 이후의 레지스터 쓰기는 이 호출에 영향 없음), done_sticky clear, CYCLES/RD_STALL/WR_STALL = 0, STATUS.busy = 1(s + 1부터). 검사는 s + 1 .. v |
+| (수락된 호출의 v) descriptor 정상 | 시작. `start_o` = 1(cycle v), 호출은 v + 1부터 |
+| (수락된 호출의 v) descriptor 오류 | 시작 안 함. BAD_DESC 그리고/또는 MISALIGN(독립적으로 set, v + 1부터 보임). STATUS.busy = 0(v + 1부터), done 없음, OPS 불변, CYCLES = C_CHK |
+| idle, start = 1, op != 1 | BAD_OP만(cycle s). done_sticky 불변(pqc 규칙: 정의되지 않은 op는 아무것도 바꾸지 않음) |
 | idle, start = 0 | done_sticky clear만 |
-| busy(끝나는 cycle 아님), start = 1 | START_BUSY(op != 1이면 BAD_OP도). 무시, descriptor 검사 안 함 |
+| busy(검사 중 또는 호출 중, 끝나는 cycle 아님), start = 1 | START_BUSY(op != 1이면 BAD_OP도). 무시. 판정 cycle v도 busy다 |
 | busy, start = 0 | 영향 없음 |
 
 - descriptor 오류: BAD_DESC = ROWS 0 또는 > 65535, N 0 또는 > NMAX, FLAGS[1:0] = 0, 쓰이는 버퍼가 2^32를 넘음(`W_ADDR + ROWS x RB`, `X_ADDR + N`, `y_en`이면 `Y_ADDR + 4 ROWS`). MISALIGN = `W_ADDR`, `X_ADDR`, (`y_en`이면) `Y_ADDR`의 [2:0] != 0. `y_en = 0`이면 `Y_ADDR`은 검사하지 않는다. 이 검사로 engine이 거절할 명령(정렬, 길이 0, 2^32 넘김)은 생기지 않는다(시뮬레이션 검사 `L3_ENGCMD`).
 - done_sticky: 호출이 끝난 cycle e에 set(그 다음 cycle부터 보임), 위 표의 clear가 같은 cycle이면 clear가 이긴다.
 - ERR: W1C. 같은 cycle에 같은 bit의 set과 clear가 겹치면 set이 남는다. RD_RESP/WR_RESP는 RRESP[1] 또는 BRESP[1]인 beat/응답마다 set(engine의 sticky가 아니라 AXI 포트의 handshake로 직접). 오류 응답이 있어도 데이터는 그대로 쓰이고 호출은 끝까지 간다.
-- 호출 종료 e: 시작한 모든 slice의 `gemv_core`가 `done_o`(마지막 y 수락 다음 cycle)를 냈고, `y_en`이면 y 쓰기의 마지막 B handshake가 있었고, `argmax_en`이면 `argmax_red`가 `done_o`를 낸 첫 cycle. busy = 1은 s + 1 .. e, done_sticky와 OPS 증가는 e + 1부터 보인다.
-- 카운터: CYCLES는 busy cycle 수 = e - s. RD_STALL, WR_STALL도 busy cycle 중 조건이 참인 cycle만 센다. 32비트에서 wrap.
+- 호출 종료 e: 시작한 모든 slice의 `gemv_core`가 `done_o`(마지막 y 수락 다음 cycle)를 냈고, `y_en`이면 y 쓰기의 마지막 B handshake가 있었고, `argmax_en`이면 `argmax_red`가 `done_o`를 낸 첫 cycle. STATUS.busy = 1은 s + 1 .. e(검사 포함), `busy_o`(top으로 가는 호출 상태)는 v + 1 .. e, done_sticky와 OPS 증가는 e + 1부터 보인다.
+- 카운터: CYCLES는 수락(s)부터 센 busy cycle 수 = e - s(검사 C_CHK 포함). RD_STALL, WR_STALL도 같은 구간에서 조건이 참인 cycle만 센다. 검사에서 거절된 호출은 CYCLES = C_CHK. 32비트에서 wrap.
 
 ### PS 호출 순서 (`arch.md` 7.3)
 1. x를 쓰고 `Xil_DCacheFlushRange(x, N)`. (행 레코드는 초기화 때 한 번.)
 2. `X_ADDR`, `W_ADDR`, `Y_ADDR`, `ROWS`, `N`, `XM`, `EXP`, `FLAGS` 중 바뀐 것을 쓴다. 이전 호출이 도는 중에 써도 된다(진행 중인 호출은 latch한 값을 쓴다).
 3. `CTRL = 0x11`.
-4. `STATUS.done_sticky` polling.
+4. `STATUS` polling: busy = 0이 될 때까지(검사 C_CHK cycle을 포함). 그 뒤 done_sticky = 1이면 정상 종료, 아니면 ERR(BAD_DESC/MISALIGN)을 본다. 검사 판정은 s + C_CHK + 1부터 보이므로 CTRL 직후의 ERR 읽기로 판단하지 않는다.
 5. `ERR`(0이 아니면 W1C), `CYCLES`, `RD_STALL`, `WR_STALL`, (`argmax_en`이면) `ARGMAX_IDX`, `ARGMAX_VAL`.
 6. `y_en`이면 `Xil_DCacheInvalidateRange(y, 4 ROWS)`.
 
@@ -93,16 +96,16 @@ y merge (행 순서: 행 r은 slice r mod P) -> argmax_red (argmax_en)
 
 ## 5. CYCLES 식 (메모리 stall 없음, read latency 1, B latency 1, `MAX_BURST` = 16, `OUTS` = 4, 기본 PIPE)
 
-기호: `nb = ceil(N/8)`, `R = 1 + nb`(행 레코드 beat 수). 시각은 s 기준.
+기호: `nb = ceil(N/8)`, `R = 1 + nb`(행 레코드 beat 수). 아래 1~6의 시각은 판정 cycle v 기준이고(S4-4의 s 기준 식과 같다), **CYCLES = C_CHK + (v 기준 식)**이다(C_CHK = 9, NMAX 1024). S4-6b의 측정값은 모든 호출에서 S4-4 값 + 9였다(아래 표).
 
 1. read 쪽. engine 명령 하나는 (burst 수 + 1) cycle의 AR 발행 시간이 들고 데이터는 1 beat/cycle로 온다.
    - x 명령이 `mx` burst(보통 1, x가 4 KiB에 걸치면 2)이면 행 레코드 데이터가 `Xd = max(0, mx + 1 - nb)` cycle 늦게 시작한다(nb = 1이면 항상 1).
    - P = 2: slice의 행 명령이 `mr` burst이면 그 slice의 다음 행들이 `max(0, mr - nb)` 늦어진다.
 2. y 준비 시각: slice p의 k번째 행 = `Y0 + k R + (그 slice의 앞선 지연 합)`, `Y0 = nb + R + 14 + Xd`. 14 = start 등록 1 + 명령 제시 1 + AR/R 왕복과 engine FIFO + `gemv_core`의 `L_PIPE`(기본 9) 등이다(분해는 측정에서 확인하지 않았다).
 3. merge: `t(r) = max(준비(r), t(r - 1) + 1)`(P = 1이면 `t(r) = Y0 + r R`).
-4. `y_en = 0`: `CYCLES = t(ROWS - 1) + 1`. P = 1이면 닫힌 식 `CYCLES = nb + ROWS x (1 + nb) + 15 + Xd`.
-5. `y_en = 1`: beat j(행 2j, 2j + 1)가 write buffer에 들어가는 시각 `h_j = t(min(2j + 1, ROWS - 1)) + 1`. y 쓰기 burst k(L_k beat, `Y_ADDR`에서 16 beat와 4 KiB로 나눔, 마지막 beat j_k)의 첫 W = `ws_k = max(h_jk + 3, we_(k-1) + 1)`, 마지막 W = `we_k = ws_k + L_k - 1`. `CYCLES = we_last + 2`.
-   - 마지막 burst가 앞 burst의 W에 막히지 않으면(보통) `CYCLES = t(ROWS - 1) + 5 + L_last`. P = 1이면 `nb + ROWS x (1 + nb) + 19 + Xd + L_last`.
+4. `y_en = 0`: `CYCLES = C_CHK + t(ROWS - 1) + 1`. P = 1이면 닫힌 식 `CYCLES = nb + ROWS x (1 + nb) + 15 + Xd + C_CHK`.
+5. `y_en = 1`: beat j(행 2j, 2j + 1)가 write buffer에 들어가는 시각 `h_j = t(min(2j + 1, ROWS - 1)) + 1`. y 쓰기 burst k(L_k beat, `Y_ADDR`에서 16 beat와 4 KiB로 나눔, 마지막 beat j_k)의 첫 W = `ws_k = max(h_jk + 3, we_(k-1) + 1)`, 마지막 W = `we_k = ws_k + L_k - 1`. `CYCLES = C_CHK + we_last + 2`.
+   - 마지막 burst가 앞 burst의 W에 막히지 않으면(보통) `CYCLES = C_CHK + t(ROWS - 1) + 5 + L_last`. P = 1이면 `nb + ROWS x (1 + nb) + 19 + Xd + L_last + C_CHK`.
    - 막히는 예: 16 beat burst 바로 뒤에 4 KiB 경계로 1 beat burst가 남으면 마지막 W가 앞 burst의 16 beat 뒤로 밀린다(측정에서 +8 cycle 사례).
 6. P = 2: ROWS가 짝수이면 마지막 행이 slice 1에서 나와 merge가 1 cycle 뒤에 받는다(3번 식에 포함). 닫힌 식은 `ceil(ROWS/2)`를 쓴다.
 
@@ -111,10 +114,12 @@ y merge (행 순서: 행 r은 slice r mod P) -> argmax_red (argmax_en)
 ### 측정값 [측정, Questa, `axi_mem_slave` stall 없음 latency 1, P = 1, 보드 아님]
 | 호출 | CYCLES | 비고 |
 |---|---|---|
-| 15M 분류기 32000 x 288, y_en = 1, argmax_en = 1 | 1,184,061 ~ 1,184,064 | `arch.md` 2.4 표의 1,184,000 + 고정 항 + 꼬리 |
-| 같은 호출 y_en = 0 | 1,184,051 | |
-| 15M token 하나(43 호출 합) | 1,951,575 ~ 1,951,644 (6 위치) | `arch.md` 2.4 표 1,950,260 + 호출당 약 31 |
-| 260K token 하나(36 호출 합) | 37,596 (P = 1), 19,597 (P = 2) | 표 36,446 / 18,402 + 호출당 고정 항 |
+| 15M 분류기 32000 x 288, y_en = 1, argmax_en = 1 | 1,184,069 ~ 1,184,077 (S4-6: 1,184,061 ~ 1,184,064) | `arch.md` 2.4 표의 1,184,000 + 고정 항 + 꼬리 + C_CHK |
+| 같은 호출 y_en = 0 | 1,184,060 (S4-6: 1,184,051) | 정확히 + 9 |
+| 15M token 하나(43 호출 합) | 1,951,992 (`q_p1_m2tok`, 1 위치; S4-6 같은 run 1,951,620) | `arch.md` 2.4 표 1,950,260 + 호출당 약 40 |
+| 260K token 하나(36 호출 합, 12 위치) | P = 1: 37,903 ~ 37,938 (S4-6: 37,560 ~ 37,616), P = 2: 19,895 ~ 19,930 (S4-6: 19,565 ~ 19,603) | 표 36,446 / 18,402 + 호출당 고정 항 |
+
+- S4-6b 차이: 호출마다 C_CHK = 9가 붙어 y_en = 0 호출은 정확히 +9, token(36 호출)은 +324가 기준이다. y_en = 1 호출은 TB의 무작위 Y_ADDR(AXI-Lite BFM과 같은 난수열을 써서 polling 횟수가 바뀌면 값이 밀림)에 따라 y burst의 4 KiB/16 beat 분할이 달라져 호출당 몇 cycle씩 다르다. 모든 호출에서 CYCLES == 5절 식(C_CHK 포함)을 `+CYC=1` run이 확인했다(P = 1, 2 각 444 호출).
 
 - 호출당 고정 항(15 + Xd, y_en이면 19 + Xd + L_last)이 `arch.md` 2.4의 `L_dram + L_pipe`에 해당하고 latency 1 모델 기준이다. 실제 DDR latency와 대역폭(eta)은 `bwtest.md`의 보드 측정 전까지 모른다.
 - RD_STALL: stall 없는 모델에서 호출당 5(x를 기다리는 시작 구간), P = 2 + stall 프로파일 1에서는 15M 분류기 268,510 cycle(메모리 stall이 그대로 보임).
@@ -124,11 +129,16 @@ y merge (행 순서: 행 r은 slice r mod P) -> argmax_red (argmax_en)
 | test | 내용 | run |
 |---|---|---|
 | `argmax_red` | K_ARGMAX 레코드 전부(260K 12, 15M 6, 기록 idx와 kd_argmax 둘 다), random 스트림(n = 1, 2, 3, 2^IDX_W 포함, 동일값/극값/단조/양끝 tie), valid gap, 연속 스트림, 끝나지 않은 스트림의 재시작, IDX_W 16/4/1, L0_SEQ/L0_RANGE 부정 시험, 잘못된 parameter | 9 |
-| `gemv_acc_csr` | 단독. 매 cycle random 쓰기/읽기 strobe와 random event를 spec 모델과 매 cycle 비교(읽기 값, start, busy, latch된 op 출력). START_BUSY(잘못된 op 포함), done cycle의 CTRL(start 0/1), W1C와 set 충돌, ERR 모든 bit, 2^32에 딱 맞는 버퍼(W/X/Y) 발생을 세어 요구 | 5 |
+| `gemv_acc_csr` | 단독. 매 cycle random 쓰기/읽기 strobe와 random event를 spec 모델과 매 cycle 비교(읽기 값, start, busy, latch된 op 출력, 판정 cycle부터 `op_wbytes_o`). START_BUSY(잘못된 op 포함, S4-6b: 검사 중 포함), done cycle의 CTRL(start 0/1), W1C와 set 충돌, ERR 모든 bit, 2^32에 딱 맞는 버퍼(W/X/Y)와 8 B 넘는 버퍼(S4-6b), 검사 중 descriptor 쓰기로 레지스터 판정이 달라진 경우(S4-6b) 발생을 세어 요구 | 5 |
 | `gemv_acc_top` | AXI-Lite BFM + 포트별 `axi_mem_slave`. 두 모델 K_GEMV 레코드 전부(분류기 포함, 분류기는 y_en = 0으로 한 번 더, K_ARGMAX 레코드와 index 대조), 합성 호출 random(n 1..1024, rows 1..600, 홀수, tie, 4 KiB 경계 직전 주소, FLAGS 조합, 이전 호출 중 descriptor 쓰기), y 메모리와 guard, AW/AR 주소 범위(P = 2는 slice별 행), 포트별 R beat 수, CYCLES = e - s(버스 관측), `+CYC=1`에서 5절 식, RD_STALL/WR_STALL(TB 독립 계수), 매 cycle CSR 참조 모델, ERR 원인별과 복구, done cycle 충돌, 긴 write/read 차단(write buffer full, `gemv_core` credit, read space, read buffer full 도달 요구), P = 1/2, PIPE (0,0)/(4,4), MAX_BURST 8 / OUTS 2 | 22 |
 
 - mutation 24개(`sim/.mut4/m.py`): `argmax_red` 3, `gemv_acc_csr` 8, top 13(홀수 ROWS 마지막 beat WSTRB, 마지막 반쪽 beat 누락, argmax tie, y 주소, 포트 1 RRESP, merge slice 순서, slice 행 주소, 행 분배, router, RD_STALL 정의, done 시점, argmax_en gating, 행 없는 slice 시작). 24개 모두 검출. 처음 실행에서 살아남은 2개는 TB 공백이었다: 2^32에 딱 맞는 버퍼(CSR TB에 경계 주소 추가), 포트 1에만 있는 read 오류(top TB에 호출 추가).
 - lint: `vlog -lint=full`, `vopt -lint=full`(top P = 1, 2, csr, argmax_red) 경고 0.
+- S4-6b(2026-11-20): `gemv_acc_csr`의 W 범위 곱을 `umul_seq`로 바꾼 뒤 `gemv_acc_csr` 5 run, `gemv_acc_top` 23 run을 다시 통과했다(CSR 참조 모델과 `cyc_formula`는 3, 5절의 새 규칙으로 고침). mutation 5개(`sim/.mut6b/m.py`의 `gcsr_*`)와 lint는 `attn.md` 7절의 S4-6b 항목.
+
+## 6b. 자원 관찰 (S4-6b) [계산, 합성 안 함]
+- runtime 곱셈기: S4-4의 `wbytes = ROWS x (1 + ceil(N/8)) x 8`(16 x 8비트 조합 곱)을 `umul_seq`(A 16, B 8: 16비트 덧셈기 하나 + 약 40 FF + 4비트 카운터)로 바꿨다. 남은 곱은 `gemv_acc_top`의 `P x RB`(P는 parameter 1 또는 2, 상수 곱 = shift)뿐이다.
+- 대가: 호출마다 C_CHK = 9 cycle(3절). 260K token(36 호출)에서 324 cycle, 37,596의 0.9% [계산].
 
 ## 7. 확인하지 못한 것
 - 보드: HP 포트 실측 latency와 대역폭, 100 MHz 타이밍, LUT 수. FPGA 준비물(`fpga/`)은 이 단계 범위 밖이다.

@@ -138,16 +138,22 @@ module tb_pim_top #(
   endfunction
 
   // ---------------- CSR reference model ----------------
-  logic [31:0] m_cmd[4];
+  // push check (pim.md 4.1, S4-6b): a CMD_PUSH in c without a check in progress takes a copy of
+  // CMD0..3, verdict on the copy in p = c + PCHK (push or ERR); a CMD_PUSH in c + 1 .. p sets
+  // PUSH_BUSY (bit 8); STATUS bit3 = check in progress; a run does not end while one is
+  localparam int PCHK = (($clog2((NMAX + 15) / 16 + 1) > $clog2((NMAX + 7) / 8 + 2)) ?
+                         $clog2((NMAX + 15) / 16 + 1) : $clog2((NMAX + 7) / 8 + 2)) + 1;
+  logic [31:0] m_cmd[4], p_cmd[4], ck[4];
+  int          m_pchk;
   bit          m_busy, m_done, m_flush;
-  logic [7:0]  m_err;
+  logic [8:0]  m_err;
   logic [31:0] m_cyc, m_rdst, m_wrst, m_ops, m_stw, m_stm, m_str, m_nl, m_nx, m_nm;
   int          m_level;
   logic [127:0] m_fifo[$];      // model command FIFO (words)
   bit          model_on = 0;
 
   function automatic void model_reset();
-    m_cmd = '{0, 0, 0, 0};
+    m_cmd = '{0, 0, 0, 0}; p_cmd = '{0, 0, 0, 0}; ck = '{0, 0, 0, 0}; m_pchk = 0;
     m_busy = 0; m_done = 0; m_flush = 0; m_err = 0; m_level = 0;
     m_cyc = 0; m_rdst = 0; m_wrst = 0; m_ops = 0; m_stw = 0; m_stm = 0; m_str = 0;
     m_nl = 0; m_nx = 0; m_nm = 0;
@@ -159,7 +165,7 @@ module tb_pim_top #(
     case (a & ~3)
       A_ID:      return 32'h5049_0001;
       A_CONFIG:  return {16'(NMAX), 4'd4, 4'(NB), 8'd100};
-      A_STATUS:  return {8'd0, 16'(m_level), 5'd0, m_err != 0, m_done, m_busy};
+      A_STATUS:  return {8'd0, 16'(m_level), 4'd0, m_pchk != 0, m_err != 0, m_done, m_busy};
       A_ERR:     return 32'(m_err);
       A_CYCLES:  return m_cyc;
       A_RDSTALL: return m_rdst;
@@ -180,10 +186,11 @@ module tb_pim_top #(
     endcase
   endfunction
 
-  function automatic int f_op();   return m_cmd[0][3:0]; endfunction
-  function automatic int f_n();    return m_cmd[0][15:4]; endfunction
-  function automatic int f_rows(); return m_cmd[0][31:16]; endfunction
-  function automatic int f_base(); return m_cmd[1][31:17]; endfunction
+  // fields and rules of the command in ck (the copy taken by the push)
+  function automatic int f_op();   return ck[0][3:0]; endfunction
+  function automatic int f_n();    return ck[0][15:4]; endfunction
+  function automatic int f_rows(); return ck[0][31:16]; endfunction
+  function automatic int f_base(); return ck[1][31:17]; endfunction
   function automatic bit m_desc_ok();
     longint unsigned len;
     longint used = longint'((f_rows() + NB - 1) / NB) * ((f_n() + 15) / 16);
@@ -194,7 +201,7 @@ module tb_pim_top #(
     endcase
     if (f_n() == 0 || f_n() > NMAX) return 0;
     if (f_op() != 2 && (f_rows() == 0 || longint'(f_base()) + used > DEPTH)) return 0;
-    return longint'(m_cmd[2]) + len <= 64'h1_0000_0000;
+    return longint'(ck[2]) + len <= 64'h1_0000_0000;
   endfunction
 
   typedef struct {
@@ -207,12 +214,12 @@ module tb_pim_top #(
 
   longint cl_s = -1, cl_e = -1, n_starts = 0, n_dones = 0, n_push = 0;
   longint t_rdst = 0, t_wrst = 0;
-  longint n_coll_c0 = 0, n_coll_c1 = 0, n_coll_err = 0, n_ovf = 0;
+  longint n_coll_c0 = 0, n_coll_c1 = 0, n_coll_err = 0, n_ovf = 0, n_start_pchk = 0, n_end_held = 0;
 
   function automatic void model_step(longint k, ev_t ev, bit pw, int pwa, logic [31:0] pwd,
                                      bit prd, int pra, logic [31:0] prdata);
-    bit ctrl, start_req, idle, op_ok, start, preq, isop, pok;
-    logic [7:0] set, clr;
+    bit ctrl, start_req, idle, op_ok, start, preq, isop, pok, pacc, pverd, dok;
+    logic [8:0] set, clr;
     if (prd) begin
       logic [31:0] e = model_read(pra);
       if (prdata !== e) c_model.fail($sformatf("read 0x%03h performed in cycle %0d: got %h, model %h", pra, k, prdata, e));
@@ -228,20 +235,28 @@ module tb_pim_top #(
     if (ev.done !== ev.dut_done) c_model.fail($sformatf("cycle %0d: DUT done %b, TB done %b", k, ev.dut_done, ev.done));
     else if (ev.done) c_model.pass();
     if (ctrl && ev.done) begin if (pwd[0]) n_coll_c1++; else n_coll_c0++; end
-    preq = pw && pwa < 256 && (pwa & ~3) == A_PUSH;
-    isop = f_op() >= 1 && f_op() <= 3;
-    pok  = preq && isop && m_desc_ok() && m_cmd[2][2:0] == 0 && m_level < CMD_DEPTH;
+    if (start && m_pchk != 0) n_start_pchk++;
+    // the run would have ended in this cycle without the push check in progress
+    if (m_busy && m_pchk != 0 && m_level == 0 && (m_flush || oc.size() == 0)) n_end_held++;
+    preq  = pw && pwa < 256 && (pwa & ~3) == A_PUSH;
+    pacc  = preq && m_pchk == 0;
+    pverd = m_pchk == 1;
+    ck    = p_cmd;
+    isop  = f_op() >= 1 && f_op() <= 3;
+    dok   = m_desc_ok();
+    pok   = pverd && isop && dok && p_cmd[2][2:0] == 0 && m_level < CMD_DEPTH;
     set = '0;
     set[0] = start_req && !idle;
     set[1] = start_req && !op_ok;
-    set[2] = preq && !isop;
-    set[3] = preq && isop && !m_desc_ok();
-    set[4] = preq && isop && m_cmd[2][2:0] != 0;
+    set[2] = pverd && !isop;
+    set[3] = pverd && isop && !dok;
+    set[4] = pverd && isop && p_cmd[2][2:0] != 0;
     set[5] = ev.rd_err;
     set[6] = ev.wr_err;
-    set[7] = preq && isop && m_desc_ok() && m_cmd[2][2:0] == 0 && m_level >= CMD_DEPTH;
+    set[7] = pverd && isop && dok && p_cmd[2][2:0] == 0 && m_level >= CMD_DEPTH;
+    set[8] = preq && m_pchk != 0;
     if (set[7]) n_ovf++;
-    clr = (pw && pwa < 256 && (pwa & ~3) == A_ERR) ? pwd[7:0] : '0;
+    clr = (pw && pwa < 256 && (pwa & ~3) == A_ERR) ? pwd[8:0] : '0;
     if ((set & clr) != 0) n_coll_err++;
     // popped command == model FIFO front
     if (ev.pop) begin
@@ -268,7 +283,9 @@ module tb_pim_top #(
     if (ev.done) begin n_dones++; cl_e = k; end
     if (start) begin m_busy = 1; m_flush = pwd[7:4] == 2; cl_s = k; cl_e = -1; n_starts++; t_rdst = 0; t_wrst = 0; end
     else if (ev.done) m_busy = 0;
-    if (pok) begin m_fifo.push_back({m_cmd[3], m_cmd[2], m_cmd[1], m_cmd[0]}); n_push++; end
+    if (pok) begin m_fifo.push_back({p_cmd[3], p_cmd[2], p_cmd[1], p_cmd[0]}); n_push++; end
+    if (pacc) begin m_pchk = PCHK; p_cmd = m_cmd; end
+    else if (m_pchk != 0) m_pchk--;
     m_level = m_level + int'(pok) - int'(ev.pop);
     if (pw && pwa < 256 && (pwa & ~3) >= A_CMD0 && (pwa & ~3) <= A_CMD3) m_cmd[((pwa & ~3) - A_CMD0) / 4] = pwd;
   endfunction
@@ -441,8 +458,8 @@ module tb_pim_top #(
         ev.ev_mac = pr_ev_mac; ev.ev_wrgb = pr_ev_wrgb; ev.ev_rdmac = pr_ev_rdmac;
         ev.dn_ldw = pr_dn_ldw; ev.dn_wrgb = pr_dn_wrgb; ev.dn_mac = pr_dn_mac;
         ev.level = pr_level;
-        // run end (model level before this cycle's pop / push)
-        ev.done = m_busy && m_level == 0 && (m_flush || oc.size() == 0);
+        // run end (model level before this cycle's pop / push; no push check in this cycle)
+        ev.done = m_busy && m_pchk == 0 && m_level == 0 && (m_flush || oc.size() == 0);
         if (m_busy) begin
           if (ev.rd_stall) t_rdst++;
           if (ev.wr_stall) t_wrst++;
@@ -523,6 +540,12 @@ module tb_pim_top #(
     for (longint i = -16; i < 4 * c.rows + 16; i++) ypre.delete(c.addr + i);
   endtask
 
+  // wait until no push check is in progress (STATUS bit3; pim.md 4.3)
+  task automatic wait_push();
+    logic [31:0] st;
+    do rd(A_STATUS, st); while (st[3] !== 1'b0);
+  endtask
+
   task automatic poll_done(longint lim = 3_000_000);
     logic [31:0] st;
     longint t0 = bfm.cyc;
@@ -539,14 +562,17 @@ module tb_pim_top #(
 
   // start a run (RUN) for the pushed commands, wait, check every command of hq, the counters and
   // CYCLES / stalls; exp_err < 0: ERR not compared
-  task automatic run_and_check(int exp_err = 0, string tag = "run", bit refill = 0, ref cmd_t more[$]);
+  task automatic run_and_check(int exp_err = 0, string tag = "run", bit refill = 0, ref cmd_t more[$],
+                                input bit pw = 1);
     logic [31:0] d;
     longint e_s;
+    if (pw) wait_push();                  // the pushed commands are in the FIFO at s
     wr(A_CTRL, 32'h11);
-    // refill while running: push the rest when the FIFO has room
+    // refill while running: push the rest when the FIFO has room (level + a command in the
+    // push check)
     while (refill && more.size() > 0) begin
       rd(A_STATUS, d);
-      if (int'(d[23:8]) < CMD_DEPTH) begin
+      if (int'(d[23:8]) + int'(d[3]) < CMD_DEPTH) begin
         cmd_t c = more.pop_front();
         if (c.op == 3) prefill_y(c);
         push(c);
@@ -556,7 +582,7 @@ module tb_pim_top #(
     @(negedge clk);
     e_s = cl_e - cl_s;
     if (exp_err >= 0) expect_reg(A_ERR, 32'(exp_err), {tag, " ERR"}, exp_err != 0 ? c_err : c_csr);
-    if (exp_err != 0) wr(A_ERR, 32'hFF);
+    if (exp_err != 0) wr(A_ERR, 32'h1FF);
     rd(A_CYCLES, d);
     if (cl_e < 0 || 32'(e_s) !== d) c_cyc.fail($sformatf("%s: CYCLES %0d, TB e - s = %0d", tag, d, e_s));
     else c_cyc.pass();
@@ -939,8 +965,8 @@ module tb_pim_top #(
              n_push, bfm.n_wr, bfm.n_rd);
     $display("limits: write buffer full %0d, y credit %0d, read outstanding at OUTS %0d, FIFO overflows %0d",
              n_wfull, n_cred, n_routs, n_ovf);
-    $display("collisions: CTRL start=0 at done %0d, CTRL start=1 at done %0d, ERR set and W1C same bit %0d",
-             n_coll_c0, n_coll_c1, n_coll_err);
+    $display("collisions: CTRL start=0 at done %0d, CTRL start=1 at done %0d, ERR set and W1C same bit %0d, start with a push in its check %0d, run end held by a push check %0d cycles",
+             n_coll_c0, n_coll_c1, n_coll_err, n_start_pchk, n_end_held);
     if (wblk) begin
       if (n_wfull == 0) c_reach.fail("WBLK: write buffer never full"); else c_reach.pass();
       if (n_cred == 0) c_reach.fail("WBLK: y credit limit never reached"); else c_reach.pass();
@@ -949,7 +975,8 @@ module tb_pim_top #(
       if (n_routs == 0) c_reach.fail("RBLK: read outstanding limit never reached"); else c_reach.pass();
     end
     if (coll) begin
-      if (n_coll_c0 == 0 || n_coll_c1 == 0 || n_coll_err == 0) c_reach.fail("COLL: a collision case did not happen");
+      if (n_coll_c0 == 0 || n_coll_c1 == 0 || n_coll_err == 0 || n_start_pchk == 0 || n_end_held == 0)
+        c_reach.fail("COLL: a collision case did not happen");
       else c_reach.pass();
     end
     begin
@@ -1029,7 +1056,7 @@ module tb_pim_top #(
   // ---------------- error tests ----------------
   task automatic expect_err_only(logic [7:0] e, string what);
     expect_reg(A_ERR, 32'(e), what, c_err);
-    wr(A_ERR, 32'hFF);
+    wr(A_ERR, 32'h1FF);
     expect_reg(A_ERR, 32'd0, {what, " W1C"}, c_err);
   endtask
 
@@ -1039,6 +1066,7 @@ module tb_pim_top #(
     longint p0 = n_push;
     wr(A_CMD0, w[31:0]); wr(A_CMD1, w[63:32]); wr(A_CMD2, w[95:64]); wr(A_CMD3, w[127:96]);
     wr(A_PUSH, 32'h0);
+    wait_push();
     repeat (2) @(posedge clk);
     if (n_push != p0) c_err.fail({what, ": command queued"}); else c_err.pass();
     expect_err_only(e, what);
@@ -1079,6 +1107,7 @@ module tb_pim_top #(
     begin
       longint o0 = x_nm;
       for (int i = 0; i < CMD_DEPTH; i++) push(m);
+      wait_push();
       expect_reg(A_STATUS, {8'd0, 16'(CMD_DEPTH), 8'h02}, "STATUS with a full FIFO", c_err);
       bad_push(m, 8'h80, "FIFO_OVF");
       hq.delete();
@@ -1154,6 +1183,7 @@ module tb_pim_top #(
         prefill_y(m);
         push(m);
         hq.delete();
+        wait_push();
         wr(A_CTRL, 32'h11);
         t0 = bfm.cyc;
         tg = t0 + d0 + longint'(off);
@@ -1166,8 +1196,16 @@ module tb_pim_top #(
         repeat (4) @(posedge clk);
         check_y(m);
         rd(A_ERR, dd);
-        wr(A_ERR, 32'hFF);
+        wr(A_ERR, 32'h1FF);
       end
+    // RUN while the pushed command is still in its check: the run must wait for it (the run
+    // would end at once with an empty FIFO) and execute it
+    for (int i = 0; i < 4; i++) begin
+      prefill_y(m);
+      push(m);
+      repeat (i) @(posedge clk);
+      run_and_check(0, "run during push check", 0, none_q, 0);
+    end
     $display("PHASE w1c %0t", $time);
     // ERR W1C against a set: every B of a long run is SLVERR, W1C of WR_RESP repeated
     prefill_y(m);
@@ -1178,7 +1216,7 @@ module tb_pim_top #(
     for (int w = 0; m_busy && w < 100000; w++) wr(A_ERR, 32'h40);
     poll_done();
     mem0.inj_clear();
-    wr(A_ERR, 32'hFF);
+    wr(A_ERR, 32'h1FF);
     check_counters("coll");
   endtask
 

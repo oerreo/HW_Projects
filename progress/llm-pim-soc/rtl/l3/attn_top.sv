@@ -20,8 +20,13 @@
 //   kv_store (KV_SRC 0, read port e = engine e) or kv_rd x H_PAR (KV_SRC 1)
 //   write arbiter: grants one engine's output stream (p then o of one head) at a time, issues
 //     its write commands; packer (two 32-bit values per beat) + axi_wr_eng (write port)
+// Call: the CTRL write s is checked by attn_csr in s + 1 .. v (v = s + CHK_CYC, sequential
+// products); start in v, the op runs from v + 1 (go_q).
 // Run end e: ATTN: every sequencer finished, no grant, packer empty, write engine idle (last B).
-// KVW: the last kv head word written. CYCLES = e - s.
+// KVW: the last kv head word written. CYCLES = e - s (check included).
+// Addresses: every head / kv head / KVW slot address is a base plus a stride added when its
+// counter advances (strides are shifts of the descriptor or the attn_csr products SEQ x hs,
+// T x hs, KVH0 x SEQ + POS); no runtime multiplier at this level.
 // RD_STALL: busy cycles in which some core waits for KV data; WR_STALL: packer beat not taken.
 module attn_top
   import llm_pkg::*;
@@ -117,6 +122,9 @@ module attn_top
   localparam int L_W   = (NL > 1) ? $clog2(NL) : 1;
   localparam int PW    = (TMAX > 1) ? $clog2(TMAX) : 1;
   localparam int HP_W  = (H_PAR > 1) ? $clog2(H_PAR) : 1;
+  localparam int SQH_W = 16 + HS_W;    // attn_csr: SEQ x hs
+  localparam int TH_W  = TW + HS_W;    // attn_csr: T x hs
+  localparam int KW0_W = KVH_W + 17;   // attn_csr: KVH0 x SEQ + POS
 
   if (H_PAR != 1 && H_PAR != 2 && H_PAR != 4) $error("attn_top: H_PAR=%0d must be 1, 2 or 4", H_PAR);
   if (KV_SRC != 0 && KV_SRC != 1) $error("attn_top: KV_SRC=%0d must be 0 (BRAM) or 1 (DDR)", KV_SRC);
@@ -145,6 +153,9 @@ module attn_top
   logic [7:0]  d_hs, d_h0, d_nh, d_kvmul, d_layer, d_kvh0, d_nkvh;
   logic [4:0]  d_kb, d_vb;
   logic        d_pen;
+  logic [SQH_W-1:0] d_sqh;
+  logic [TH_W-1:0]  d_ths;
+  logic [KW0_W-1:0] d_kw0;
 
   attn_csr #(.ADDR_W(ADDR_W), .H_PAR(H_PAR), .KV_SRC(KV_SRC), .KL(KL), .HS_MAX(HS_MAX), .TMAX(TMAX),
              .NKV(NKV), .NL(NL), .KW(KW), .VW(VW), .FCLK_MHZ(FCLK_MHZ)) u_csr (
@@ -155,21 +166,30 @@ module attn_top
     .ks_addr_o(d_ksa), .vs_addr_o(d_vsa), .t_o(d_t), .hs_o(d_hs), .kb_o(d_kb), .vb_o(d_vb),
     .p_en_o(d_pen), .head0_o(d_h0), .nhead_o(d_nh), .kvmul_o(d_kvmul), .layer_o(d_layer),
     .kvh0_o(d_kvh0), .nkvh_o(d_nkvh), .seq_o(d_seq), .pos_o(d_pos),
+    .seqhs_o(d_sqh), .ths_o(d_ths), .kw0_o(d_kw0),
     .rd_err_i(rd_err_ev), .wr_err_i(wr_err_ev), .rd_stall_i(rd_stall_ev), .wr_stall_i(wr_stall_ev));
 
-  // run phase: the descriptor is valid from s + 1 (go_q)
+  // run phase: start is the verdict cycle v of the CSR check; the descriptor is valid from the
+  // accepted CTRL write on and the derived products from v (go_q = v + 1)
   logic go_q;
   always_ff @(posedge clk or negedge rst_n)
     if (!rst_n) go_q <= 1'b0;
     else        go_q <= start;
 
-  logic [31:0] rowk, rowv, qbytes;
+  // per-head strides (shifts of the descriptor; the head and kv head addresses are kept by
+  // adding these strides when the head / kv head counters advance, no runtime multiplier)
+  logic [31:0] rowk, rowv, qbytes, pstride, ostride, kstride, vstride, sstride;
   logic        ek2, ev2;
-  assign ek2    = d_kb > 5'd8;
-  assign ev2    = d_vb > 5'd8;
-  assign rowk   = 32'(d_hs) << ek2;
-  assign rowv   = 32'(d_hs) << ev2;
-  assign qbytes = 32'd8 + 32'(d_hs) * 2;
+  assign ek2     = d_kb > 5'd8;
+  assign ev2     = d_vb > 5'd8;
+  assign rowk    = 32'(d_hs) << ek2;
+  assign rowv    = 32'(d_hs) << ev2;
+  assign qbytes  = 32'd8 + {23'd0, d_hs, 1'b0};                    // QB = 8 + 2 hs
+  assign pstride = {12'd0, (17'(d_t) + 17'd1) >> 1, 3'b000};        // PS = 8 ceil(T/2)
+  assign ostride = {22'd0, d_hs, 2'b00};                            // 4 hs
+  assign kstride = 32'(d_sqh) << ek2;                               // SEQ hs ek
+  assign vstride = 32'(d_sqh) << ev2;                               // SEQ hs ev
+  assign sstride = {13'd0, d_seq, 3'b000};                          // 8 SEQ
 
   // ---------------- engines ----------------
   typedef enum logic [2:0] {ES_IDLE, ES_SCAN, ES_QCMD, ES_QHDR, ES_START, ES_RUN, ES_DONE} es_t;
@@ -177,7 +197,7 @@ module attn_top
   logic [H_PAR-1:0]            e_done, e_kvstall, e_rerr;
   logic [H_PAR-1:0]            o_valid, o_ready, o_last, o_is_o;
   logic [H_PAR-1:0][31:0]      o_data;
-  logic [H_PAR-1:0][7:0]       e_head;
+  logic [H_PAR-1:0][31:0]      e_pa, e_oa;     // p / o address of the engine's head h_q
   // kv_store ports (KV_SRC 0)
   logic [H_PAR-1:0]            ks_rq_valid, ks_rq_ready, ks_rq_pass, ks_valid, ks_ready, ks_busy;
   logic [H_PAR-1:0][KVH_W-1:0] ks_rq_kvh;
@@ -201,7 +221,9 @@ module attn_top
     logic [AM_W-1:0] qm_q;
     logic [E_W-1:0]  qe_q;
     logic [31:0]     kb_q, vb_q, ksb_q, vsb_q;   // DDR KV bases of the kv head
-    logic            mine, at_end;
+    logic [31:0]     qa_q, pa_q, oa_q;           // Q_ADDR + h QB, P_ADDR + h PS, O_ADDR + 4 hs h
+    logic [31:0]     kof_q, vof_q, sof_q;        // kv head kvh_q: kvh SEQ hs ek / ev, 8 kvh SEQ
+    logic            mine, at_end, h_adv, kvh_adv, seq_go;
 
     // read engine
     logic        rc_valid, rc_ready, d_valid, d_ready, d_last;
@@ -218,6 +240,10 @@ module attn_top
 
     assign mine   = 32'(kvh_q) % H_PAR == e && h_q >= d_h0;
     assign at_end = 9'(h_q) == 9'(d_h0) + 9'(d_nh);
+    // the head counter advances (and the kv head counter with it after KVMUL heads)
+    assign seq_go  = es_q == ES_IDLE && go_q && !op_kvw;
+    assign h_adv   = (es_q == ES_SCAN && !at_end && !mine) || (es_q == ES_RUN && c_done);
+    assign kvh_adv = h_adv && sub_q == d_kvmul - 1'b1;
 
     // ---- head sequencer ----
     always_ff @(posedge clk or negedge rst_n)
@@ -251,7 +277,7 @@ module attn_top
             es_q    <= ES_QHDR;
             qph_q   <= 1'b1;
             qhalf_q <= 1'b0;
-            qn_q    <= HS_W'(32'(d_hs) / 4);
+            qn_q    <= HS_W'(d_hs >> 2);
           end
           ES_QHDR: if (d_valid) es_q <= ES_START;
           ES_START: es_q <= ES_RUN;
@@ -282,15 +308,36 @@ module attn_top
       end
       if (es_q == ES_RUN && qph_q && d_valid && d_ready && !qhalf_q) qlo_q <= d_data;
       if (es_q == ES_START) begin
-        kb_q  <= d_ka + 32'(kvh_q) * 32'(d_seq) * rowk;
-        vb_q  <= d_va + 32'(kvh_q) * 32'(d_seq) * rowv;
-        ksb_q <= d_ksa + 32'(kvh_q) * 32'(d_seq) * 8;
-        vsb_q <= d_vsa + 32'(kvh_q) * 32'(d_seq) * 8;
+        kb_q  <= d_ka + kof_q;
+        vb_q  <= d_va + vof_q;
+        ksb_q <= d_ksa + sof_q;
+        vsb_q <= d_vsa + sof_q;
+      end
+      // head / kv head addresses (mod 2^32, equal to base + index x stride)
+      if (seq_go) begin
+        qa_q  <= d_qa;
+        pa_q  <= d_pa;
+        oa_q  <= d_oa;
+        kof_q <= '0;
+        vof_q <= '0;
+        sof_q <= '0;
+      end else begin
+        if (h_adv) begin
+          qa_q <= qa_q + qbytes;
+          pa_q <= pa_q + pstride;
+          oa_q <= oa_q + ostride;
+        end
+        if (kvh_adv) begin
+          kof_q <= kof_q + kstride;
+          vof_q <= vof_q + vstride;
+          sof_q <= sof_q + sstride;
+        end
       end
     end
 
     assign e_done[e] = es_q == ES_DONE;
-    assign e_head[e] = h_q;
+    assign e_pa[e]   = pa_q;
+    assign e_oa[e]   = oa_q;
     assign c_start   = es_q == ES_START;
     assign c_qv      = es_q == ES_RUN && qph_q && qhalf_q && d_valid;
 
@@ -300,7 +347,7 @@ module attn_top
 
     always_comb begin
       rc_valid = 1'b0;
-      rc_addr  = d_qa + 32'(h_q) * qbytes;
+      rc_addr  = qa_q;
       rc_bytes = qbytes;
       d_ready  = 1'b0;
       if (es_q == ES_QCMD) rc_valid = 1'b1;
@@ -376,7 +423,8 @@ module attn_top
       kv_rd #(.KL(KL), .HS_MAX(HS_MAX), .TMAX(TMAX), .CH(CH)) u_kvr (
         .clk, .rst_n,
         .rq_valid_i(c_kvreq_v), .rq_ready_o(c_kvreq_r), .rq_pass_i(c_kvreq_pass), .rq_t_i(TW'(d_t)),
-        .rq_hs_i(HS_W'(d_hs)), .rq_ek2_i(ek2), .rq_ev2_i(ev2), .rq_kaddr_i(kb_q), .rq_vaddr_i(vb_q),
+        .rq_hs_i(HS_W'(d_hs)), .rq_ths_i(d_ths), .rq_ek2_i(ek2), .rq_ev2_i(ev2), .rq_kaddr_i(kb_q),
+        .rq_vaddr_i(vb_q),
         .rq_ksaddr_i(ksb_q), .rq_vsaddr_i(vsb_q),
         .rc_valid_o(kvr_rc_valid), .rc_ready_i(rc_ready && es_q != ES_QCMD), .rc_addr_o(kvr_rc_addr),
         .rc_bytes_o(kvr_rc_bytes),
@@ -430,17 +478,19 @@ module attn_top
   logic [7:0]  kwc_j, kwd_j;          // command / data kv head
   logic [1:0]  kwc_k, kwd_k;          // 0 K, 1 V, 2 ks, 3 vs
   logic        kwc_act, kwd_act, kwd_h, kw_done_q;
-  logic [31:0] kw_slot;
+  logic [KW0_W-1:0] kw_slot_q;        // source slot kwc_j SEQ + POS (from KVH0 SEQ + POS, + SEQ)
   logic [63:0] kw_lo_q;
-  assign kw_slot = (32'(kwc_j) * 32'(d_seq) + 32'(d_pos));
+  logic [31:0] kw_s32;
+  assign kw_s32 = 32'(kw_slot_q);
 
+  // KVW has hs = KL = 8 (attn_csr: hs <= KL, hs % 8 == 0), so a row is 8 << ek bytes
   always_comb begin
     kw_cmd_valid = kwc_act;
     unique case (kwc_k)
-      2'd0:    begin kw_cmd_addr = d_ka + kw_slot * rowk;  kw_cmd_bytes = rowk; end
-      2'd1:    begin kw_cmd_addr = d_va + kw_slot * rowv;  kw_cmd_bytes = rowv; end
-      2'd2:    begin kw_cmd_addr = d_ksa + kw_slot * 8;    kw_cmd_bytes = 32'd8; end
-      default: begin kw_cmd_addr = d_vsa + kw_slot * 8;    kw_cmd_bytes = 32'd8; end
+      2'd0:    begin kw_cmd_addr = d_ka + (kw_s32 << (3 + 32'(ek2)));  kw_cmd_bytes = rowk; end
+      2'd1:    begin kw_cmd_addr = d_va + (kw_s32 << (3 + 32'(ev2)));  kw_cmd_bytes = rowv; end
+      2'd2:    begin kw_cmd_addr = d_ksa + {kw_s32[28:0], 3'b000};      kw_cmd_bytes = 32'd8; end
+      default: begin kw_cmd_addr = d_vsa + {kw_s32[28:0], 3'b000};      kw_cmd_bytes = 32'd8; end
     endcase
   end
   assign kw_d_ready = kwd_act;
@@ -467,6 +517,7 @@ module attn_top
           if (kwc_j == d_kvh0 + d_nkvh - 1'b1) kwc_act <= 1'b0;
         end
       end
+
       if (kw_hs) begin
         kwd_h <= !kw_sub_last;
         if (kw_sub_last) begin
@@ -484,6 +535,8 @@ module attn_top
     end
 
   always_ff @(posedge clk) begin
+    if (go_q && op_kvw) kw_slot_q <= d_kw0;
+    else if (kwc_act && e0_cmd_ready && kwc_k == 2'd3) kw_slot_q <= kw_slot_q + KW0_W'(d_seq);
     if (kw_hs && !kw_sub_last) kw_lo_q <= e0_d_data;
     if (kw_hs && kw_sub_last)
       unique case (kwd_k)
@@ -510,7 +563,7 @@ module attn_top
   logic [HP_W-1:0] g_sel_q;
   logic [1:0]      wc_n_q;          // write commands left for the grant (p, o)
   logic            wc_p_q;          // next command is p
-  logic [7:0]      g_head_q;
+  logic [31:0]     g_pa_q, g_oa_q;  // p / o address of the granted head
   logic            wcmd_valid, wcmd_ready, pk_ready, in_hs, in_last, in_is_o, wr_in_ready, emit;
   logic [31:0]     wcmd_addr, wcmd_bytes, in_data;
   logic            pk_valid_q, half_q;
@@ -537,9 +590,8 @@ module attn_top
   assign in_hs = g_act_q && o_valid[g_sel_q] && pk_ready;
 
   assign wcmd_valid = wc_n_q != '0;
-  assign wcmd_addr  = wc_p_q ? d_pa + 32'(g_head_q) * ((32'(d_t) + 1) >> 1) * 8
-                             : d_oa + 32'(g_head_q) * 32'(d_hs) * 4;
-  assign wcmd_bytes = wc_p_q ? 32'(d_t) * 4 : 32'(d_hs) * 4;
+  assign wcmd_addr  = wc_p_q ? g_pa_q : g_oa_q;
+  assign wcmd_bytes = wc_p_q ? {14'd0, d_t, 2'b00} : ostride;     // 4 T, 4 hs
 
   always_ff @(posedge clk or negedge rst_n)
     if (!rst_n) begin
@@ -551,7 +603,8 @@ module attn_top
       if (!g_act_q && sel_valid && wc_n_q == '0) begin
         g_act_q  <= 1'b1;
         g_sel_q  <= sel;
-        g_head_q <= e_head[sel];
+        g_pa_q   <= e_pa[sel];
+        g_oa_q   <= e_oa[sel];
         wc_n_q   <= d_pen ? 2'd2 : 2'd1;
         wc_p_q   <= d_pen;
       end else begin
@@ -607,6 +660,8 @@ module attn_top
     if (rst_n === 1'b1 && wr_ecmd && !c_wecmd_q)
       $error("L3_ENGCMD attn_top %m: the write engine rejected a command");
     c_wecmd_q <= (rst_n === 1'b1) && wr_ecmd;
+    if (rst_n === 1'b1 && go_q && op_kvw && 32'(d_hs) != KL)
+      $error("L3_KVWHS attn_top %m: KVW with hs %0d != KL (rows of 8 << ek bytes assumed)", d_hs);
   end
 `endif
 

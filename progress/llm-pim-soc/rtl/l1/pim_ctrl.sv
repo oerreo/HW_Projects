@@ -2,7 +2,8 @@
 // and timing docs/spec/pim.md). One command at a time:
 //
 //   LDW   (op 1) rows, n, base, addr : read command (addr, rows x 8 (1 + ceil(n/8)) bytes) for the
-//                row records (arch.md 2.2), word assembly, bank writes: row r -> bank r mod NB,
+//                row records (arch.md 2.2; the length by umul_seq, the command LDW_CYC cycles
+//                after the handshake), word assembly, bank writes: row r -> bank r mod NB,
 //                word base + (r div NB) nw + w (nw = ceil(n/LB)); lane i of word w = column
 //                LB w + i (columns >= n written 0), tag = wm in word 0, 0 in the others. The empty
 //                slots of the last round (rows not a multiple of NB) are written with zero words.
@@ -170,6 +171,17 @@ module pim_ctrl
     end
 
   // ---------------- read and write commands ----------------
+  // LDW read length rows x 8 (1 + ceil(n/8)): sequential product (umul_seq started in the
+  // handshake cycle h, no runtime multiplier). The LDW read command is presented from
+  // h + 1 + LDW_CYC (WRGB: h + 1), LDW_CYC = LB8_W + 1.
+  localparam int LB8_W   = $clog2(NBT + 2);           // 1 + ceil(n/8) <= NMAX/8 + 1
+  localparam int LDW_CYC = LB8_W + 1;
+  logic [ROWS_W+LB8_W-1:0] lprod;
+  logic                    lm_done;
+  umul_seq #(.A_W(ROWS_W), .B_W(LB8_W)) u_lmul (
+    .clk, .rst_n, .start_i(cmd_hs && cmd_op_i == OP_LDW), .a_i(cmd_rows_i),
+    .b_i(LB8_W'(((32'(cmd_n_i) + 32'd7) >> 3) + 32'd1)), .p_o(lprod), .done_o(lm_done), .busy_o());
+
   logic        rdc_q, wrc_q;
   logic [31:0] rdc_addr_q, rdc_bytes_q, wrc_addr_q, wrc_bytes_q;
 
@@ -178,22 +190,23 @@ module pim_ctrl
       rdc_q <= 1'b0;
       wrc_q <= 1'b0;
     end else begin
-      if (cmd_hs && (cmd_op_i == OP_LDW || cmd_op_i == OP_WRGB)) rdc_q <= 1'b1;
+      if ((cmd_hs && cmd_op_i == OP_WRGB) || lm_done) rdc_q <= 1'b1;
       else if (rd_cmd_ready_i) rdc_q <= 1'b0;
       if (cmd_hs && cmd_op_i == OP_MACAB) wrc_q <= 1'b1;
       else if (wr_cmd_ready_i) wrc_q <= 1'b0;
     end
 
-  always_ff @(posedge clk)
+  always_ff @(posedge clk) begin
     if (cmd_hs) begin
-      rdc_addr_q  <= cmd_addr_i;
-      rdc_bytes_q <= (cmd_op_i == OP_LDW) ?
-                     32'(cmd_rows_i) * (32'(((cmd_n_i + 7) >> 3) + 1) << 3) : 32'(cmd_n_i);
+      rdc_addr_q <= cmd_addr_i;
+      if (cmd_op_i == OP_WRGB) rdc_bytes_q <= 32'(cmd_n_i);
       if (cmd_op_i == OP_MACAB) begin
         wrc_addr_q  <= cmd_addr_i;
         wrc_bytes_q <= 32'(cmd_rows_i) << 2;
       end
     end
+    if (lm_done) rdc_bytes_q <= 32'({lprod, 3'b000});
+  end
 
   assign rd_cmd_valid_o = rdc_q;
   assign rd_cmd_addr_o  = rdc_addr_q;

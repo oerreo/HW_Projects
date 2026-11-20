@@ -2,7 +2,8 @@
 
 상태: RTL 시뮬레이션 통과(2026-11-19, `sim/tests/udiv_seq.cfg`, `lut_lerp.cfg`, `exp_unit.cfg`, `attn_score.cfg`, `attn_vacc.cfg`, `attn_core.cfg`, `kv_store.cfg`, `kv_rd.cfg`, `attn_top.cfg`), FPGA 미구성(G5 전). 구조 결정은 `arch.md` 4절(3 pass + 나눗셈, D7 260K KV는 BRAM, D8 H_PAR = 2, D9 layer 단위 명령, D14 kb/vb in {8, 12, 16}), 공통 레지스터 틀은 `arch.md` 7.2, engine 규칙은 `hierarchy.md` 3.6이 원본이다. 이 문서는 데이터 배치, 레지스터 맵, 실행 규칙, 내부 구성, cycle 식, 검증 내용을 확정한다.
 
-- RTL: `rtl/l0/udiv_seq.sv`, `rtl/l0/lut_lerp.sv`(표 `rtl/pkg/lut_pkg.sv`, `model/tools/lutsv.py`로 `tabs.c`에서 생성), `rtl/l1/exp_unit.sv`, `rtl/l1/attn_score.sv`, `rtl/l1/attn_vacc.sv`, `rtl/l2/attn_core.sv`, `rtl/l2/kv_store.sv`, `rtl/l2/kv_rd.sv`, `rtl/l3/attn_csr.sv`, `rtl/l3/attn_top.sv`. 재사용(수정 없음): `rshr_sat`, `dotp`, `ram_sdp`, `sync_fifo`, `axil_slave`, `axi_rd_eng`, `axi_wr_eng`.
+- S4-6b(2026-11-20): `attn_csr`의 descriptor 검사와 `attn_top`, `kv_rd`의 주소 계산에서 runtime 곱셈을 없앴다(순차 곱 `umul_seq`, 증분 덧셈). 판정과 데이터는 같고 호출 timing이 바뀌었다(4.1, 6절).
+- RTL: `rtl/l0/udiv_seq.sv`, `rtl/l0/umul_seq.sv`(S4-6b), `rtl/l0/lut_lerp.sv`(표 `rtl/pkg/lut_pkg.sv`, `model/tools/lutsv.py`로 `tabs.c`에서 생성), `rtl/l1/exp_unit.sv`, `rtl/l1/attn_score.sv`, `rtl/l1/attn_vacc.sv`, `rtl/l2/attn_core.sv`, `rtl/l2/kv_store.sv`, `rtl/l2/kv_rd.sv`, `rtl/l3/attn_csr.sv`, `rtl/l3/attn_top.sv`. 재사용(수정 없음): `rshr_sat`, `dotp`, `ram_sdp`, `sync_fifo`, `axil_slave`, `axi_rd_eng`, `axi_wr_eng`.
 - golden: `model/src/kern.c`의 `k_attn2_st`(K_ATTN2, K_ATTN은 kb = vb = 8 또는 16과 같음)와 S4-6에서 export한 stage 함수 `k_attn_score`, `k_attn_exp`, `k_attn_pn`, `k_attn_w`, `k_attn_out`(`attn_core`가 이 함수들로 계산하도록 바꿨다. 기존 덤프 4종 `cmp` 동일, `make test` 16,669,793 항목 mismatch 0, `model/results/maketest_s4_6.txt`). TB 쪽 DPI는 `tb/dpi/kdpi.c`의 `kd_attn_*`, `kd_att_*`(연산은 모두 `kern.c`).
 - 표기: cycle 수는 Questa 시뮬레이션(`axi_mem_slave` 모델, stall 없음, read/B latency 1)의 값이며 보드 값이 아니다. 자원은 [계산](구조에서 센 값, 합성 안 함).
 
@@ -16,7 +17,7 @@
 | P3 | `attn_vacc` | `p = (e R + 2^31) >> 32` (`k_attn_pn`), `w = rshr(p vm, ve - emin - G)` (`k_attn_w`, vm = 0이면 0), `acc_i += w V_ti` |
 | O | `attn_vacc` | `o_i = sat32(rshr(acc_i, emin + G))` (`k_attn_out`) |
 
-- 폭: dot 38비트(16x16 곱 8 lane 합 35비트 + beat 누산), `rshr(dot, d0)` 24비트(golden 전제 `|.| < 2^22`, 넘으면 `L1_RANGE`), `qm km` 34비트, score 곱 58비트, `d 47274` 49비트, `e R` 50비트, `p vm` 34비트, `w` 36비트 container(golden 상한 2^33), V 누산 `ACC_W` = 60(검사 `ACC_W >= 50 + log2 T_MAX`).
+- 폭: dot `ACC_W = SW + clog2(NG + 1)`비트(`attn_score`: SW = 32 + clog2(KL) = 35는 16x16 곱 8 lane 합, NG = ceil(HS_MAX/KL) beat 누산; HS_MAX 64에서 39비트, HS_MAX 8에서 36비트. S4-6 문서의 "38비트"는 RTL과 달라 S4-6b에서 고쳤다), `rshr(dot, d0)` 24비트(golden 전제 `|.| < 2^22`, 넘으면 `L1_RANGE`), `qm km` 34비트, score 곱 58비트, `d 47274` 49비트(`exp_unit.prod_q`. 필요한 폭: golden 전제 s <= mx에서 d는 [-2^30, 0](clamp)이라 |d 47274| <= 2^30 x 47274 < 2^45.6, 부호 포함 47비트면 충분하고 `arch.md` 4.3의 48비트 [계산](d 31비트 x 16비트 + 부호)도 충분하다. RTL의 49비트는 d의 33비트 container 전체(s > mx인 TB 방향성 벡터 포함) x 17비트 signed 상수로 넘침이 없게 잡은 폭이라 필요보다 2비트 넓다), `e R` 50비트, `p vm` 34비트, `w` 36비트 container(golden 상한 2^33), V 누산 `ACC_W` = 60(검사 `ACC_W >= 50 + log2 T_MAX`).
 - q, K, V는 16비트 container. kb, vb in {8, 12, 16}은 golden의 값 범위를 전제로 한다(actq 출력). core는 vb를 쓰지 않는다(V는 sign-extend된 값으로 온다).
 - hs: core는 1..HS_MAX 임의(마지막 beat의 lane >= hs는 무시). `attn_top`은 hs가 8의 배수인 것만 받는다(DDR 행이 8 B 단위, BAD_DESC).
 
@@ -39,9 +40,9 @@ kv head of q head h = `h / KVMUL`(golden `j / kvmul`).
 | 0x00 | ID | R | 0x41540001 | [31:16] 0x4154("AT"), [15:0] 버전 1 |
 | 0x04 | CONFIG | R | | [7:0] `FCLK_MHZ`, [10:8] H_PAR, [11] KV_SRC(0 BRAM, 1 DDR), [15:12] log2(KL) = 3, [31:16] TMAX |
 | 0x08 | CTRL | W | | bit0 start, [7:4] op(1 = ATTN, 2 = KVW). 읽으면 0 |
-| 0x0C | STATUS | R | 0 | bit0 busy, bit1 done_sticky, bit2 err_any |
+| 0x0C | STATUS | R | 0 | bit0 busy(검사 중 또는 op 중), bit1 done_sticky, bit2 err_any |
 | 0x10 | ERR | R/W1C | 0 | bit0 START_BUSY, bit1 BAD_OP, bit2 BAD_DESC, bit3 MISALIGN, bit4 RD_RESP, bit5 WR_RESP |
-| 0x14 | CYCLES | R | 0 | 마지막 op의 cycle 수(e - s) |
+| 0x14 | CYCLES | R | 0 | 마지막으로 수락된 호출의 cycle 수(e - s, 검사 포함. 검사에서 거절되면 CHK_CYC) |
 | 0x18 | RD_STALL | R | 0 | 같은 구간에서 어떤 core가 KV beat를 기다린 cycle 수(`kv_stall_o`의 OR) |
 | 0x1C | WR_STALL | R | 0 | 같은 구간에서 packer의 beat를 `axi_wr_eng`가 받지 못한 cycle 수 |
 | 0x20 | OPS | R | 0 | reset 이후 끝난 op 수(ATTN + KVW), 2^32 wrap |
@@ -62,15 +63,22 @@ kv head of q head h = `h / KVMUL`(golden `j / kvmul`).
 
 ## 4. 실행 규칙
 
-### 4.1 CTRL (쓰기가 수행되는 cycle s, idle = busy가 아니거나 op가 끝나는 cycle e)
+### 4.1 CTRL (쓰기가 수행되는 cycle s, idle = 검사 중도 op 중도 아니거나 op가 끝나는 cycle e)
+S4-6b부터 descriptor 검사는 순차 계산이다(`umul_seq`, `udiv_seq`. 조합 곱셈기와 나눗셈기 없음). 판정 cycle은 **v = s + CHK_CYC**이고, 판정 결과(어떤 descriptor가 BAD_DESC/MISALIGN인지)는 S4-6의 조합 검사와 bit 단위로 같다.
+
+- **CHK_CYC = 18** (KV_SRC 1): 마지막 head의 kv head `(HEAD0 + NHEAD - 1) / KVMUL`을 `udiv_seq`(Q_W 8, 9 cycle)로 구한 뒤 `kvmax x SEQ`, `kvmax x (SEQ hs)`를 `umul_seq`(multiplier 8비트, 9 cycle)로 구한다.
+- **CHK_CYC = max(10, w(hs) + 1, w(kv) + w(hs) + 2)** (KV_SRC 0): `hend x ceil(T/2)`(multiplier hend 9비트, 10 cycle), `hend x hs`, KVW의 `kvl x SEQ` 다음 `slot x hs`. w(hs) = min(KL, HS_MAX)의 비트 수, w(kv) = NKV - 1의 비트 수(최소 1). 기본 BRAM 빌드(KL 8, NKV 4)에서 **10**.
+
 | 조건 | 결과 |
 |---|---|
-| idle, start, op 1 (ATTN) 또는 op 2 (KVW, KV_SRC 0), descriptor 정상 | 시작. descriptor를 latch(s + 1부터 유효, 이후의 레지스터 쓰기는 진행 중인 op에 영향 없음), done_sticky clear, CYCLES/RD_STALL/WR_STALL = 0 |
-| idle, start, op 1/2, descriptor 오류 | 시작 안 함. BAD_DESC 그리고/또는 MISALIGN(독립), done_sticky clear |
-| idle, start, op가 1, 2가 아님 또는 op 2인데 KV_SRC 1 | BAD_OP만. done_sticky 불변 |
+| idle, start, op 1 (ATTN) 또는 op 2 (KVW, KV_SRC 0) | 수락(cycle s). descriptor를 latch(s + 1부터 유효, 이후의 레지스터 쓰기는 이 호출에 영향 없음), done_sticky clear, CYCLES/RD_STALL/WR_STALL = 0, STATUS.busy = 1(s + 1부터). 검사는 s + 1 .. v |
+| (수락된 호출의 v) descriptor 정상 | 시작(`start_o`, cycle v). op는 v + 1부터 |
+| (수락된 호출의 v) descriptor 오류 | 시작 안 함. BAD_DESC 그리고/또는 MISALIGN(독립, v + 1부터 보임), STATUS.busy = 0(v + 1부터). done 없음, OPS 불변, CYCLES = CHK_CYC |
+| idle, start, op가 1, 2가 아님 또는 op 2인데 KV_SRC 1 | BAD_OP만(cycle s). done_sticky 불변 |
 | idle, start = 0 | done_sticky clear만 |
-| busy(e가 아님), start = 1 | START_BUSY(op가 틀리면 BAD_OP도). 무시 |
+| busy(검사 중 또는 op 중, e가 아님. 판정 cycle v 포함), start = 1 | START_BUSY(op가 틀리면 BAD_OP도). 무시 |
 
+- 오류 우선순위: BAD_OP와 START_BUSY는 CTRL 쓰기 cycle에 정해지고(둘 다 set 가능), BAD_DESC와 MISALIGN은 수락된 호출의 v에만 정해진다(서로 독립). BAD_OP나 START_BUSY인 쓰기는 검사를 시작하지 않는다.
 - done_sticky는 e에 set(e + 1부터 보임), 같은 cycle의 clear가 이긴다. ERR는 W1C, 같은 bit의 set이 clear를 이긴다. RD_RESP/WR_RESP는 RRESP[1]/BRESP[1]인 handshake마다 set되고 데이터는 그대로 쓰인다(op는 끝까지 간다).
 
 ### 4.2 descriptor 검사 (`attn_csr`, TB의 독립 모델과 매 cycle 대조)
@@ -79,13 +87,15 @@ kv head of q head h = `h / KVMUL`(golden `j / kvmul`).
 - KVW: hs <= KL, kb <= KW, vb <= VW, NKVH >= 1, KVH0 + NKVH <= NKV, POS < TMAX, POS < SEQ, LAYER < NL, 네 원본 버퍼의 마지막 행 끝이 2^32 이하.
 - MISALIGN: ATTN은 Q_ADDR, O_ADDR, (`p_en`) P_ADDR, (KV_SRC 1) K/V/KS/VS_ADDR의 [2:0] != 0. KVW는 K/V/KS/VS_ADDR.
 - 이 검사로 engine이 거절할 명령(정렬, 길이 0, 2^32 넘김)은 생기지 않는다(시뮬레이션 검사 `L3_ENGCMD`).
+- 판정은 latch한 값(s의 레지스터)으로 한다. 곱셈기의 피연산자는 다른 항이 모두 참일 때 정확한 폭으로 줄였다(hs <= KL 또는 HS_MAX, T <= TMAX, HEAD0 + NHEAD <= 256, KVH0 + NKVH <= NKV). 그 밖의 경우는 다른 항이 이미 거짓이라 판정이 같다. KV_SRC 0의 kv head 조건은 `hend <= NKV x KVMUL`(상수 곱)로 나눗셈 없이 같은 판정을 낸다.
 
 ### 4.3 op 종료 e
-- ATTN: 모든 engine의 head 순서기가 끝났고, write 중재가 비었고(grant 없음, 남은 write 명령 없음), packer가 비었고, `axi_wr_eng`가 마지막 B를 받은 첫 cycle. KVW: 마지막 kv head의 word를 kv_store에 쓰는 cycle. CYCLES = e - s.
+- ATTN: 모든 engine의 head 순서기가 끝났고, write 중재가 비었고(grant 없음, 남은 write 명령 없음), packer가 비었고, `axi_wr_eng`가 마지막 B를 받은 첫 cycle. KVW: 마지막 kv head의 word를 kv_store에 쓰는 cycle. CYCLES = e - s(검사 CHK_CYC 포함). op 자체(v + 1 .. e)의 cycle은 S4-6과 같다.
 
 ### 4.4 PS 호출 순서 (forward의 layer l, 위치 pos, T = pos + 1)
-1. (KV_SRC 0) ARM의 K/V actq 결과가 golden 배치의 `kc/vc/kcs/vcs`에 있다. `K_ADDR` 등 = layer l base, `SEQ`, `LAYER = l`, `POS = pos`, `KVH = {NKV, 0}`, `HS`, `FMT`; flush; `CTRL = 0x21`(KVW); done_sticky polling.
-2. head마다 q 레코드를 쓰고 flush. `Q_ADDR`, `O_ADDR`, (`P_ADDR`), `T`, `HEAD = {KVMUL, NHEAD, HEAD0}`, `FMT`(p_en). (KV_SRC 1) `K_ADDR`.. = layer base, `SEQ`. `CTRL = 0x11`; done_sticky polling; `ERR`, `CYCLES`; o를 invalidate.
+1. (KV_SRC 0) ARM의 K/V actq 결과가 golden 배치의 `kc/vc/kcs/vcs`에 있다. `K_ADDR` 등 = layer l base, `SEQ`, `LAYER = l`, `POS = pos`, `KVH = {NKV, 0}`, `HS`, `FMT`; flush; `CTRL = 0x21`(KVW); STATUS polling.
+2. head마다 q 레코드를 쓰고 flush. `Q_ADDR`, `O_ADDR`, (`P_ADDR`), `T`, `HEAD = {KVMUL, NHEAD, HEAD0}`, `FMT`(p_en). (KV_SRC 1) `K_ADDR`.. = layer base, `SEQ`. `CTRL = 0x11`; STATUS polling; `ERR`, `CYCLES`; o를 invalidate.
+- STATUS polling: busy = 0이 될 때까지 기다린다(검사 CHK_CYC 포함). 그 뒤 done_sticky = 1이면 정상 종료, 아니면 ERR을 본다. BAD_DESC/MISALIGN은 v + 1부터 보이므로 CTRL 직후의 ERR 읽기로 판단하지 않는다.
 - golden 순서(head마다 attention 호출, 260K token당 40회)를 layer당 KVW 1회 + ATTN 1회로 줄인다(D9).
 
 ## 5. 구성
@@ -103,6 +113,7 @@ attn_core (P1/P2/DIV/P3/O) --p, o stream--> write arbiter (one engine's head at 
 KVW (KV_SRC 0): read port 0 commands (K row, V row, ks, vs per kv head) -> word -> kv_store write
 ```
 
+- 주소(S4-6b, runtime 곱셈 없음): engine마다 head 주소 `Q_ADDR + h QB`, `P_ADDR + h PS`, `O_ADDR + 4 hs h`를 head 카운터가 증가할 때 stride(QB = 8 + 2 hs, PS = 8 ceil(T/2), 4 hs: shift)를 더해 유지하고, write 중재는 grant 때 그 engine의 p/o 주소를 latch한다. DDR KV의 kv head offset `kvh SEQ hs ek`, `kvh SEQ hs ev`, `8 kvh SEQ`는 kv head 카운터가 증가할 때 `(SEQ hs) << ek` 등을 더한다(`SEQ hs`는 `attn_csr`가 검사 중에 구한 곱 `seqhs_o`). KVW의 slot `j SEQ + POS`는 `attn_csr`의 `kw0_o = KVH0 SEQ + POS`에서 시작해 kv head마다 SEQ를 더하고, 행 주소는 slot << (3 + ek)이다(KVW는 hs = KL = 8, 시뮬레이션 검사 `L3_KVWHS`). `kv_rd`는 요청의 `ths = T hs`(`attn_csr`의 `ths_o`)로 V 길이와 마지막 K chunk 길이를 구하고, K 행 주소는 chunk마다 CH hs ek를 더한다.
 - `attn_core` 내부: `attn_score`(P1), `ram_sdp` p buffer(TMAX x 32: s, 이어서 e), `ram_sdp` vs buffer(TMAX x 25: P1에서 쓰고 P3에서 읽음), `exp_unit`(P2), `udiv_seq`(DIV), `attn_vacc`(P3, O), `sync_fifo` 출력 FIFO(`OUT_DEPTH` x 34: data, last, is_o). pass FSM은 `attn_core` 자신의 control이다(`hierarchy.md` 초안의 `attn_ctrl`을 별도 모듈로 두지 않았다).
 - KV source 인터페이스(KV 위치와 무관): core가 pass를 요청(`kvreq`, 0 = K, 1 = V)하면 source가 T x ceil(hs/8) beat를 위치 순서로 보낸다. K pass beat는 K lane과, 위치의 마지막 beat에서 `(km, ke, vm, ve)`. V pass beat는 V lane만(scale은 core의 vs buffer에서). K 요청은 start 때, V 요청은 P2 시작 때 내서 source가 미리 읽을 수 있다.
 - core의 backpressure: P1, P2는 멈추지 않는다. P3는 위치의 첫 beat를 출력 FIFO credit(level + 진행 중 p < OUT_DEPTH)이 있을 때만 받고, O는 빈 칸이 있을 때만 읽는다.
@@ -123,20 +134,22 @@ start 수락 cycle을 0, `done_o` cycle을 C라 하면, q와 KV beat가 매 cycl
 - `p_en`은 stall이 없으면 cycle에 영향이 없다(출력 FIFO credit만).
 
 ### 6.2 `attn_top` token 합 [측정, Questa, stall 없는 메모리 모델 latency 1, p_en = 0]
-ATTN op CYCLES를 layer마다 한 op(head 전부)로 돌려 token(위치) 하나의 layer 합을 냈다(`attn_top.cfg`의 `*_tok` runs).
+ATTN op CYCLES를 layer마다 한 op(head 전부)로 돌려 token(위치) 하나의 layer 합을 냈다(`attn_top.cfg`의 `*_tok` runs). S4-6b부터 CYCLES에 검사 CHK_CYC(BRAM 빌드 10, DDR 빌드 18)가 op마다 들어간다. 아래 표는 S4-6b 재측정 값이고 괄호는 S4-6 값이다.
 
 | 구성 | T = 1 | 8 | 64 | 128 | 256 | 512 | arch.md 4.4 [계산] |
 |---|---|---|---|---|---|---|---|
-| 260K, KV BRAM, H_PAR 2 | 1,760 | 2,180 | 5,540 | 9,380 | 17,060 | **32,420** | T 512에서 32,320 |
-| 260K, KV BRAM, H_PAR 1 | 3,365 | 4,205 | 10,925 | 18,605 | 33,965 | 64,685 | - |
-| 260K, KV BRAM, H_PAR 2, p_en = 1 | 1,745 | 2,198 | 5,874 | 10,032 | 18,360 | 34,983 | - |
-| 15M, KV DDR, H_PAR 1 | 5,514 | - | - | 101,526 | 198,294 | - | T 256에서 196,416 |
-| 15M, KV DDR, H_PAR 2 | 3,102 | - | - | 51,108 | 99,496 | - | - |
+| 260K, KV BRAM, H_PAR 2 | 1,810 (1,760) | 2,230 (2,180) | 5,590 (5,540) | 9,430 (9,380) | 17,110 (17,060) | **32,470** (32,420) | T 512에서 32,320 |
+| 260K, KV BRAM, H_PAR 1 | 3,415 (3,365) | 4,255 (4,205) | 10,975 (10,925) | 18,655 (18,605) | 34,015 (33,965) | 64,735 (64,685) | - |
+| 260K, KV BRAM, H_PAR 2, p_en = 1 | 1,795 (1,745) | 2,250 (2,198) | 5,927 (5,874) | 10,090 (10,032) | 18,410 (18,360) | 35,034 (34,983) | - |
+| 15M, KV DDR, H_PAR 1 | 5,622 (5,514) | - | - | 101,634 (101,526) | 198,403 (198,294) | - | T 256에서 196,416 |
+| 15M, KV DDR, H_PAR 2 | 3,210 (3,102) | - | - | 51,216 (51,108) | 99,601 (99,496) | - | - |
+
+- S4-6b 차이: 260K p_en = 0은 모든 T에서 정확히 +50(layer 5개 x CHK_CYC 10), KVW op는 2,560개 모두 38 -> 48(+10, 합 97,280 -> 122,880). 15M은 +108(layer 6개 x 18)이고 T 256에서 +109, +105, p_en = 1은 +50..+58이다. 이 차이는 op 자체의 변화가 아니라 TB의 무작위 o/p 주소(AXI-Lite BFM이 같은 난수열을 쓰는데 polling 횟수가 바뀌어 순서가 밀림)로 write burst의 4 KiB/16 beat 분할이 달라진 것이다(p_en = 0, KV BRAM에서는 주소가 cycle에 영향이 없어 정확히 +50). op 내부(v + 1 .. e)의 cycle 규칙은 S4-6과 같고 매 cycle CSR 참조 모델이 CYCLES = e - s를 확인했다.
 
 - 260K H_PAR 2: layer 하나 = engine당 head 4개 순차. T 256과 512의 차에서 layer당 12T(= 4 head x 3T), 절편 layer당 340 = 4 x 69(core) + 64. head당 q 레코드 읽기와 순서기 전환이 약 8 cycle, op 시작/종료(마지막 B)가 약 31 cycle이다(H_PAR 1과 2의 두 식에서 푼 값, engine 사이 write 중재가 겹쳐 정수로 나눠지지 않는다).
 - 15M DDR H_PAR 1: head당 198,294 / 36 = 5,508 = 21T + 132(T 256). P1이 위치당 14 beat(K 12 + scale 2), P3가 6 beat라 `arch.md`의 `21T + 80` 식과 같은 꼴이고 상수가 52 크다(chunk 명령마다의 engine 왕복과 q 레코드 읽기).
 - p_en = 1은 260K T 512에서 8% 늘었다(두 engine의 p가 write 포트 하나를 나눠 쓰고, 다른 engine의 출력이 grant를 기다리는 동안 credit에 걸린다).
-- KVW: kv head 4개를 쓰는 op 하나가 38 CYCLES(2,560 op 평균, 4 x 4 read 명령). 260K token당 layer 5개 = 190 cycle.
+- KVW: kv head 4개를 쓰는 op 하나가 48 CYCLES(S4-6b, 검사 10 포함; S4-6 38). 260K token당 layer 5개 = 240 cycle(S4-6 190).
 - 보드의 DDR latency, ARM 쪽 비용(AXI-Lite 쓰기, cache flush/invalidate, polling)은 들어 있지 않다.
 
 ## 7. 시뮬레이션 검증 (2026-11-19)
@@ -156,6 +169,17 @@ ATTN op CYCLES를 layer마다 한 op(head 전부)로 돌려 token(위치) 하나
 - mutation 42개(`sim/.mut6/m.py`): `udiv_seq` 3, `lut_lerp` 3, `exp_unit` 2, `attn_score` 5, `attn_vacc` 4, `attn_core` 8, `kv_store` 2, `kv_rd` 3, `attn_csr` 3, `attn_top` 9. **42개 모두 검출**(`sim/.mut6/summary.txt`). 첫 회차에서 살아남은 3개(`lut_zero`: u = 17 x 2^16에서만 다름, `exp_clamp`: -w wrap 구간, `csr_hs8`: BRAM 빌드에서 hs 12는 hs <= KL로도 거절됨)는 동치가 아니라 TB 공백이었고, 방향성 벡터(fraction 경계, wrap 구간, hs 4)를 추가해 검출했다. `kvs_credit`는 L2_OVF 13회 뒤 TB가 멈춰(beat 유실) 손으로 끝냈고, `tb_kv_store`/`tb_kv_rd`에 watchdog(`TB_TIMEOUT`)을 넣었다.
 - lint: `vlog -lint=full`, `vopt -lint=full`(`sim/.lint6`: 9개 모듈 + `attn_top` KV_SRC 1/H_PAR 1 + `attn_core` PIPE 0) 경고 0.
 
+### 7.1 S4-6b 재검증 (2026-11-20)
+| test | 내용 | run |
+|---|---|---|
+| `umul_seq` (신규) | 정확한 곱(TB 128비트) 대조. 경계 쌍(0, 1, 2, max - 1, max, 2^k, 2^k +- 1, 교대 비트) 전부, random 10^6(A 25 x B 9), 크기 33 x 8, 16 x 16, 24 x 8, 64 x 64 random, 소형 전수(6 x 5, 1 x 1, 1 x 7, 8 x 2), done cycle의 start, busy/done 시점, p 유지. 부정: busy 중 start(UMUL_START), X 피연산자(UMUL_X), A_W 65 elaboration 실패 | 13 |
+| `attn_csr` (신규, 단독) | spec 4절 참조 모델(64비트 정확 곱, 이유별 판정)과 매 cycle 대조: 읽기 값, `start_o`(v = s + CHK_CYC), `busy_o`, `op_kvw_o`, latch된 descriptor(s + 1부터), 통과 판정부터 다음 수락까지 `seqhs_o`/`ths_o`/`kw0_o`. 방향성: 정상 template, BAD_DESC 이유 하나씩(첫 오류 값과 마지막 정상 값), 범위마다 끝이 정확히 2^32(수락)와 + 8(거절), 빌드 최대 곱, BAD_DESC + MISALIGN, BAD_OP(DDR 빌드의 KVW 포함), 검사의 모든 cycle(판정 cycle 포함)과 op 중의 START_BUSY(BAD_OP 동반 포함), done cycle의 CTRL(start 0/1), 검사 중 descriptor 쓰기(레지스터 판정과 latch 판정이 다른 경우), W1C와 set 충돌. 이어서 매 cycle random 접근 3 x 10^5 ~ 2 x 10^6 cycle. 빌드: BRAM(HS_MAX 8, 16, NKV 1, 7/TMAX 100/KW VW 16), DDR(HS_MAX 64, 255/TMAX 100, 8/TMAX 65535), HS_MAX 4 elaboration 실패. 빌드에서 혼자 날 수 없는 이유(hs > KL with HS_MAX <= KL 등)만 요구에서 뺐다 | 10 |
+| 기존 TB 수정 | `kv_rd`(요청에 ths), `attn_top`(참조 모델에 검사 단계, 오류 호출 뒤 STATUS.busy = 0 대기, KVW를 KVH0 > 0인 두 op로 나누는 경우 추가: 요구 coverage), `gemv_acc_csr`/`gemv_acc_top`, `pim_csr`/`pim_ctrl`/`pim_top`(각 spec의 새 규칙) | - |
+
+- 회귀: `./sim/run.sh all` **368 run, fails 0**(기존 345 + `umul_seq` 13 + `attn_csr` 10, `sim/regression_all.log`).
+- mutation 42개(`sim/.mut6b/m.py`, `res.txt`): `umul_seq` 3, `attn_csr` 13(stride, 판정 경계 `<` 대 `<=`, slot + 1, T hs 항, 나눗셈 결과 사용 시점, 판정 cycle, latch 대신 live 레지스터, CYCLES clear 시점, 출력 곱), `attn_top` 9(초기 base, 증분 시점, K/V stride, kv head 증분, o stride, grant의 engine, KVW 첫 slot, KVW slot 증분 시점, KVW 행 크기), `kv_rd` 4, `gemv_acc_csr` 5, `pim_csr` 5, `pim_top` 1(push 검사 중 run 종료), `pim_ctrl` 2(LDW 길이, LDW 명령 시점). **42개 모두 첫 회차에 검출**(3개는 TB watchdog 종료로 검출: `kvr_koff`, `kvr_vall`, `kvr_chrow`). RTL 원본 불변(sha256 대조).
+- lint: `sim/.lint6b`(모든 RTL 파일 `vlog -lint=full`, `vopt -lint=full` 17개 구성: `umul_seq` 2, `attn_csr` 3, `attn_top` 3, `kv_rd`, `kv_store`, `gemv_acc_csr`, `gemv_acc_top` P 1/2, `pim_csr`, `pim_ctrl`, `pim_core`, `pim_top`) 경고 0.
+
 ## 8. 자원 [계산, 합성 안 함]
 
 | 모듈 | DSP48E1 (25x18) | 메모리 |
@@ -169,7 +193,9 @@ ATTN op CYCLES를 layer마다 한 op(head 전부)로 돌려 token(위치) 하나
 | `kv_rd` | 0 | scale buffer CH x 25 x 2 (레지스터) |
 
 - 260K 시스템 P(H_PAR 2): attention DSP 66, BRAM36 60 + 2 = 62. `arch.md` 8절 표(attention engine당 BRAM 0.5)보다 engine당 0.5 많다: P3에서 vm/ve를 다시 읽지 않으려고 vs buffer를 따로 둬서다(KV 스트림이 P3에서 V만 싣고, DDR KV의 P3 traffic이 위치당 V 행만 된다). 시스템 P 합계는 126 -> 127/140 [계산].
-- 관찰: descriptor 검사(`attn_csr`)와 주소 계산(`attn_top`의 `kvh x SEQ x row`, `h x QB`, `h x 4 hs`, KVW slot)이 runtime 곱셈이다. 합성하면 곱셈기 10개 이상이 추론될 수 있다 [추정]. op 시작 때 한 번 계산되는 값이라 순차 계산이나 증분 덧셈으로 바꿀 수 있다(남은 일).
+- S4-6b 이전의 관찰: descriptor 검사(`attn_csr`)와 주소 계산(`attn_top`의 `kvh x SEQ x row`, `h x QB`, `h x 4 hs`, KVW slot, `kv_rd`의 `T x row`, `t0 x row`)이 runtime 곱셈(일부 64비트 폭 표현)과 runtime 나눗셈(`(HEAD0 + NHEAD - 1) / KVMUL`)이었다.
+- S4-6b 이후 [계산, 합성 안 함]: control 쪽 runtime 곱셈기와 나눗셈기는 없다. `attn_csr`는 KV_SRC 0에서 `umul_seq` 5개(A x B 비트: 9 x 4, 9 x 9, 16 x 2, 16 x 2, 19 x 4), KV_SRC 1에서 `umul_seq` 6개(9 x HS_W, 9 x 9, 16 x HS_W, TW x HS_W, 16 x 8, (16 + HS_W) x 8)와 `udiv_seq`(8/8/8) 하나를 쓴다. 각각 A비트 덧셈기 하나와 (2A + B)비트 정도의 레지스터다. 대신 비교기(36비트 덧셈 + 비교)는 판정 cycle에 레지스터 값만 받는다. `attn_top`은 engine마다 32비트 덧셈기 3개(q, p, o 주소)와 KV_SRC 1에서 3개(kv head offset)를 더 쓴다. 남은 곱은 상수 곱뿐이다(`KVMUL x NKV`, `kv_rd`의 `hs x CH`, `kv_store`의 `layer x SEQ`, leaf 데이터패스의 의도된 곱은 위 표).
+- 대가: 호출마다 CHK_CYC(KV_SRC 0: 10, KV_SRC 1: 18) cycle(4.1, 6절).
 - 100 MHz 타이밍 위험 [추정, 미측정]: 24x34, 17x33 곱, 60비트 누산(lane 8개), `attn_vacc`의 o 읽기 mux(HS_MAX:1, 60비트), `rshr_sat` 58/60비트.
 
 ## 9. 정한 세부와 확인하지 못한 것
@@ -177,4 +203,4 @@ ATTN op CYCLES를 layer마다 한 op(head 전부)로 돌려 token(위치) 하나
 - `udiv_seq` CYCLES = Q_W + 1(34)이다(`hierarchy.md` 초안의 Q_W + 2보다 1 짧다).
 - 보드: HP 포트 latency, 100 MHz 타이밍, LUT 수, 72비트 BRAM 폭 추론(210비트 word가 BRAM36 3개 폭으로 매핑되는지) 미확인.
 - 15M에서 kv_rd의 chunk 명령 왕복이 DDR latency에 따라 얼마나 늘어나는지는 latency 1 모델 값만 있다(`axi_mem_slave` latency 1..16 stall run은 결과 일치만 확인했고 cycle은 비교하지 않았다).
-- `attn_csr`는 전용 TB 없이 `attn_top` TB의 매 cycle 참조 모델로만 검증했다.
+- (S4-6 시점) `attn_csr`는 전용 TB 없이 `attn_top` TB의 매 cycle 참조 모델로만 검증했다. S4-6b에서 단독 TB `tb/attn_csr`를 추가했다(7절).

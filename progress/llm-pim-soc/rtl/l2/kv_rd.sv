@@ -4,13 +4,16 @@
 // attn_core pass stream.
 //
 // Request (rq_*, taken while idle): pass (0 = K, 1 = V), T, hs (multiple of 8, = KL x beats),
-// element sizes (ek2 / ev2: 2-byte elements, else 1 byte) and the byte addresses of position 0
+// ths = T x hs (given by the requester: attn_csr computes it once per call), element sizes (ek2 / ev2: 2-byte elements, else 1 byte) and the byte addresses of position 0
 // of this kv head: kaddr (K rows, hs x ek bytes each), vaddr (V rows), ksaddr / vsaddr (8 bytes
 // per position: m in bits [31:0], e in [63:32]).
 // K pass: per chunk of CH positions (t0, n = min(CH, T - t0)) three read commands: ks (n x 8 B),
 // vs (n x 8 B), K rows (n x hs x ek B). Output: per position hs/8 beats of 8 lanes (16-bit,
 // sign-extended from ek bytes), every beat with the position's (km, ke, vm, ve).
 // V pass: one command (T x hs x ev B); output beats of V lanes (scales 0).
+// Command addresses and lengths without a runtime multiplier: ks / vs at 8 t0 (shift), K rows at
+// kaddr + koff (koff += CH hs ek per chunk, CH constant), a full chunk CH hs ek bytes, the last
+// chunk T hs ek - koff, the V pass T hs ev (from ths).
 // Data of one ek / ev = 2 output beat is two input beats (lanes 0..3, 4..7), of ek / ev = 1 one
 // input beat. Commands are issued as soon as the engine takes them (it queues them while the
 // previous one is still returning data); data arrives in command order.
@@ -24,7 +27,8 @@ module kv_rd
   parameter int TMAX   = llm_pkg::T_MAX,
   parameter int CH     = 16,
   localparam int HS_W  = $clog2(HS_MAX + 1),
-  localparam int TW    = $clog2(TMAX + 1)
+  localparam int TW    = $clog2(TMAX + 1),
+  localparam int TH_W  = TW + HS_W
 ) (
   input  logic                  clk,
   input  logic                  rst_n,
@@ -34,6 +38,7 @@ module kv_rd
   input  logic                  rq_pass_i,
   input  logic [TW-1:0]         rq_t_i,
   input  logic [HS_W-1:0]       rq_hs_i,
+  input  logic [TH_W-1:0]       rq_ths_i,      // T x hs (precondition, L2_THS)
   input  logic                  rq_ek2_i,
   input  logic                  rq_ev2_i,
   input  logic [31:0]           rq_kaddr_i,
@@ -70,33 +75,41 @@ module kv_rd
   logic            act_q, pass_q, ek2_q, ev2_q;
   logic [TW-1:0]   T_q;
   logic [HS_W-1:0] hs_q;
+  logic [TH_W-1:0] ths_q;
   logic [31:0]     ka_q, va_q, ksa_q, vsa_q;
   logic            rq_hs;
   assign rq_ready_o = !act_q;
   assign rq_hs      = rq_valid_i && !act_q;
 
-  logic [31:0] rowk, rowv;      // bytes per position
-  assign rowk = 32'(hs_q) << ek2_q;
-  assign rowv = 32'(hs_q) << ev2_q;
+  localparam int CR_W = HS_W + $clog2(CH + 1); // CH x hs
+  logic [CR_W-1:0] chs;
+  logic [31:0]     chrow, kall, vall;
+  assign chs   = CR_W'(hs_q) * CR_W'(CH);       // constant multiple
+  assign chrow = 32'(chs) << ek2_q;             // K bytes of a full chunk
+  assign kall  = 32'(ths_q) << ek2_q;           // K bytes of all T positions
+  assign vall  = 32'(ths_q) << ev2_q;           // V bytes of all T positions
 
   // ---------------- command generator ----------------
   logic          cact_q;        // commands left
   logic [1:0]    ck_q;          // K pass: 0 ks, 1 vs, 2 K rows
   logic [TW-1:0] ct0_q;         // chunk start
   logic [TW-1:0] cn;            // positions of the chunk
-  assign cn = (32'(T_q) - 32'(ct0_q) < CH) ? TW'(T_q - ct0_q) : TW'(CH);
+  logic          clast;         // last chunk shorter than CH
+  logic [31:0]   koff_q;        // K row bytes before the chunk: ct0 hs ek
+  assign clast = 32'(T_q) - 32'(ct0_q) < CH;
+  assign cn    = clast ? TW'(T_q - ct0_q) : TW'(CH);
 
   always_comb begin
     rc_addr_o  = '0;
     rc_bytes_o = '0;
     if (pass_q) begin
       rc_addr_o  = va_q;
-      rc_bytes_o = 32'(T_q) * rowv;
+      rc_bytes_o = vall;
     end else
       unique case (ck_q)
-        2'd0:    begin rc_addr_o = ksa_q + 32'(ct0_q) * 8;    rc_bytes_o = 32'(cn) * 8; end
-        2'd1:    begin rc_addr_o = vsa_q + 32'(ct0_q) * 8;    rc_bytes_o = 32'(cn) * 8; end
-        default: begin rc_addr_o = ka_q + 32'(ct0_q) * rowk;  rc_bytes_o = 32'(cn) * rowk; end
+        2'd0:    begin rc_addr_o = ksa_q + 32'({ct0_q, 3'b000}); rc_bytes_o = 32'({cn, 3'b000}); end
+        2'd1:    begin rc_addr_o = vsa_q + 32'({ct0_q, 3'b000}); rc_bytes_o = 32'({cn, 3'b000}); end
+        default: begin rc_addr_o = ka_q + koff_q;  rc_bytes_o = clast ? kall - koff_q : chrow; end
       endcase
   end
   assign rc_valid_o = cact_q;
@@ -121,10 +134,15 @@ module kv_rd
     end
 
   always_ff @(posedge clk)
+    if (rq_hs) koff_q <= '0;
+    else if (cact_q && rc_ready_i && !pass_q && ck_q == 2'd2) koff_q <= koff_q + chrow;
+
+  always_ff @(posedge clk)
     if (rq_hs) begin
       pass_q <= rq_pass_i;
       T_q    <= rq_t_i;
       hs_q   <= rq_hs_i;
+      ths_q  <= rq_ths_i;
       ek2_q  <= rq_ek2_i;
       ev2_q  <= rq_ev2_i;
       ka_q   <= rq_kaddr_i;
@@ -252,6 +270,8 @@ module kv_rd
       if (rq_hs && (rq_t_i == '0 || 32'(rq_t_i) > TMAX || rq_hs_i == '0 || 32'(rq_hs_i) > HS_MAX ||
                     rq_hs_i % 8 != 0))
         $error("L2_RANGE kv_rd %m: request T %0d hs %0d", rq_t_i, rq_hs_i);
+      if (rq_hs && 32'(rq_ths_i) != 32'(rq_t_i) * 32'(rq_hs_i))   // simulation-only check
+        $error("L2_THS kv_rd %m: request ths %0d != T %0d x hs %0d", rq_ths_i, rq_t_i, rq_hs_i);
       if (d_hs && ds_q != 2'd2 &&
           (d_data_i[31:0] >= 32'(1 << AM_W) || $signed(d_data_i[63:32]) != $signed(E_W'(d_data_i[63:32]))))
         $error("L2_RANGE kv_rd %m: scale m %0d e %0d outside 17 / %0d bits", d_data_i[31:0],

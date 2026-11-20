@@ -22,10 +22,11 @@
 //
 // Run: the CTRL write that starts a run is performed in cycle s; busy from s + 1. RUN: the
 // queued commands go to pim_core from s + 1. The run is complete in the first cycle e (busy) in
-// which the command FIFO is empty, pim_core has nothing in flight (controller idle, every y popped,
-// the last write command taken) and the write engine has no command left (busy_o = 0: every B
-// received). FLUSH: the FIFO is popped one command per cycle without executing; complete in the
-// first busy cycle with an empty FIFO. CYCLES = e - s.
+// which no pushed command is still being checked (pim_csr push_busy_o, S4-6b), the command FIFO
+// is empty, pim_core has nothing in flight (controller idle, every y popped, the last write
+// command taken) and the write engine has no command left (busy_o = 0: every B received).
+// FLUSH: the FIFO is popped one command per cycle without executing; complete in the first busy
+// cycle with an empty FIFO and no push check. CYCLES = e - s.
 // RD_STALL counts busy cycles in which the core is ready for a read beat and has none, WR_STALL
 // busy cycles in which the packer offers a beat that axi_wr_eng does not take. RD_RESP / WR_RESP
 // are set by every R beat / B response with RRESP[1] / BRESP[1] (data is used as returned).
@@ -135,7 +136,7 @@ module pim_top
   logic             push, fifo_in_ready, fifo_valid, fifo_ready;
   logic [127:0]     push_data, fifo_data;
   logic [LV_W-1:0]  fifo_level;
-  logic             start, busy, run_flush, run_done;
+  logic             start, busy, run_flush, run_done, push_busy;
   logic             rd_err_ev, wr_err_ev, rd_stall_ev, wr_stall_ev;
   logic             ev_mac, ev_wrgb, ev_rdmac, done_ldw, done_wrgb, done_mac;
 
@@ -145,8 +146,8 @@ module pim_top
     .wr_en_i(wr_en), .wr_addr_i(wr_addr), .wr_data_i(wr_data),
     .rd_en_i(rd_en), .rd_addr_i(rd_addr), .rd_data_o(rd_data),
     .push_o(push), .push_data_o(push_data), .fifo_ready_i(fifo_in_ready), .fifo_level_i(fifo_level),
-    .start_o(start), .busy_o(busy), .run_flush_o(run_flush), .done_i(run_done),
-    .rd_err_i(rd_err_ev), .wr_err_i(wr_err_ev), .rd_stall_i(rd_stall_ev), .wr_stall_i(wr_stall_ev),
+    .start_o(start), .busy_o(busy), .push_busy_o(push_busy), .run_flush_o(run_flush),
+    .done_i(run_done), .rd_err_i(rd_err_ev), .wr_err_i(wr_err_ev), .rd_stall_i(rd_stall_ev), .wr_stall_i(wr_stall_ev),
     .ev_mac_i(ev_mac), .ev_wrgb_i(ev_wrgb), .ev_rdmac_i(ev_rdmac), .done_ldw_i(done_ldw),
     .done_wrgb_i(done_wrgb), .done_mac_i(done_mac));
 
@@ -241,7 +242,7 @@ module pim_top
     .m_axi_wready_i, .m_axi_bid_i, .m_axi_bresp_i, .m_axi_bvalid_i, .m_axi_bready_o);
 
   // ---------------- run completion and events ----------------
-  assign run_done = busy && fifo_level == '0 && (run_flush || (!core_busy && !wr_busy));
+  assign run_done = busy && !push_busy && fifo_level == '0 && (run_flush || (!core_busy && !wr_busy));
 
   assign rd_stall_ev = core_rd_stall;
   assign rd_err_ev   = m_axi_rvalid_i && m_axi_rready_o && m_axi_rresp_i[1];

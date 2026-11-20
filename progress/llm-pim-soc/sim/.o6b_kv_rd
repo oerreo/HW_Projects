@@ -1,0 +1,6 @@
+### kv_rd: compile (RTL_DIR=../../rtl)
+### kv_rd: compile done in 0 s
+### kv_rd/q_base: vsim tb_kv_rd +SEED=1 +NREQ=40 +MSTALL=0 +PY=100 (expect pass)
+kv_rd/q_base: PASS (rc=0 errors=0 RANGE=0 wall=0s) CHECKS [beats]: checks=9820 mismatches=0 CHECKS [count]: checks=40 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 
+### kv_rd/q_stall: vsim tb_kv_rd +SEED=2 +NREQ=40 +MSTALL=1 +PY=60 +BLK=1 (expect pass)
+kv_rd/q_stall: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [beats]: checks=10340 mismatches=0 CHECKS [count]: checks=40 mismatches=0 CHECKS [coverage]: checks=1 mismatches=0 

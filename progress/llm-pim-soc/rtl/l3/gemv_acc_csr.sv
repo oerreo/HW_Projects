@@ -10,10 +10,10 @@
 //   0x00 ID          R     0x4741_0001 ("GA", version 1)
 //   0x04 CONFIG      R     [7:0] FCLK_MHZ, [11:8] P, [15:12] log2(LANES), [31:16] NMAX
 //   0x08 CTRL        W     bit0 start, [7:4] op (1 = GEMV); reads 0
-//   0x0C STATUS      R     bit0 busy, bit1 done_sticky, bit2 err_any (ERR != 0)
+//   0x0C STATUS      R     bit0 busy (check or call), bit1 done_sticky, bit2 err_any (ERR != 0)
 //   0x10 ERR         R/W1C bit0 START_BUSY, bit1 BAD_OP, bit2 BAD_DESC, bit3 MISALIGN,
 //                          bit4 RD_RESP, bit5 WR_RESP
-//   0x14 CYCLES      R     cycles of the last call (start to done)
+//   0x14 CYCLES      R     cycles of the last accepted call (CTRL write to done, check included)
 //   0x18 RD_STALL    R     cycles of the last call with a slice waiting for read data
 //   0x1C WR_STALL    R     cycles of the last call with the y packer held by the write engine
 //   0x20 OPS         R     completed calls
@@ -29,25 +29,30 @@
 //   0x64 ARGMAX_VAL  R     that maximum (int32)
 //   other                  read 0, write ignored
 //
-// Op state: busy_q is 1 from the cycle after an accepted start (s) up to and including the
-// done_i cycle (e). "Idle" for a CTRL write is !busy_q or the done_i cycle itself (the call has
-// finished in that cycle: a start written then is accepted).
+// Call state (S4-6b: the W range product is computed by a sequential multiplier, no runtime
+// multiplier): a CTRL write with start = 1 and op = 1 in cycle s while idle is accepted. The
+// descriptor is latched into the op_* outputs (valid from s + 1 until the next accepted call),
+// STATUS.busy = 1 from s + 1, and the check runs in s + 1 .. v, v = s + CHK_CYC
+// (CHK_CYC = NBW + 1: umul_seq ROWS x (1 + ceil(N/8)), started in s). In v a legal descriptor
+// gives start_o (busy_o from v + 1 up to and including the done_i cycle e); otherwise BAD_DESC
+// (ROWS or N out of range, FLAGS[1:0] = 0, a used buffer passing 2^32: W_ADDR + ROWS x 8
+// (1 + ceil(N/8)), X_ADDR + N, Y_ADDR + 4 ROWS if y_en) and MISALIGN (W_ADDR, X_ADDR, Y_ADDR if
+// y_en not 8-byte aligned) are set independently in v (visible v + 1), no start, STATUS.busy = 0
+// from v + 1, no done. The terms without a product are evaluated in s on the registers and kept;
+// the W range in v on the latched W_ADDR and the product (the same verdict as the
+// combinational check of S4-4, bit for bit).
+// "Idle" for a CTRL write is: no check and no call (busy_o), or the done_i cycle itself.
 // CTRL write while idle: clears done_sticky (wins over done_i of the same cycle), except a
-// start with an op other than 1 (BAD_OP, nothing else changes). With start = 1 and op = 1 the
-// descriptor is checked: BAD_DESC (ROWS or N out of range, FLAGS[1:0] = 0, a used buffer
-// passing 2^32: W_ADDR + ROWS x 8 (1 + ceil(N/8)), X_ADDR + N, Y_ADDR + 4 ROWS if y_en) and
-// MISALIGN (W_ADDR, X_ADDR, Y_ADDR if y_en not 8-byte aligned) are set independently; with
-// either one the call does not start. Otherwise start_o = 1 in that cycle and the descriptor
-// is latched into the op_* outputs (valid from s + 1 until the next start).
-// CTRL write with start = 1 while busy (not in the done_i cycle): START_BUSY, ignored (also
-// BAD_OP if op != 1, as in pqc-ntt-ip; the descriptor is not checked while busy). A CTRL
-// write with start = 0 while busy has no effect.
+// start with an op other than 1 (BAD_OP in s, nothing else changes).
+// CTRL write with start = 1 while busy (check or call, not the done_i cycle): START_BUSY, ignored
+// (also BAD_OP if op != 1, as in pqc-ntt-ip). A CTRL write with start = 0 while busy has no
+// effect.
 // ERR: W1C; a set wins over a clear of the same bit in the same cycle. RD_RESP / WR_RESP are
 // set by every read beat / write response with SLVERR or DECERR (rd_err_i / wr_err_i).
-// Counters: CYCLES, RD_STALL, WR_STALL are cleared by the start (cycle s) and count the busy_q
-// cycles (s + 1 .. e; RD_STALL / WR_STALL only those with rd_stall_i / wr_stall_i), so
-// CYCLES = e - s. They wrap at 2^32. OPS counts done_i. ARGMAX_IDX / ARGMAX_VAL take
-// am_idx_i / am_max_i at am_done_i.
+// Counters: CYCLES, RD_STALL, WR_STALL are cleared by the accepted CTRL write (cycle s) and count
+// the busy cycles s + 1 .. e (check and call; RD_STALL / WR_STALL only those with rd_stall_i /
+// wr_stall_i), so CYCLES = e - s (a call failing the check: CHK_CYC). They wrap at 2^32. OPS
+// counts done_i. ARGMAX_IDX / ARGMAX_VAL take am_idx_i / am_max_i at am_done_i.
 // Reset: all registers 0 except FLAGS (y_en = 1); ID and CONFIG are constants.
 module gemv_acc_csr
   import llm_pkg::*;
@@ -72,8 +77,8 @@ module gemv_acc_csr
   input  logic [ADDR_W-1:0]       rd_addr_i,
   output logic [31:0]             rd_data_o,
   // op control
-  output logic                    start_o,     // accepted start (cycle s)
-  output logic                    busy_o,      // s + 1 .. e
+  output logic                    start_o,     // legal call (verdict cycle v = s + CHK_CYC)
+  output logic                    busy_o,      // v + 1 .. e
   input  logic                    done_i,      // the call is complete (cycle e, only while busy)
   // latched descriptor (from s + 1)
   output logic [31:0]             op_w_addr_o,
@@ -87,7 +92,7 @@ module gemv_acc_csr
   output logic signed [E_W-1:0]   op_fo_o,
   output logic                    op_am_en_o,
   output logic                    op_y_en_o,
-  output logic [WB_W-1:0]         op_wbytes_o, // ROWS x 8 (1 + ceil(N/8))
+  output logic [WB_W-1:0]         op_wbytes_o, // ROWS x 8 (1 + ceil(N/8)), valid from start_o
   // events of the current cycle
   input  logic                    rd_err_i,    // read beat with RRESP[1]
   input  logic                    wr_err_i,    // write response with BRESP[1]
@@ -161,49 +166,60 @@ module gemv_acc_csr
     end
 
   // ---------------- descriptor check ----------------
-  logic            rows_ok, n_ok, flags_ok, desc_ok, align_ok;
-  logic [NBW-1:0]  nb1;      // 1 + ceil(N/8), from the low bits of N (used only if n_ok)
-  logic [WB_W-1:0] wbytes;
+  localparam int CHK_CYC = NBW + 1;                 // umul_seq B_W = NBW
+  localparam int CC_W    = $clog2(CHK_CYC + 1);
+  logic            rows_ok, n_ok, flags_ok, pre_ok, align_ok;
+  logic [NBW-1:0]  nb1;      // 1 + ceil(N/8), from the low bits of N (exact if n_ok)
   logic            y_en_r;
 
+  // terms without a product, on the registers in cycle s
   assign y_en_r   = flags_r[1];
   assign rows_ok  = (rows_r != 32'd0) && (rows_r <= 32'((64'd1 << ROWS_W) - 1));
   assign n_ok     = (n_r != 32'd0) && (n_r <= 32'(NMAX));
   assign flags_ok = flags_r != 2'b00;
   assign nb1      = NBW'((({1'b0, n_r[NW-1:0]} + (NW + 1)'(7)) >> 3) + 1);
-  assign wbytes   = WB_W'(rows_r[ROWS_W-1:0]) * WB_W'(nb1) * WB_W'(8);
-  assign desc_ok  = rows_ok && n_ok && flags_ok &&
-                    ({1'b0, waddr_r} + 33'(wbytes) <= 33'h1_0000_0000) &&
+  assign pre_ok   = rows_ok && n_ok && flags_ok &&
                     ({1'b0, xaddr_r} + 33'(n_r) <= 33'h1_0000_0000) &&
                     (!y_en_r || ({1'b0, yaddr_r} + {1'b0, rows_r[30:0], 2'b00} <= 33'h1_0000_0000));
   assign align_ok = (waddr_r[2:0] == 3'd0) && (xaddr_r[2:0] == 3'd0) &&
                     (!y_en_r || yaddr_r[2:0] == 3'd0);
 
-  // ---------------- CTRL ----------------
-  logic busy_q, done_q;
-  logic ctrl_wr, start_req, idle, op_ok;
+  // ---------------- CTRL and call state ----------------
+  logic busy_q, done_q, chk_q, pre_ok_q, al_ok_q;
+  logic [CC_W-1:0] ccnt_q;
+  logic ctrl_wr, start_req, idle, op_ok, acc, verdict, desc_ok;
   logic [ERR_W-1:0] err_q, err_set;
 
   assign ctrl_wr   = wr_hit && (wr_w == R_CTRL);
   assign start_req = ctrl_wr && wr_data_i[0];
-  assign idle      = !busy_q || done_i;
+  assign idle      = (!chk_q && !busy_q) || done_i;
   assign op_ok     = wr_data_i[7:4] == 4'd1;
-  assign start_o   = start_req && idle && op_ok && desc_ok && align_ok;
+  assign acc       = start_req && idle && op_ok;          // accepted call: cycle s
+  assign verdict   = chk_q && ccnt_q == CC_W'(1);         // cycle v = s + CHK_CYC
+  assign start_o   = verdict && desc_ok && al_ok_q;
   assign busy_o    = busy_q;
+
+  // W bytes ROWS x (1 + ceil(N/8)) x 8 (sequential, exact for ROWS < 2^ROWS_W, N <= NMAX)
+  logic [ROWS_W+NBW-1:0] wprod;
+  logic                  wm_busy;
+  umul_seq #(.A_W(ROWS_W), .B_W(NBW)) u_wmul (
+    .clk, .rst_n, .start_i(acc), .a_i(rows_r[ROWS_W-1:0]), .b_i(nb1), .p_o(wprod), .done_o(),
+    .busy_o(wm_busy));
+  assign desc_ok = pre_ok_q && ({1'b0, op_w_addr_o} + 33'({wprod, 3'b000}) <= 33'h1_0000_0000);
 
   always_comb begin
     err_set               = '0;
     err_set[E_START_BUSY] = start_req && !idle;
     err_set[E_BAD_OP]     = start_req && !op_ok;
-    err_set[E_BAD_DESC]   = start_req && idle && op_ok && !desc_ok;
-    err_set[E_MISALIGN]   = start_req && idle && op_ok && !align_ok;
+    err_set[E_BAD_DESC]   = verdict && !desc_ok;
+    err_set[E_MISALIGN]   = verdict && !al_ok_q;
     err_set[E_RD_RESP]    = rd_err_i;
     err_set[E_WR_RESP]    = wr_err_i;
   end
 
-  // latched descriptor
+  // latched descriptor (from s + 1)
   always_ff @(posedge clk)
-    if (start_o) begin
+    if (acc) begin
       op_w_addr_o <= waddr_r;
       op_x_addr_o <= xaddr_r;
       op_y_addr_o <= yaddr_r;
@@ -215,8 +231,10 @@ module gemv_acc_csr
       op_fo_o     <= exp_r[23:16];
       op_am_en_o  <= flags_r[0];
       op_y_en_o   <= flags_r[1];
-      op_wbytes_o <= wbytes;
+      pre_ok_q    <= pre_ok;
+      al_ok_q     <= align_ok;
     end
+  assign op_wbytes_o = WB_W'({wprod, 3'b000});
 
   // ---------------- state, ERR, counters ----------------
   logic [31:0]        cyc_q, rdst_q, wrst_q, ops_q;
@@ -226,6 +244,8 @@ module gemv_acc_csr
   always_ff @(posedge clk or negedge rst_n)
     if (!rst_n) begin
       busy_q  <= 1'b0;
+      chk_q   <= 1'b0;
+      ccnt_q  <= '0;
       done_q  <= 1'b0;
       err_q   <= '0;
       cyc_q   <= '0;
@@ -235,6 +255,13 @@ module gemv_acc_csr
       amidx_q <= '0;
       amval_q <= '0;
     end else begin
+      if (acc) begin
+        chk_q  <= 1'b1;
+        ccnt_q <= CC_W'(CHK_CYC);
+      end else if (chk_q) begin
+        ccnt_q <= ccnt_q - 1'b1;
+        if (verdict) chk_q <= 1'b0;
+      end
       if (start_o) busy_q <= 1'b1;
       else if (done_i) busy_q <= 1'b0;
       // done_sticky: a CTRL write while idle clears it (wins over done_i), except a start with
@@ -243,11 +270,11 @@ module gemv_acc_csr
       else if (done_i) done_q <= 1'b1;
       // ERR: W1C, set wins
       err_q <= (err_q & ~((wr_hit && wr_w == R_ERR) ? wr_data_i[ERR_W-1:0] : '0)) | err_set;
-      if (start_o) begin
+      if (acc) begin
         cyc_q  <= '0;
         rdst_q <= '0;
         wrst_q <= '0;
-      end else if (busy_q) begin
+      end else if (chk_q || busy_q) begin
         cyc_q <= cyc_q + 32'd1;
         if (rd_stall_i) rdst_q <= rdst_q + 32'd1;
         if (wr_stall_i) wrst_q <= wrst_q + 32'd1;
@@ -266,7 +293,7 @@ module gemv_acc_csr
       case (rd_w)
         R_ID:      rd_data_o = ID_VAL;
         R_CONFIG:  rd_data_o = CONFIG_VAL;
-        R_STATUS:  rd_data_o = {29'd0, err_q != '0, done_q, busy_q};
+        R_STATUS:  rd_data_o = {29'd0, err_q != '0, done_q, chk_q || busy_q};
         R_ERR:     rd_data_o = 32'(err_q);
         R_CYCLES:  rd_data_o = cyc_q;
         R_RDSTALL: rd_data_o = rdst_q;
@@ -291,8 +318,12 @@ module gemv_acc_csr
 
 `ifndef SYNTHESIS
   always @(posedge clk)
-    if (rst_n === 1'b1 && done_i === 1'b1 && busy_q !== 1'b1)
-      $error("L3_DONE gemv_acc_csr %m: done_i while not busy");
+    if (rst_n === 1'b1) begin
+      if (done_i === 1'b1 && busy_q !== 1'b1)
+        $error("L3_DONE gemv_acc_csr %m: done_i while not busy");
+      if (verdict && wm_busy)
+        $error("L3_CHK gemv_acc_csr %m: the W product is not ready in the verdict cycle");
+    end
 `endif
 
 endmodule

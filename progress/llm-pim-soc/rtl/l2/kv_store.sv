@@ -91,7 +91,8 @@ module kv_store
   logic [WW-1:0]    r_rd [NKV];
   logic [AW_-1:0]   w_addr;
   logic [WW-1:0]    w_word;
-  assign w_addr = AW_'(32'(w_layer_i) * SEQ + 32'(w_pos_i));
+  // layer x SEQ is a constant multiple (SEQ parameter; a shift when SEQ is a power of two)
+  assign w_addr = AW_'(w_layer_i) * AW_'(SEQ) + AW_'(w_pos_i);
   assign w_word = pack(w_k_i, w_v_i, w_km_i, w_ke_i, w_vm_i, w_ve_i);
 
   for (genvar j = 0; j < NKV; j++) begin : g_ram
@@ -117,7 +118,7 @@ module kv_store
     assign rq_ready_o[p] = !run_q;
     assign busy_o[p]     = run_q;
     assign iss[p]        = run_q && ti_q != t_q && 32'(level) + 32'(rv_q) < FIFO_D;
-    assign iss_a[p]      = AW_'(32'(layer_q) * SEQ + 32'(ti_q));
+    assign iss_a[p]      = AW_'(layer_q) * AW_'(SEQ) + AW_'(ti_q);
 
     always_ff @(posedge clk or negedge rst_n)
       if (!rst_n) begin

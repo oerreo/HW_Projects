@@ -14,7 +14,9 @@
 //   wrgb = ceil(n/32), rdmac = rows; one done pulse per command).
 // Timing rules checked every cycle: the words of a round in consecutive cycles; last words of two
 // rounds >= NB cycles apart; the gather of a round starts exactly L_BANK cycles after its last word
-// and takes one bank per cycle; the y FIFO model never holds more than Y_DEPTH; busy_o / idle_o.
+// and takes one bank per cycle; the y FIFO model never holds more than Y_DEPTH; busy_o / idle_o;
+// the read command of a WRGB is presented in h + 1 and that of an LDW in h + 1 + LDW_CYC
+// (h = handshake cycle, LDW_CYC = bits(NMAX/8 + 2) + 1: sequential length product, pim.md 5).
 // +STALL=0 (no gaps, y_ready 1, engines accept at once): every MACAB's done_mac_o cycle equals the
 // schedule formula (pim.md). +YBLK=1: long y_ready blocks, the credit limit must be reached.
 // Records (+VEC): the LDW of the 36 matrices of the first position at the bimg_map bases, then the
@@ -37,6 +39,7 @@ module tb_pim_ctrl #(
   localparam int LB = 16, NMAX = 1024, ROWS_W = 16, LS = 3;
   localparam int AA = $clog2(DEPTH), NW = $clog2(NMAX + 1), GA = $clog2(NMAX / LB);
   localparam int BI_W = $clog2(NB), WW = 8 * LB + 16;
+  localparam int LDW_CYC = $clog2(NMAX / 8 + 2) + 1;
 
   logic clk = 1'b0, rst_n = 1'b0;
   always #5 clk = ~clk;
@@ -176,7 +179,7 @@ module tb_pim_ctrl #(
   longint hs_t[$], hs_tl[$]; // cycle of each command handshake, last round word before it
   longint hs_cr[$], n_fskip = 0;  // credit-hold count at the handshake, formula checks skipped
   int     hs_op[$], hs_nw[$], hs_R[$];
-  bit     cmd_hs_seen = 0;
+  bit     cmd_hs_seen = 0, rdc_v_q = 0;
   longint t_prev_round_last = -1000;
   longint n_credit = 0;      // cycles a round waits for y credit
   int     tb_res = 0;        // y rows reserved (round starts) and not yet popped
@@ -284,6 +287,14 @@ module tb_pim_ctrl #(
       n_hs++;
     end
     // ---- engine commands ----
+    if (rdc_v === 1'b1 && !rdc_v_q) begin
+      automatic longint h = hs_t.size() > 0 ? hs_t[$] : -1;
+      automatic int op = hs_op.size() > 0 ? hs_op[$] : 0;
+      if (cyc != h + 1 + (op == 1 ? LDW_CYC : 0))
+        c_tim.fail($sformatf("read command of op %0d presented in cycle %0d, handshake %0d", op, cyc, h));
+      else c_tim.pass();
+    end
+    rdc_v_q = rdc_v === 1'b1;
     if (rdc_v && rdc_r) begin
       if (q_rdc.size() == 0) c_cmd.fail("unexpected rd_cmd");
       else begin

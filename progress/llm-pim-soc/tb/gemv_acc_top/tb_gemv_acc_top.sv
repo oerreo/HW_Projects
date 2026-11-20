@@ -189,15 +189,21 @@ module tb_gemv_acc_top #(
   bit  model_on = 1'b0;
 
   // ---------------- CSR reference model ----------------
+  // gemv_acc.md 3: a call accepted in s is checked on the descriptor latched in s; the verdict
+  // is in v = s + CHK (CHK = bits of 1 + NMAX/8 + 1); STATUS.busy covers the check
+  localparam int CHK = $clog2(NMAX / 8 + 2) + 1;
   logic [31:0] m_wa, m_xa, m_ya, m_rows, m_n, m_xm, m_exp, m_flags;
+  logic [31:0] l_wa, l_xa, l_ya, l_rows, l_n, l_flags;    // latched in s
   bit          m_busy, m_done;
+  int          m_chk;
+  longint      m_s;
   logic [5:0]  m_err;
   logic [31:0] m_cyc, m_rdst, m_wrst, m_ops, m_amidx, m_amval;
 
   function automatic void model_reset();
     m_wa = 0; m_xa = 0; m_ya = 0; m_rows = 0; m_n = 0; m_xm = 0; m_exp = 0; m_flags = 2;
     m_busy = 0; m_done = 0; m_err = 0; m_cyc = 0; m_rdst = 0; m_wrst = 0; m_ops = 0;
-    m_amidx = 0; m_amval = 0;
+    m_amidx = 0; m_amval = 0; m_chk = 0; m_s = -1;
   endfunction
 
   function automatic logic [31:0] model_read(int a);
@@ -205,7 +211,7 @@ module tb_gemv_acc_top #(
     case (a & ~3)
       A_ID:      return 32'h4741_0001;
       A_CONFIG:  return {16'(NMAX), 4'd3, 4'(P), 8'd100};
-      A_STATUS:  return {29'd0, m_err != 0, m_done, m_busy};
+      A_STATUS:  return {29'd0, m_err != 0, m_done, m_busy || m_chk != 0};
       A_ERR:     return 32'(m_err);
       A_CYCLES:  return m_cyc;
       A_RDSTALL: return m_rdst;
@@ -225,18 +231,19 @@ module tb_gemv_acc_top #(
     endcase
   endfunction
 
+  // descriptor rules on the latched values
   function automatic bit model_desc_ok();
-    longint unsigned rb = 8 * (1 + (longint'(m_n) + 7) / 8);
-    bit ye = m_flags[1];
-    if (m_rows == 0 || m_rows > 65535 || m_n == 0 || m_n > NMAX || m_flags[1:0] == 0) return 0;
-    if (longint'(m_wa) + longint'(m_rows) * rb > 64'h1_0000_0000) return 0;
-    if (longint'(m_xa) + longint'(m_n) > 64'h1_0000_0000) return 0;
-    if (ye && longint'(m_ya) + 4 * longint'(m_rows) > 64'h1_0000_0000) return 0;
+    longint unsigned rb = 8 * (1 + (longint'(l_n) + 7) / 8);
+    bit ye = l_flags[1];
+    if (l_rows == 0 || l_rows > 65535 || l_n == 0 || l_n > NMAX || l_flags[1:0] == 0) return 0;
+    if (longint'(l_wa) + longint'(l_rows) * rb > 64'h1_0000_0000) return 0;
+    if (longint'(l_xa) + longint'(l_n) > 64'h1_0000_0000) return 0;
+    if (ye && longint'(l_ya) + 4 * longint'(l_rows) > 64'h1_0000_0000) return 0;
     return 1;
   endfunction
 
   function automatic bit model_align_ok();
-    return m_wa[2:0] == 0 && m_xa[2:0] == 0 && (!m_flags[1] || m_ya[2:0] == 0);
+    return l_wa[2:0] == 0 && l_xa[2:0] == 0 && (!l_flags[1] || l_ya[2:0] == 0);
   endfunction
 
   typedef struct {
@@ -247,7 +254,7 @@ module tb_gemv_acc_top #(
   // one cycle k of the model: write / read performed in k, events of k
   function automatic void model_step(longint k, ev_t ev, bit pw, int pwa, logic [31:0] pwd,
                                      bit prd, int pra, logic [31:0] prdata);
-    bit ctrl, start_req, idle, op_ok, start, w1c_hit, busy_old;
+    bit ctrl, start_req, idle, op_ok, start, w1c_hit, busy_old, acc, verdict, d_ok = 1, a_ok = 1;
     logic [5:0] set, clr;
     if (prd) begin
       logic [31:0] e = model_read(pra);
@@ -257,9 +264,12 @@ module tb_gemv_acc_top #(
     end
     ctrl      = pw && pwa < 256 && (pwa & ~3) == A_CTRL;
     start_req = ctrl && pwd[0];
-    idle      = !m_busy || ev.done;
+    idle      = (!m_busy && m_chk == 0) || ev.done;
     op_ok     = pwd[7:4] == 4'd1;
-    start     = start_req && idle && op_ok && model_desc_ok() && model_align_ok();
+    acc       = start_req && idle && op_ok;
+    verdict   = m_chk == 1;
+    if (verdict) begin d_ok = model_desc_ok(); a_ok = model_align_ok(); end
+    start     = verdict && d_ok && a_ok;
     if (start !== ev.dut_start)
       c_model.fail($sformatf("cycle %0d: DUT start %b, model %b", k, ev.dut_start, start));
     if (ev.done !== ev.dut_done)
@@ -273,19 +283,19 @@ module tb_gemv_acc_top #(
     set = '0;
     set[0] = start_req && !idle;
     set[1] = start_req && !op_ok;
-    set[2] = start_req && idle && op_ok && !model_desc_ok();
-    set[3] = start_req && idle && op_ok && !model_align_ok();
+    set[2] = verdict && !d_ok;
+    set[3] = verdict && !a_ok;
     set[4] = ev.rd_err;
     set[5] = ev.wr_err;
     w1c_hit = pw && pwa < 256 && (pwa & ~3) == A_ERR;
     clr = w1c_hit ? pwd[5:0] : '0;
     if ((set & clr) != 0) n_coll_err++;
     // next state
-    busy_old = m_busy;
+    busy_old = m_busy || m_chk != 0;
     if (ctrl && idle && !(pwd[0] && !op_ok)) m_done = 0;
     else if (ev.done) m_done = 1;
     m_err = (m_err & ~clr) | set;
-    if (start) begin
+    if (acc) begin
       m_cyc = 0; m_rdst = 0; m_wrst = 0;
     end else if (busy_old) begin
       m_cyc++;
@@ -301,12 +311,16 @@ module tb_gemv_acc_top #(
       m_amidx = cl_am_idx;
       m_amval = cl_am_val;
     end
+    if (acc) begin
+      m_chk = CHK; m_s = k;
+      l_wa = m_wa; l_xa = m_xa; l_ya = m_ya; l_rows = m_rows; l_n = m_n; l_flags = m_flags;
+    end else if (m_chk != 0) m_chk--;
     if (start) m_busy = 1;
     else if (ev.done) m_busy = 0;
-    if (start) begin   // the call the monitor follows from now on
-      cl_s = k; cl_e = -1;
-      cl_rows = m_rows; cl_n = m_n; cl_nb = (m_n + 7) / 8; cl_ye = m_flags[1]; cl_am = m_flags[0];
-      cl_wa = m_wa; cl_xa = m_xa; cl_ya = m_ya;
+    if (start) begin   // the call the monitor follows from now on (CYCLES from the CTRL write s)
+      cl_s = m_s; cl_e = -1;
+      cl_rows = l_rows; cl_n = l_n; cl_nb = (l_n + 7) / 8; cl_ye = l_flags[1]; cl_am = l_flags[0];
+      cl_wa = l_wa; cl_xa = l_xa; cl_ya = l_ya;
       cl_am_idx = nx_am_idx; cl_am_val = nx_am_val;
       ny = 0; nw_hs = 0; naw = 0; nb_hs = 0; rbeats = '{0, 0}; c_ly = -1; t_rdst = 0; t_wrst = 0;
       n_starts++;
@@ -657,7 +671,8 @@ module tb_gemv_acc_top #(
       tt = rd > tt + 1 ? rd : tt + 1;
       t.push_back(tt);
     end
-    if (!c.ye) return t[c.rows - 1] + 1;
+    // gemv_acc.md 5: times from the verdict cycle v = s + CHK, CYCLES = CHK + (formula from v)
+    if (!c.ye) return CHK + t[c.rows - 1] + 1;
     void'(nbursts(c.ya, (c.rows + 1) / 2, lens));
     foreach (lens[k]) begin
       int jl = j + lens[k] - 1, ry = 2 * jl + 1 < c.rows - 1 ? 2 * jl + 1 : c.rows - 1;
@@ -665,7 +680,7 @@ module tb_gemv_acc_top #(
       we = ws + lens[k] - 1;
       j += lens[k];
     end
-    return we + 2;
+    return CHK + we + 2;
   endfunction
 
   // ---------------- synthetic calls ----------------
@@ -1046,9 +1061,12 @@ module tb_gemv_acc_top #(
     write_desc(c);
   endtask
 
+  // PS rule (gemv_acc.md 3): after the CTRL write wait for STATUS.busy = 0 (the check)
   task automatic bad_start(logic [31:0] ctrl, logic [5:0] e, bit done, string what);
     longint st0 = n_starts;
+    logic [31:0] st;
     wr(A_CTRL, ctrl);
+    do rd(A_STATUS, st); while (st[0] !== 1'b0);
     repeat (3) @(posedge clk);
     if (n_starts != st0) c_err.fail({what, ": call started"}); else c_err.pass();
     expect_err_only(e, done, what);
@@ -1176,7 +1194,7 @@ module tb_gemv_acc_top #(
         tg = t0 + d0 + longint'(off);   // signed target (an unsigned compare would zero-extend off)
         while (longint'(bfm.cyc) < tg) @(posedge clk);
         wr(A_CTRL, st ? 32'h11 : 32'h10);
-        for (int w = 0; m_busy; w++) begin
+        for (int w = 0; m_busy || m_chk != 0; w++) begin
           if (w > 100000) begin
             c_model.fail("WATCHDOG: call of the collision sweep does not end");
             void'(tb_final_report('{c_y, c_am, c_mem, c_cyc, c_model, c_csr}));

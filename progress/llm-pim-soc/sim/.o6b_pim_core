@@ -1,0 +1,12 @@
+### pim_core: compile (RTL_DIR=../../rtl)
+### pim_core: compile done in 0 s
+### pim_core/q_m1_nostall: vsim tb_pim_core +SEED=1 +VEC=../../model/build/vec/m1 +STALL=0 (expect pass)
+pim_core/q_m1_nostall: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [y]: checks=432 mismatches=0 CHECKS [bank_stat]: checks=684 mismatches=0 CHECKS [streams]: checks=721 mismatches=0 CHECKS [bank_image]: checks=4 mismatches=0 CHECKS [same_x]: checks=180 mismatches=0 CHECKS [cycle_formula]: checks=432 mismatches=0 
+### pim_core/q_m1_stall: vsim tb_pim_core +SEED=2 +VEC=../../model/build/vec/m1 +MAXPOS=2 +STALL=1 +YBLK=1 (expect pass)
+pim_core/q_m1_stall: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [y]: checks=72 mismatches=0 CHECKS [bank_stat]: checks=114 mismatches=0 CHECKS [streams]: checks=151 mismatches=0 CHECKS [bank_image]: checks=4 mismatches=0 CHECKS [same_x]: checks=30 mismatches=0 CHECKS [limits]: checks=1 mismatches=0 
+### pim_core/q_m1_perrec: vsim tb_pim_core +SEED=3 +VEC=../../model/build/vec/m1 +MAXPOS=2 +LAYER=0 +STALL=1 (expect pass)
+pim_core/q_m1_perrec: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [y]: checks=72 mismatches=0 CHECKS [bank_stat]: checks=144 mismatches=0 CHECKS [streams]: checks=181 mismatches=0 CHECKS [bank_image]: checks=4 mismatches=0 
+### pim_core/q_syn_nostall: vsim tb_pim_core +SEED=4 +SYN=120 +STALL=0 (expect pass)
+pim_core/q_syn_nostall: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [y]: checks=243 mismatches=0 CHECKS [bank_stat]: checks=431 mismatches=0 CHECKS [streams]: checks=552 mismatches=0 CHECKS [cycle_formula]: checks=243 mismatches=0 
+### pim_core/q_syn_stall: vsim tb_pim_core +SEED=5 +SYN=120 +STALL=1 +YBLK=1 (expect pass)
+pim_core/q_syn_stall: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [y]: checks=235 mismatches=0 CHECKS [bank_stat]: checks=415 mismatches=0 CHECKS [streams]: checks=536 mismatches=0 CHECKS [limits]: checks=1 mismatches=0 

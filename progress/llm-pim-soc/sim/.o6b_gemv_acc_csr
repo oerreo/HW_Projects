@@ -1,0 +1,12 @@
+### gemv_acc_csr: compile (RTL_DIR=../../rtl)
+### gemv_acc_csr: compile done in 0 s
+### gemv_acc_csr/q_rnd: vsim tb_gemv_acc_csr +SEED=1 +N_CYC=200000 +PDONE=5 +PEV=30 (expect pass)
+gemv_acc_csr/q_rnd: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [read_data]: checks=200003 mismatches=0 CHECKS [start_busy]: checks=200003 mismatches=0 CHECKS [op_outputs]: checks=199992 mismatches=0 CHECKS [coverage]: checks=14 mismatches=0 
+### gemv_acc_csr/q_p2: vsim tb_gemv_acc_csr -gP=2 +SEED=2 +N_CYC=200000 +PDONE=20 +PEV=60 (expect pass)
+gemv_acc_csr/q_p2: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [read_data]: checks=200003 mismatches=0 CHECKS [start_busy]: checks=200003 mismatches=0 CHECKS [op_outputs]: checks=199975 mismatches=0 CHECKS [coverage]: checks=14 mismatches=0 
+### gemv_acc_csr/rnd_long: vsim tb_gemv_acc_csr +SEED=3 +N_CYC=2000000 +PDONE=2 +PEV=10 (expect pass)
+gemv_acc_csr/rnd_long: PASS (rc=0 errors=0 RANGE=0 wall=3s) CHECKS [read_data]: checks=2000003 mismatches=0 CHECKS [start_busy]: checks=2000003 mismatches=0 CHECKS [op_outputs]: checks=1999998 mismatches=0 CHECKS [coverage]: checks=14 mismatches=0 
+### gemv_acc_csr/nmax64: vsim tb_gemv_acc_csr -gNMAX=64 +SEED=4 +N_CYC=500000 +PDONE=10 +PEV=30 (expect pass)
+gemv_acc_csr/nmax64: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [read_data]: checks=500003 mismatches=0 CHECKS [start_busy]: checks=500003 mismatches=0 CHECKS [op_outputs]: checks=499989 mismatches=0 CHECKS [coverage]: checks=14 mismatches=0 
+### gemv_acc_csr/bad_nmax: vsim tb_gemv_acc_csr -gNMAX=4 (expect elab_fail:gemv_acc_csr: NMAX=4 must be 8..65535)
+gemv_acc_csr/bad_nmax: PASS (rc=2 errors=1 RANGE=0 wall=0s) 

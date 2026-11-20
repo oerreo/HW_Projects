@@ -1,0 +1,24 @@
+### gemv_acc_top: compile (RTL_DIR=../../rtl)
+### gemv_acc_top: compile done in 0 s
+### gemv_acc_top/q_p1_m1: vsim tb_gemv_acc_top +SEED=1 +PROF=1 +MAXD=2 +VEC=../../model/build/vec/m1 +CSR=1 (expect pass)
+gemv_acc_top/q_p1_m1: PASS (rc=0 errors=0 RANGE=0 wall=4s) CHECKS [y]: checks=432 mismatches=0 CHECKS [argmax]: checks=444 mismatches=0 CHECKS [cycles]: checks=1332 mismatches=0 CHECKS [records]: checks=876 mismatches=0 CHECKS [memory]: checks=33562 mismatches=0 CHECKS [csr_model]: checks=34875 mismatches=0 CHECKS [csr]: checks=493 mismatches=0 
+### gemv_acc_top/q_p2_m1: vsim tb_gemv_acc_top -gP=2 +SEED=2 +PROF=1 +MAXD=2 +VEC=../../model/build/vec/m1 +CSR=1 (expect pass)
+gemv_acc_top/q_p2_m1: PASS (rc=0 errors=0 RANGE=0 wall=3s) CHECKS [y]: checks=432 mismatches=0 CHECKS [argmax]: checks=426 mismatches=0 CHECKS [cycles]: checks=1332 mismatches=0 CHECKS [records]: checks=876 mismatches=0 CHECKS [memory]: checks=56701 mismatches=0 CHECKS [csr_model]: checks=20021 mismatches=0 CHECKS [csr]: checks=493 mismatches=0 
+### gemv_acc_top/q_p1_m2tok: vsim tb_gemv_acc_top +SEED=3 +PROF=0 +MAXD=0 +VEC=../../model/build/vec/m2 +MAXREC=43 +CYC=1 (expect pass)
+gemv_acc_top/q_p1_m2tok: PASS (rc=0 errors=0 RANGE=0 wall=11s) CHECKS [y]: checks=43 mismatches=0 CHECKS [argmax]: checks=52 mismatches=0 CHECKS [cycles]: checks=176 mismatches=0 CHECKS [records]: checks=87 mismatches=0 CHECKS [memory]: checks=197588 mismatches=0 CHECKS [csr_model]: checks=42907 mismatches=0 CHECKS [csr]: checks=46 mismatches=0 
+### gemv_acc_top/q_p1_cyc: vsim tb_gemv_acc_top +SEED=4 +PROF=0 +MAXD=0 +SYN=300 +CYC=1 +B2B=1 (expect pass)
+gemv_acc_top/q_p1_cyc: PASS (rc=0 errors=0 RANGE=0 wall=4s) CHECKS [y]: checks=195 mismatches=0 CHECKS [argmax]: checks=404 mismatches=0 CHECKS [cycles]: checks=1200 mismatches=0 CHECKS [memory]: checks=61598 mismatches=0 CHECKS [csr_model]: checks=52744 mismatches=0 CHECKS [csr]: checks=302 mismatches=0 
+### gemv_acc_top/q_p2_cyc: vsim tb_gemv_acc_top -gP=2 +SEED=5 +PROF=0 +MAXD=0 +SYN=300 +CYC=1 +B2B=1 (expect pass)
+gemv_acc_top/q_p2_cyc: PASS (rc=0 errors=0 RANGE=0 wall=5s) CHECKS [y]: checks=214 mismatches=0 CHECKS [argmax]: checks=368 mismatches=0 CHECKS [cycles]: checks=1200 mismatches=0 CHECKS [memory]: checks=87945 mismatches=0 CHECKS [csr_model]: checks=34256 mismatches=0 CHECKS [csr]: checks=302 mismatches=0 
+### gemv_acc_top/q_p1_err: vsim tb_gemv_acc_top +SEED=6 +PROF=0 +MAXD=0 +ERR=1 +CSR=1 (expect pass)
+gemv_acc_top/q_p1_err: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [memory]: checks=2503 mismatches=0 CHECKS [csr_model]: checks=2314 mismatches=0 CHECKS [csr]: checks=53 mismatches=0 CHECKS [err]: checks=69 mismatches=0 
+### gemv_acc_top/q_p2_err: vsim tb_gemv_acc_top -gP=2 +SEED=7 +PROF=0 +MAXD=0 +ERR=1 (expect pass)
+gemv_acc_top/q_p2_err: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [memory]: checks=2849 mismatches=0 CHECKS [csr_model]: checks=1246 mismatches=0 CHECKS [csr]: checks=6 mismatches=0 CHECKS [err]: checks=70 mismatches=0 
+### gemv_acc_top/q_p1_coll: vsim tb_gemv_acc_top +SEED=21 +PROF=0 +MAXD=0 +COLL=1 (expect pass)
+gemv_acc_top/q_p1_coll: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [memory]: checks=447 mismatches=0 CHECKS [csr_model]: checks=79 mismatches=0 CHECKS [csr]: checks=3 mismatches=0 CHECKS [limits]: checks=1 mismatches=0 
+### gemv_acc_top/q_p2_coll: vsim tb_gemv_acc_top -gP=2 +SEED=22 +PROF=0 +MAXD=0 +COLL=1 (expect pass)
+gemv_acc_top/q_p2_coll: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [memory]: checks=711 mismatches=0 CHECKS [csr_model]: checks=80 mismatches=0 CHECKS [csr]: checks=3 mismatches=0 CHECKS [limits]: checks=1 mismatches=0 
+### gemv_acc_top/q_p1_blk: vsim tb_gemv_acc_top +SEED=8 +PROF=1 +MAXD=1 +SYN=150 +WBLK=1 +RBLK=1 (expect pass)
+gemv_acc_top/q_p1_blk: PASS (rc=0 errors=0 RANGE=0 wall=7s) CHECKS [y]: checks=109 mismatches=0 CHECKS [argmax]: checks=170 mismatches=0 CHECKS [cycles]: checks=450 mismatches=0 CHECKS [memory]: checks=39698 mismatches=0 CHECKS [csr_model]: checks=206936 mismatches=0 CHECKS [csr]: checks=152 mismatches=0 CHECKS [limits]: checks=3 mismatches=0 
+### gemv_acc_top/q_p2_blk: vsim tb_gemv_acc_top -gP=2 +SEED=9 +PROF=1 +MAXD=1 +SYN=150 +WBLK=1 +RBLK=1 (expect pass)
+gemv_acc_top/q_p2_blk: PASS (rc=0 errors=0 RANGE=0 wall=7s) CHECKS [y]: checks=108 mismatches=0 CHECKS [argmax]: checks=172 mismatches=0 CHECKS [cycles]: checks=450 mismatches=0 CHECKS [memory]: checks=36633 mismatches=0 CHECKS [csr_model]: checks=176201 mismatches=0 CHECKS [csr]: checks=152 mismatches=0 CHECKS [limits]: checks=5 mismatches=0 

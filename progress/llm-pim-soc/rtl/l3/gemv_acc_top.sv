@@ -23,9 +23,10 @@
 //                                 engine writes only its 4 bytes (WSTRB 0x0F, command length
 //                                 4 ROWS). Not used if !FLAGS.y_en (the merge then never waits).
 //
-// Timing: the CTRL write that starts a call is performed in cycle s (gemv_acc_csr start_o).
-// In s + 1 the descriptor is latched, the cores get start_i and the sequencers are loaded; the
-// read and write commands are presented from s + 2. The call is complete in cycle e when every
+// Timing: the CTRL write of a call is performed in cycle s; gemv_acc_csr latches the descriptor
+// and checks it in s + 1 .. v (v = s + CHK_CYC, sequential W range product) and gives start_o in
+// v. In v + 1 the cores get start_i and the sequencers are loaded; the read and write commands
+// are presented from v + 2. The call is complete in cycle e when every
 // started core has given done_o (last y accepted), the y write has its last B response (y_en)
 // and argmax_red has given done_o (argmax_en). CYCLES = e - s.
 // RD_STALL counts the cycles in which a slice's core is ready for a read beat (x port in
@@ -170,7 +171,7 @@ module gemv_acc_top
     .wr_stall_i(wr_stall_ev), .am_done_i(am_done), .am_idx_i(am_idx), .am_max_i(am_max)
   );
 
-  // start_q: cycle s + 1 (descriptor latched)
+  // start_q: cycle v + 1 (descriptor latched since s + 1, wbytes valid from v)
   logic start_q;
   always_ff @(posedge clk or negedge rst_n)
     if (!rst_n) start_q <= 1'b0;

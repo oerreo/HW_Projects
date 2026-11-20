@@ -20,6 +20,7 @@ L3  bw_top           HP 대역폭 측정 top (S4-3, 측정 도구). axil_slave +
 L3  gemv_acc_top     GEMV 가속기형 IP. AXI-Lite CSR + HP read/write master + gemv_core x P       RTL
       L1  axil_slave       AXI4-Lite 5채널 -> 레지스터 strobe (pqc-ntt-ip에서 복사)                RTL
       L3  gemv_acc_csr     레지스터 맵, done_sticky, ERR, CYCLES/STALL 카운터                       RTL
+            L0  umul_seq   descriptor 검사의 W 범위 곱 ROWS x (1 + ceil(N/8)) (S4-6b)             RTL
       L1  axi_rd_eng       AXI4 read master: (addr, bytes) 명령 -> 64b beat 스트림, 4 KiB 분할      RTL
       L1  axi_wr_eng       AXI4 write master: (addr, bytes) 명령 + 스트림 -> burst 쓰기             RTL
       L2  gemv_core        행 레코드 스트림 x 활성 벡터 -> y 스트림 (lane 8)                          RTL
@@ -34,8 +35,10 @@ L3  gemv_acc_top     GEMV 가속기형 IP. AXI-Lite CSR + HP read/write master +
 L3  pim_top          GEMV PIM형 IP. CSR + 명령 FIFO + HP master + pim_core                           RTL
       L1  axil_slave, axi_rd_eng, axi_wr_eng, sync_fifo (위와 같은 모듈)
       L3  pim_csr          레지스터 맵, 명령 FIFO 입구                                              RTL
+            L0  umul_seq x 2   push 검사의 bank 범위 곱, LDW 길이 곱 (S4-6b)                       RTL
       L2  pim_core         NB개 bank + global buffer + 명령 컨트롤러 + 결과 gather                    RTL
             L1  pim_ctrl         명령 FSM: LDW, WRGB, MACAB(RDROW 미구현). bank 주소, lock-step 스케줄, gather 순서  RTL
+                  L0  umul_seq   LDW 읽기 길이 rows x 8 (1 + ceil(n/8)) (S4-6b)                     RTL
             L1  pim_gb           global buffer(활성 벡터 1개), 방송 read                           RTL
             L1  pim_bank         bank 하나: 가중치 RAM + mac_row + mantissa 추출 + MAC_REG           RTL
                   L0  ram_sdp    가중치 image (2 x BRAM36 폭, 8 깊이)                               RTL
@@ -46,6 +49,7 @@ L3  pim_top          GEMV PIM형 IP. CSR + 명령 FIFO + HP master + pim_core   
 L3  attn_top         attention IP. CSR + read port per engine + attn_core x H_PAR + KV source + write arbiter  RTL
       L1  axil_slave, axi_rd_eng (x H_PAR), axi_wr_eng (위와 같은 모듈)
       L3  attn_csr         레지스터 맵, descriptor 검사, start/done, descriptor latch (S4-6)          RTL
+            L0  umul_seq, udiv_seq   순차 descriptor 검사와 top용 곱(SEQ hs, T hs, KVH0 SEQ + POS) (S4-6b)  RTL
       L2  attn_core        head 하나의 score, softmax, V 가중합 (q/K/V 폭 8/12/16, 16b container). pass FSM(Q, P1, P2, DIV, P3, O)은 attn_core 자신의 control (S4-6에서 attn_ctrl을 따로 두지 않음)  RTL
             L1  attn_score       dotp(16x16, KL lane) + c = qm*km + 곱 + rshr_sat, running max, emin/mmax/have  RTL
                   L0  dotp, rshr_sat
@@ -127,6 +131,7 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 | `rshr_sat` | `IN_W`, `OUT_W`, `SAT_MODE`(0: OUT_W 포화, 1: 64비트 `I64MAX` 규칙), `PIPE` | `x_i[IN_W]` signed, `sh_i[SH_W]` signed, `valid_i` | `y_o[OUT_W]` signed, `valid_o` | `PIPE` (0..2) | `sat32(k_rshr(x, s))` 또는 `k_rshr` 단독. sh >= IN_W이면 0(golden의 s >= 62 규칙과 같음), sh < 0이면 포화 좌shift(음수 쪽 포화값은 golden이 `-I64MAX`, sat32는 `I32MIN`으로 서로 다르다. `SAT_MODE`로 구분) |
 | `dotp` | `LANES`, `AW`, `BW`, `PIPE` | `a_i[LANES*AW]`, `b_i[LANES*BW]` signed, `valid_i` | `sum_o[AW+BW+clog2(LANES)]` signed, `valid_o` | `PIPE` (0..clog2(LANES)+1) | `k_gemv` 내부 곱합, `attn_core`의 dot (stage 덤프 A1, A3) |
 | `udiv_seq` | `NUM_W`, `DEN_W`, `Q_W` | `start_i`, `num_i[NUM_W]`, `den_i[DEN_W]` (den > 0, 몫 < 2^Q_W 전제) | `q_o[Q_W]`, `done_o`(1 cycle pulse), `busy_o` | `CYCLES = Q_W + 1` (S4-6 확정: start cycle c, done c + Q_W + 1) | C `/` (`aq_setup`의 M, R; attention의 `2^48 / sum`) |
+| `umul_seq` | `A_W`, `B_W` (각 1..64) | `start_i`, `a_i[A_W]`, `b_i[B_W]` | `p_o[A_W+B_W]`(정확한 곱), `done_o`(1 cycle pulse), `busy_o` | `CYCLES = B_W + 1` (start cycle c, busy c+1 .. c+B_W, done c + B_W + 1, `udiv_seq`와 같은 handshake. S4-6b) | 정수 곱 (TB의 128비트 곱) |
 | `lut_lerp` | `FUNC`(0 = EXP2N; 1 = SIGM은 S4-7, 지금은 elaboration 실패), `PIPE` | EXP2N: `u_i[32]`(Q16 지수, >= 0). SIGM: `a_i[32]` signed Q16. `valid_i` | `y_o[17]` Q16 unsigned, `valid_o` | `PIPE` (1..3, 표 read가 동기라 1 이상) | `k_exp2neg(u, 8, lut)`, `k_sigmoid(a, 8, lut)`. 표는 `tabs.c`에서 생성한 SV package(`rtl/pkg/lut_pkg.sv`, `model/tools/lutsv.py`) |
 | `rsqrt_nr` | - | `start_i`, `u_i[42]` | `rm_o[32]`, `re_o[E_W]`, `done_o` | `CYCLES` 고정 (곱셈기 1개 순차, 약 12~20 [추정]) | `k_rsqrt` |
 | `argmax_red` | `IDX_W` | `v_i[32]` signed, `valid_i`, `first_i`, `last_i` | `idx_o[IDX_W]`, `max_o[32]` signed, `done_o` | 1 (`done_o` 1 cycle pulse, `idx_o`/`max_o`는 done cycle부터 다음 valid_i까지 유지) | `k_argmax` (같은 값이면 앞 index: 엄격한 `>`만 갱신) |
@@ -159,7 +164,7 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 | `pim_core` | `NB` = 4, `LB` = 16, `DEPTH` = 4096, `DOT_PIPE`, `SCALE_PIPE`, `Y_DEPTH` = 32 | 명령 stream(LDW, WRGB, MACAB), rd 명령 + 데이터 stream(64b) | wr 명령, y stream(32b + `y_last_o`), `busy_o`, `rd_stall_o`, 사건 | MACAB(앞 round에서 떨어진 경우): `(R-1) max(nw,4) + nw + L_BANK + nvl + L_S`, 기본 `ceil(rows/4) x ceil(n/16) + 12` (nw >= 4, rows % 4 = 0; S4-5 측정으로 확정) | K_GEMV + `bank_gemv` |
 | `attn_core` | `KL` = `VL` = 8, `HS_MAX`, `TMAX`, PIPE 4개, `OUT_DEPTH` | start + cfg(`T`, `hs`, `kb`, `qm`, `qe`, `p_en`), q stream(ceil(hs/8) beat), KV pass 요청(`kvreq`, 0 K / 1 V) + KV stream(K beat + 위치 마지막 beat의 ks, vs / V beat) | 출력 stream(p[T] (p_en), o[hs], `last`, `is_o`), `done`, `kv_stall_o` | `(T+1) ceil(hs/8) + T + T ceil(hs/8) + hs + C0`, `C0 = 54 + DOT + SH + RS + LUT PIPE` (기본 60, S4-6 측정으로 확정) | K_ATTN2 |
 | `kv_store` | `NKV`, `NL`, `SEQ`, `KL`, `KW`, `VW`, `H_PAR`, `FIFO_D` | 쓰기(kv head, layer, pos, K/V 16b lane, ks, vs), 포트 p의 pass 요청(kv head j mod H_PAR = p, layer, T) | 포트별 KV pass stream | 1 위치/cycle (요청 후 T + 3 이내) | `fwd_h.c`의 `kc/vc/kcs/vcs` 배치를 KVW로 옮긴 것 |
-| `kv_rd` | `KL` = 8, `HS_MAX`, `TMAX`, `CH` | pass 요청(pass, T, hs, ek, ev, kv head의 K/V/KS/VS base) | `axi_rd_eng` 명령, KV pass stream | DDR beat 수에 묶임: K pass 위치당 hs ek / 8 + 2 beat, V pass hs ev / 8 beat | 같음 (golden 배치 그대로) |
+| `kv_rd` | `KL` = 8, `HS_MAX`, `TMAX`, `CH` | pass 요청(pass, T, hs, ths = T x hs(요청자가 계산, S4-6b), ek, ev, kv head의 K/V/KS/VS base) | `axi_rd_eng` 명령, KV pass stream | DDR beat 수에 묶임: K pass 위치당 hs ek / 8 + 2 beat, V pass hs ev / 8 beat | 같음 (golden 배치 그대로) |
 | `vec_core` | `N_MAX` | op + cfg, 입력 stream(들) | q stream + scale, 또는 idx | RMSNORM `4n + C`, SWIGLU `2n + C`, ACTQ `2n + C`, ARGMAX `n` | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX |
 
 L3의 레지스터 맵과 kernel 호출 순서는 `arch.md` 7절.
@@ -254,6 +259,18 @@ L3의 레지스터 맵과 kernel 호출 순서는 `arch.md` 7절.
 - 호출: op ATTN(layer 하나의 head 범위, D9)과 op KVW(KV_SRC 0, 위치 하나의 kv head 범위). 명령 FIFO는 없다. head h는 engine (h / KVMUL) mod H_PAR가 맡고, `kv_store` 읽기 포트 p는 kv head j mod H_PAR = p만 읽는다.
 - 배치: q 레코드 `{qm, qe}` + q int16 [hs], o는 golden `att + h hs`, p는 head마다 8 ceil(T/2) B 간격(write engine의 8 B 정렬), DDR KV는 golden `kc/vc/kcs/vcs` slot 배치 그대로. top은 hs % 8 == 0만 받는다.
 - cycle(`attn.md` 6절): core `C = (T+1) ceil(hs/8) + T + T ceil(hs/8) + hs + 60`(기본 PIPE). 260K token(H_PAR 2, KV BRAM, T 512) ATTN 합 32,420(arch.md 4.4 계산 32,320), 15M token(H_PAR 1, KV DDR, T 256) 198,294(계산 196,416).
+
+### 3.10 S4-6b에서 바뀐 세부 (2026-11-20, 합성 품질 정리)
+L3 top/CSR과 `pim_ctrl`, `kv_rd`의 runtime 곱셈(주소 계산, descriptor 범위 검사)을 없앴다. 기능(판정 결과, 주소, 데이터)은 같고, 순차 계산이 들어간 곳만 timing이 바뀌었다. 원본은 `spec/attn.md` 4절, `spec/gemv_acc.md` 3절, `spec/pim.md` 4절.
+
+- 새 leaf `umul_seq`(L0, 3.2절 표): 부호 없는 shift-add 곱셈기, multiplier 1비트/cycle, `CYCLES = B_W + 1`. 단독 TB `tb/umul_seq`(경계 쌍, random 10^6, 크기 6종, 소형 전수, 부정 시험, elaboration 실패).
+- `attn_csr`: CTRL 수락(s) 뒤 s + 1 .. v에 `umul_seq`/`udiv_seq`로 검사, v = s + CHK_CYC에 `start_o` 또는 BAD_DESC/MISALIGN. CHK_CYC = 10(KV_SRC 0 기본), 18(KV_SRC 1). top용 곱 출력 `seqhs_o`, `ths_o`, `kw0_o` 추가.
+- `gemv_acc_csr`: 같은 방식, CHK_CYC = NBW + 1(NMAX 1024에서 9). `op_wbytes_o`는 판정 cycle부터 유효.
+- `pim_csr`: CMD_PUSH 검사가 PCHK_CYC(NMAX 1024에서 9) cycle. 검사 중 CMD_PUSH는 ERR bit8 PUSH_BUSY, STATUS bit3 push_busy. 출력 `push_busy_o`로 `pim_top`의 run 종료를 막는다.
+- `pim_ctrl`: LDW 읽기 길이를 `umul_seq`로 구해 LDW 읽기 명령이 LDW_CYC(NMAX 1024에서 9) cycle 늦다. MACAB와 WRGB는 그대로.
+- `attn_top`: head/kv head/KVW slot 주소를 base + stride 누적(카운터가 증가할 때 더함)으로 바꿨다. stride는 descriptor의 shift와 `attn_csr`의 곱. cycle은 바뀌지 않는다(CSR 검사 cycle만 앞에 붙음).
+- `kv_rd`: 요청에 `ths`(T x hs) 입력 추가. K 행 명령 주소는 chunk마다 CH hs ek를 더하고, 마지막 chunk 길이는 T hs ek - 누적 offset, V pass 길이는 T hs ev. cycle은 그대로.
+- `kv_store`(layer x SEQ, SEQ parameter)와 `gemv_acc_top`(P x RB, P parameter)은 상수 곱이라 폭만 정리하거나 그대로 두었다.
 
 ## 4. golden에 경계가 없어 `model/`에 추가해야 하는 것
 

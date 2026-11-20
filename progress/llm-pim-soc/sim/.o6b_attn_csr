@@ -1,0 +1,6 @@
+### attn_csr: compile (RTL_DIR=../../rtl)
+### attn_csr: compile done in 0 s
+### attn_csr/bram_nkv1: vsim tb_attn_csr -gNKV=1 -gNL=1 +SEED=13 +N_CYC=300000 +PDONE=10 +PEV=30 (expect pass)
+attn_csr/bram_nkv1: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [read_data]: checks=309385 mismatches=0 CHECKS [start_busy]: checks=309385 mismatches=0 CHECKS [latched]: checks=309352 mismatches=0 CHECKS [derived]: checks=1680 mismatches=0 CHECKS [coverage]: checks=44 mismatches=0 
+### attn_csr/bram_nkv7: vsim tb_attn_csr -gNKV=7 -gKW=16 -gVW=16 -gTMAX=100 +SEED=14 +N_CYC=300000 +PDONE=10 +PEV=30 (expect pass)
+attn_csr/bram_nkv7: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [read_data]: checks=308616 mismatches=0 CHECKS [start_busy]: checks=308616 mismatches=0 CHECKS [latched]: checks=308583 mismatches=0 CHECKS [derived]: checks=1634 mismatches=0 CHECKS [coverage]: checks=43 mismatches=0 

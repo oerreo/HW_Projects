@@ -1,0 +1,10 @@
+### pim_ctrl: compile (RTL_DIR=../../rtl)
+### pim_ctrl: compile done in 1 s
+### pim_ctrl/q_m1_nostall: vsim tb_pim_ctrl +SEED=1 +VEC=../../model/build/vec/m1 +STALL=0 (expect pass)
+pim_ctrl/q_m1_nostall: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [eng_cmds]: checks=972 mismatches=0 CHECKS [events]: checks=721 mismatches=0 CHECKS [timing]: checks=101832 mismatches=0 CHECKS [bank_writes]: checks=16288 mismatches=0 CHECKS [mac_reads]: checks=48864 mismatches=0 CHECKS [gather]: checks=42144 mismatches=0 CHECKS [bank_image]: checks=4 mismatches=0 CHECKS [cycle_formula]: checks=432 mismatches=0 
+### pim_ctrl/q_m1_stall: vsim tb_pim_ctrl +SEED=2 +VEC=../../model/build/vec/m1 +MAXREC=72 +STALL=1 +YBLK=1 (expect pass)
+pim_ctrl/q_m1_stall: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [eng_cmds]: checks=192 mismatches=0 CHECKS [events]: checks=151 mismatches=0 CHECKS [timing]: checks=17002 mismatches=0 CHECKS [bank_writes]: checks=16288 mismatches=0 CHECKS [mac_reads]: checks=8144 mismatches=0 CHECKS [gather]: checks=7024 mismatches=0 CHECKS [bank_image]: checks=4 mismatches=0 CHECKS [limits]: checks=1 mismatches=0 
+### pim_ctrl/q_syn_nostall: vsim tb_pim_ctrl +SEED=3 +SYN=400 +STALL=0 (expect pass)
+pim_ctrl/q_syn_nostall: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [eng_cmds]: checks=490 mismatches=0 CHECKS [events]: checks=401 mismatches=0 CHECKS [timing]: checks=227342 mismatches=0 CHECKS [bank_writes]: checks=217436 mismatches=0 CHECKS [mac_reads]: checks=193745 mismatches=0 CHECKS [gather]: checks=26682 mismatches=0 CHECKS [cycle_formula]: checks=232 mismatches=0 
+### pim_ctrl/q_syn_stall: vsim tb_pim_ctrl +SEED=4 +SYN=400 +STALL=1 +YBLK=1 (expect pass)
+pim_ctrl/q_syn_stall: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [eng_cmds]: checks=478 mismatches=0 CHECKS [events]: checks=401 mismatches=0 CHECKS [timing]: checks=232790 mismatches=0 CHECKS [bank_writes]: checks=241948 mismatches=0 CHECKS [mac_reads]: checks=194075 mismatches=0 CHECKS [gather]: checks=30785 mismatches=0 CHECKS [limits]: checks=1 mismatches=0 
