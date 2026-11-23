@@ -129,6 +129,40 @@ DSP는 S4 문서의 [계산](구조에서 센 곱셈기 타일, `gemv_acc.md` 6b
 ### 1.7 L4 top과 block design
 - `rtl/l4/axil_xbar.sv`(신규, control RTL): AXI4-Lite 1 -> N, 주소 [15:12]로 slot 선택, 트랜잭션 하나씩(읽기와 쓰기 각 1 outstanding), 빈 slot 읽기 0, 응답 OKAY. 단독 TB 필요(G3/G4).
 - `rtl/l4/sys_a_top.sv`, `rtl/l4/sys_p_top.sv`(신규): `axil_xbar` + IP 3개의 인스턴스와 배선만(design-methodology의 상위 모듈 규칙). 포트: `s_axi`(AXI-Lite, 주소 16비트) 하나, `m_hp0_axi` ~ `m_hp3_axi`(AXI4 64비트, 1.3절 표대로 IP의 read 채널과 write 채널을 묶음; 쓰지 않는 채널은 valid 0, ready 1로 tie-off), `clk`, `rst_n`. parameter는 1.2절 표 값을 기본으로 하고 IP parameter를 그대로 내보낸다.
+
+**S5-2에서 확정한 세부 (2026-11-20, 시뮬레이션 통과, 보드와 합성 전)**
+
+`axil_xbar` (parameter `N` 1..2^SLOT_W, `SLOT_W` 1..4, `S_ADDR_W` 12 + SLOT_W..32, `SLOT_EN`(bit k = slot k 있음, N 이상 bit는 0), `REG` 0/1; 잘못된 값은 elaboration 실패):
+- 주소: slot = addr[12 +: SLOT_W](SLOT_W 4: [15:12]), slave에는 addr[11:0]만 간다. slot >= N, SLOT_EN 0인 slot, addr[S_ADDR_W-1:12+SLOT_W] != 0(범위 밖)은 "없는 slot": slave에 가지 않고 읽기는 0, 쓰기는 무시, 응답 OKAY. 있는 slot의 BRESP/RRESP/RDATA는 그대로 전달한다(IP는 항상 OKAY이나 xbar는 SLVERR/DECERR도 통과시킨다).
+- write(AW, W, B)와 read(AR, R) 경로는 독립. 경로마다 1 outstanding: 다음 AW/W(AR)는 앞 트랜잭션의 master 쪽 B(R) handshake 뒤에만 받는다. AW와 W는 어느 순서로, 어느 간격으로 와도 된다. WSTRB, AxPROT는 그대로 전달.
+- `REG = 1`(기본, 시스템 top의 `XB_REG` 기본값): master 포트와 slave 포트 사이에 어느 방향으로도 조합 경로가 없다(모든 출력이 flip-flop 또는 상수). `localparam LAT_REQ = 1`, `LAT_RSP = 1`: slave AWVALID = master AW handshake + 1, slave WVALID = max(AW, W handshake) + 1(W는 slot을 안 뒤에 낸다), slave ARVALID = AR handshake + 1, master BVALID / RVALID = slave B / R handshake + 1(slave BREADY / RREADY는 요청을 낼 때부터 1). 없는 slot: BVALID = max(AW, W handshake) + 1, RVALID = AR handshake + 1.
+- `REG = 0`: 조합 통과(`LAT_REQ = LAT_RSP = 0`). AW/AR VALID와 READY, B/R는 같은 cycle에 통과하고 W는 AW handshake 뒤에만 받는다. 없는 slot: BVALID = W handshake + 1, RVALID = AR handshake + 1.
+- [측정, Questa, TB slave 모델: READY 항상 1, 요청 handshake 다음 cycle에 응답] 단일 트랜잭션: REG 1 읽기(AR handshake -> master RVALID) 3 cycle, 쓰기(마지막 AW/W handshake -> BVALID) 3 cycle; REG 0 각 1 cycle. back-to-back 주기(master가 응답 다음 cycle에 다음 요청): REG 1 있는 slot 읽기 4, 쓰기 4, 없는 slot 2, 2 cycle; REG 0 있는 slot 읽기 2, 쓰기 3(W가 AW 다음 cycle), 없는 slot 2, 3 cycle. IP의 `axil_slave`(요청 handshake c -> 응답 VALID c + 2)를 붙이면 그 지연이 더해진다. 실제 GP0 왕복 시간은 보드 측정 전이다 [미측정].
+- 시뮬레이션 검사(`ifndef SYNTHESIS`, tag): `L4_XB_AW`/`L4_XB_W`/`L4_XB_AR`(master VALID/payload가 READY 전에 바뀜), `L4_XB_B`/`L4_XB_R`(slave 응답이 READY 전에 바뀜), `L4_XB_UNEXP`(요청 없는 slave 응답).
+
+slot 표 (GP0 0x43C0_0000 기준, xbar `S_ADDR_W` 16, `N` 4, slot 4..15는 N 밖이라 없는 slot):
+
+| slot | 주소 | 빌드 A (`SLOT_EN` 4'b1101) | 빌드 P (`SLOT_EN` 4'b1110) | ID / CONFIG (기본 parameter, TB 확인) |
+|---|---|---|---|---|
+| 0 | 0x43C0_0000 | `gemv_acc_top` (`u_ga`) | 없음(0) | 0x4741_0001 / 0x0400_3164 (A2: 0x0400_3264) |
+| 1 | 0x43C0_1000 | 없음(0) | `pim_top` (`u_pi`) | 0x5049_0001 / 0x0400_4464, CONFIG2 0x0020_1000 |
+| 2 | 0x43C0_2000 | `attn_top` (`u_at`) KV_SRC 1 | `attn_top` (`u_at`) KV_SRC 0 | 0x4154_0001 / A 0x0200_3964, P 0x0200_3264 (PD 0x0200_3A64); CONFIG2 A 0x0000_0040, P 0x0005_0408 (PD 0x0000_0008); CONFIG3 A 0, P 0x0200_080C (PD 0) |
+| 3 | 0x43C0_3000 | `vec_top` (`u_ve`) | `vec_top` (`u_ve`) | 0x5645_0001 / 0x0400_1064 |
+| 4..15 | 0x43C0_4000 ~ | 없음(0) | 없음(0) | 0 |
+
+HP 포트 배정 (구현, 1.3절 표와 같음):
+
+| 포트 | `sys_a_top` read / write | `sys_p_top` read / write |
+|---|---|---|
+| `m_hp0_axi_*` | `u_ga` slice 0 / `u_ga` | `u_pi` / `u_pi` |
+| `m_hp1_axi_*` | `u_at` engine 0 / `u_at` | `u_at` engine 0 / `u_at` |
+| `m_hp2_axi_*` | `GA_P` 2(A2)이면 `u_ga` slice 1, `AT_H_PAR` 2(A')이면 `u_at` engine 1, 아니면 tie-off / tie-off | `AT_H_PAR` 2(기본)이면 `u_at` engine 1, 1이면 tie-off / tie-off |
+| `m_hp3_axi_*` | `u_ve` / `u_ve` | `u_ve` / `u_ve` |
+
+- 포트 이름 규칙: `s_axi_<ch>_<i|o>`(AXI4-Lite, `S_ADDR_W` 비트 주소), `m_hp<k>_axi_<ch>_<i|o>`(k = 0..3, AXI4 master, 데이터 64비트, ID `IDW` 비트; 방향 접미사는 이 모듈 기준). HP 포트마다 read 채널 묶음(AR, R)과 write 채널 묶음(AW, W, B)을 모두 두고, 두 빌드의 포트 목록이 같다(block design shell 하나로 두 빌드를 받기 위함). 쓰지 않는 채널 묶음은 VALID 0, RREADY/BREADY 1, 그 밖의 출력 0이다. 한 HP 포트의 read 묶음과 write 묶음을 서로 다른 IP가 쓸 수 있는 구조이며(배선만), 현재 배정에서 그런 포트는 없다(HP2는 read만 쓴다).
+- parameter 이름: 공통 `S_ADDR_W`(16), `XB_REG`(1), `IDW`(1), `MAX_BURST`(16), `OUTS`(4), `FCLK_MHZ`(100); IP별 접두사 `GA_*`(gemv_acc), `PI_*`(pim), `AT_*`(attn), `VE_*`(vec)로 IP parameter를 그대로 내보낸다. 기본값은 1.2절 표의 빌드 값. elaboration 검사: `sys_a_top` GA_P 1/2, AT_H_PAR 1/2, GA_P 2와 AT_H_PAR 2 동시 금지(HP2 read 중복); `sys_p_top` AT_H_PAR 1/2.
+- 클럭과 리셋: `clk`, `rst_n` 하나를 xbar와 IP 3개에 그대로 준다(top 안의 로직 없음).
+- 검증: `sim/tests/axil_xbar.cfg`(단독 TB, 30 run), `sim/tests/sys_a_top.cfg`, `sys_p_top.cfg`(smoke, `tb/sys_top/tb_sys_top.sv`: slot ID/CONFIG, IP마다 호출 하나를 golden(DPI)과 대조, 호출마다 traffic이 나간 HP 포트 확인, tie-off 매 cycle 확인). HP 포트마다 독립 메모리 모델이라, 두 HP 포트가 같은 버퍼를 봐야 하는 시험(IP 사이 kernel 연쇄, forward)은 S5-3의 공유 메모리 모델로 미룬다. lint: `sim/.lint8`(xbar 4개 구성, `sys_a_top` 기본/A2/A' + XB_REG 0, `sys_p_top` 기본/PD/H_PAR 1 + XB_REG 0, `vlog`/`vopt -lint=full`) 경고 0.
 - Vivado block design(`fpga/sys/create_project.tcl BUILD=A|P`, `fpga/bw/create_project.tcl`을 바탕으로): PS7(GP0, 쓰는 HP 포트, FCLK0, board preset) + `proc_sys_reset` + ctrl interconnect(GP0 -> `s_axi`) + HP 포트마다 interconnect + module reference(Verilog shell `fpga/sys/src/sys_<a|p>_bd.v`, bw의 `bw_bd.v`와 같은 방식). L4 top은 SystemVerilog라 module reference가 Verilog shell을 요구하는 점도 bw와 같다 [미확인, bw와 같은 위험].
 
 ## 2. SW 구조
@@ -146,6 +180,7 @@ sys_main.c          BEGIN/END, BUILD/PLAT/SYS 줄, 모델마다 sbench
 ```
 - 재사용(수정 없음): `fpga/sw/src/`의 `plat.h`/`plat_xil.c`/`plat_host.c`(시간, UART, DDR 이미지, arena), `out.c`(로그 한 줄), `lmhash.c`, `expect.h`/`exp.c`와 `fpga/sw/expect/exp_m*.h`(PC 기대값: 위치별 token, logits hash), `prof.c`(lap probe, 행렬 구분). baseline ELF(`fpga/sw/`)는 그대로 두어 S3 측정과 비교 기준을 유지한다.
 - `model/src` 변경(O3 권고안): `fwd_h.c`의 `run()`이 `k_exec`를 부르는 자리를 실행기 함수 포인터로 바꿀 수 있게 `lm_h_forward_x(s, c, w, tok, pos, hook, exec)`를 추가하고, `lm_h_forward(...)`는 `exec = NULL`(지금과 같은 `k_exec`)로 그것을 부른다. 기존 호출자는 바뀌지 않는다. 바꾼 뒤 `make test` PASS와 기존 덤프 `cmp` 동일을 확인한다(hierarchy.md 4절 원칙).
+- (S5-1 구현) 실행기 형식은 `k_exec_t { k_exec_fn fn; void *user; }`, `int k_exec_fn(void *user, const kcall_t *c)`(`model/src/llm.h`). 덤프 4종 `cmp` 동일, `make test` 16,686,497 항목 mismatch 0(새 그룹 `forward_x executor` 16,704 항목 포함, `model/results/maketest_s5_1.txt`). hal 계층은 `plat.h`를 확장하지 않고 별도 `fpga/sys/sw/hal.h`로 두었다(`hal_rd/wr(slot, off)`, `hal_pa`, `hal_flush/inval/flush_all`, `hal_dsb`, `hal_arena`, 호스트 전용 `hal_env`와 일관성 검사 `hal_arm_rd/wr`). arena는 hal이 준다(호스트는 4 KiB 정렬, 보드는 `ARENA_ADDR`). 드라이버 공통 코드는 `drv_com.c`.
 
 ### 2.2 실행기 (`sx_exec`)
 kernel 호출마다 `kcall_t`(kid, prm, 버퍼 포인터)를 받는다. 버퍼 포인터와 초기화 때 등록한 `lm_hs_t`, `lm_hw_t`로 행렬(가중치 포인터), layer와 kv head(`kc` 안의 offset), 위치(T = prm[0])를 알아낸다. 행렬 구분은 `prof.c`의 `hprof_setup`과 같은 방식이다.
@@ -180,6 +215,12 @@ kernel 호출마다 `kcall_t`(kid, prm, 버퍼 포인터)를 받는다. 버퍼 �
 - **barrier 규칙**: 미뤄 둔 일이 있을 때, 다음 호출이 미뤄 둔 묶음에 들어갈 수 있는 종류(ATTN 묶음에는 ACTQ(q head)와 ATTN, PIM 묶음에는 같은 x의 K_GEMV)가 아니면 먼저 미뤄 둔 것을 실행하고 완료를 기다린다. forward 끝(argmax 뒤)도 barrier다. 이 규칙은 "미뤄 둔 호출의 출력을 읽는 호출은 반드시 barrier를 거친다"를 보장하므로 forward 순서의 세부 지식에 기대지 않는다.
 - **x 세대**: `a8`/`as`에 쓰는 모든 호출(RMSNORM, SWIGLU, ACTQ(att), ARM이든 IP든)이 세대를 하나 올린다. WRGB 생략은 (x 포인터, 세대)가 마지막 WRGB와 같을 때만.
 - **BRAM KV(KV_SRC 0)**: 위치 pos의 layer l에서 첫 ATTN을 낼 때 그 앞에 KVW(layer l, POS pos, kv head 0..NKV-1, 원본은 golden `kc/vc/kcs/vcs`의 layer base)를 낸다. ATTN을 켠 run은 위치 0부터 돈다(run 중간에 A를 켜지 않는다). 예외: 시스템 TB의 warm start는 `sx_kv_sync(upto)`로 지난 위치의 KVW를 몰아 낸다(3.2절).
+- **(S5-1 구현에서 정한 세부)**
+  - 사용 가능 여부(모델마다, `AVAIL` 줄): G, C는 `gemv_acc`가 있거나 `pim`이 있고 lane 16과 bank 깊이(누적 word <= DEPTH)가 맞을 때, A는 `attn`이 있고 모델이 K_ATTN2 형식(창 없음, exp_bits 8)이며 BRAM KV면 hs <= KL, hs <= HS_MAX, nkv <= NKV, L <= NL, kb <= KW, vb <= VW, seq <= TMAX일 때, vec 비트는 `vec`가 있을 때. 사용 가능하지 않은 비트를 요구하는 (mask, opt)는 run하지 않고 `SKIP`을 찍는다(fallback이 아님). 15M을 빌드 P에서 돌리면 PIM(237,312 word > 4,096)과 BRAM KV(hs 48 > KL 8) 때문에 G, C, A가 빠진다.
+  - 보호 조건에 더한 것: GEMV xm < 2^17, we/xe/fo가 signed 8비트(EXP, CMD3 필드 폭), vec의 f/fy/ge가 signed 8비트와 epsc >= 0, ATTN은 descriptor의 kb/vb/hs가 모델과 같고 K 포인터에서 계산한 첫 위치가 0(창 없음), kv head = j / KVMUL, j < 64(실행기 표 크기). 실패하면 ARM으로 실행하고 `fb`. timeout으로 꺼진 IP의 호출도 `fb`로 센다.
+  - IP 출력 invalidate(소비자 규칙 3의 구체화): y of q, k, o, w2는 항상(ARM rope, add), v는 Qh가 ARM일 때, w1/w3은 S가 ARM일 때, cls는 run T/P/K(hash)이거나 ARGMAX를 ARM이 할 때(FUSE_AM이면 제외), `as`, `qh`, `qhs`는 항상(`fwd_h.c`가 다음 descriptor를 만들며 읽고, q 레코드 복사가 읽는다), a8은 다음 GEMV(final rmsnorm 뒤는 C, 그 밖은 G)가 ARM일 때, K/V slot은 A가 ARM일 때, att는 Qa가 ARM일 때. run K는 모든 IP 출력을 invalidate한다. ARGMAX index는 레지스터에서 읽어 ARM이 `s->argmax[0]`에 쓰고 그 4 B를 flush한다(vec ARGMAX의 OUT_ADDR도 `s->argmax`).
+  - barrier: 쌓인 ATTN 묶음에는 K_ATTN2(같은 layer, 같은 T, 다음 head)와 q head ACTQ만 들어가고, PIM 묶음에는 IP로 가는 같은 x 주소와 같은 x 세대의 K_GEMV만 들어간다. run P에서는 hook이 barrier 실행을 직전 lap과 분리해 묶음의 범주(ATTN: attn, PIM: 묶음 첫 행렬의 범주)에 넣는다. KVW는 attn 범주.
+  - run 종류 W(warm start, 호스트와 시스템 TB용): 위치 0..S-2를 mask 0으로, 전체 flush, (BRAM KV면) `sx_kv_sync(S - 1)`, 위치 S-1을 mask로. token과 hash는 모든 위치에서 비교한다.
 
 **cache 일관성 규칙** (ACP를 쓰지 않으므로 ARM이 유지한다, arch.md 7.1):
 1. run 시작 때 전체 `Xil_DCacheFlush`(baseline과 같음). 초기화 끝에도 전체 flush(행 레코드, 가중치, g 배열이 DDR에 있게).
@@ -279,6 +320,7 @@ measure.md의 a, b, c를 호출 하나에서 ARM global timer로 겹치지 않�
 | `CHECK` | (기존) + mask | token, logits hash(위치마다 PC 기대값), K 모드 mismatch |
 
 - 파서(`fpga/sw/tools/parse_log.py`)를 확장해 (m, v, mask, opt)마다 표를 만들고, mask 0 대비 가속비, KSPLIT 합 검사, Amdahl 예측(4.2절)과 실측을 나란히 낸다.
+- (S5-1 구현) 블록은 `LMSYS BEGIN fmt=1` .. `LMSYS END`. 더한 키: `CLK tps`, `AVAIL m v avail build why rrec_bytes bank_words`, `SKIP m v mask opt avail`, `COH`(호스트 cache 모사의 첫 오류와 수: `m v run mask opt n old kind what k pos addr`). 모든 run 줄(`RUN`, `KERN`, `KSPLIT`, `KCMP`, `CHECK`, `COH`, `IPERR`)에 `run mask opt`를 둔다. `KSPLIT`/`KCMP`의 k는 KERN 범주에서 actq를 `actq_h`(Qh), `actq_a`(Qa)로 나눈 것이다(KERN actq = 둘의 합). `KCMP mis`는 다른 원소 수, `CHECK`는 `kmis coh fb iperr`를 더해 요구 합이 0일 때만 PASS. `IPERR`는 run당 16줄까지 찍고 수는 `CHECK iperr`에 정확히 센다. 파서는 CHECK 요구 합, KCMP 합 = CHECK kmis, COH n = CHECK coh, KSPLIT(arm + pl + mv + call) <= KERN(범주마다), MSUM(실패 run 수 + 데이터 검사), RESULT를 다시 계산한다. 형식 전체는 `fpga/sys/README.md` 1절.
 
 ### 2.7 정합성 검사
 | run | 내용 | 통과 |
@@ -305,6 +347,7 @@ rtl/l4/  axil_xbar.sv sys_a_top.sv sys_p_top.sv
 tb/axil_xbar/, tb/sys_top/ (tb_sys_top.sv, hal_dpi.c), sim/tests/axil_xbar.cfg, sys_top.cfg
 ```
 - 보드 프로그램의 mask 목록과 위치 수는 컴파일 시점 상수(`MASK_LIST`, `RUN_MASK`, `STEPS`)다. 한 ELF가 목록을 차례로 실행한다(UART 입력 없음).
+- (S5-1 구현) 실제 파일: `fpga/sys/sw/` sys_main.c, sbench.c/h, sx_exec.c, sx.h, sysmem.c, drv_com.c, drv_ga.c, drv_pi.c, drv_at.c, drv_ve.c, ipregs.h, hal.h, hal_xil.c, scfg.h(`SYS_MASK_LIST`, `SYS_RUN_MASK`, `SYS_STEPS`, `SYS_FCLK_HZ`, `SYS_POLL_MIN_US`, `SX_FAULT_INJ`). `fpga/sys/test/` hal_host.c, ipm.h, ipm_ga.c, ipm_pi.c, ipm_at.c, ipm_ve.c, Makefile, run.sh, xilstub/. Tcl, XDC, Verilog shell, XSCT 스크립트는 S5-5. 호스트 빌드는 같은 목록을 환경변수 `SX_LIST`, `SX_RUNS`, `SX_STEPS`, `SX_MODELS`로 바꿀 수 있다(보드 빌드의 `hal_env`는 항상 NULL).
 - `ipregs.h`의 offset과 비트는 IP spec 문서(gemv_acc.md 2절, pim.md 2~3절, attn.md 3절, vec.md 3절)가 원본이다.
 
 ## 3. 호스트에서 검증하는 방법
@@ -317,6 +360,8 @@ tb/axil_xbar/, tb/sys_top/ (tb_sys_top.sv, hal_dpi.c), sim/tests/axil_xbar.cfg, 
 - **결함 주입**(각각 FAIL로 잡혀야 함): (1) 생산자 flush 하나 누락, (2) 소비자 invalidate 하나 누락, (3) q 레코드의 qm/qe 순서, (4) DDR KV layer base 한 layer 어긋남, (5) PIM bank base 겹침, (6) 세대가 바뀌었는데 WRGB 생략, (7) barrier 규칙 위반(미뤄 둔 ATTN 전에 ACTQ(att) 실행), (8) IP 모델이 RD_RESP를 냄, (9) IP가 끝나지 않음(timeout 경로), (10) 보호 조건 우회(지원 밖 descriptor를 IP로 보냄 -> BAD_DESC).
 - 추가: `hal_xil.c`와 드라이버를 stub BSP 헤더(`fpga/sw/test/xilstub/` 재사용 + `Xil_DCacheFlushRange`/`InvalidateRange` 선언)로 `-fsyntax-only -Werror`, XSCT/Vivado Tcl stub 검사(bw의 `stub_check.tcl` 방식).
 - 한계: IP 모델은 RTL이 아니다. 통과는 SW의 흐름, 배치 변환, 일관성 규칙, 로그 형식이 spec과 맞는다는 것만 보인다.
+- (S5-1 구현에서 정한 것) "kernel 시작 때 입력 범위의 CPU와 DDR 이미지가 같다"는 위 문장은 IP -> IP 사슬에서는 성립하지 않는다(소비자가 IP면 규칙 3이 invalidate를 하지 않으므로 CPU 쪽은 옛 값이다. 예: Qh와 A가 모두 IP인 K slot). 그래서 검사를 읽는 쪽별로 나눴다. cache 모사는 CPU 메모리, DDR 이미지, 마지막 동기 값(syn), ARM 쓰기 표시(실행기가 `hal_arm_wr`로 kernel 출력, q 레코드, ARGMAX index를 표시, 표시하지 않은 쓰기는 CPU != syn으로 잡음)의 네 배열이다. 오류: ARM이 IP가 쓰고 invalidate하지 않은 byte를 읽음(`arm_rd_stale`, ARM kernel 입력, `fwd_h.c`가 읽는 `as`/`qhs`, q 레코드 복사, logits hash, run K 그림자 입력), IP가 ARM이 쓰고 flush하지 않은 byte를 읽음(`ip_rd_dirty`, IP 모델의 메모리 읽기), IP가 그런 byte가 있는 line에 씀(`ip_wr_dirty`, 규칙 4), flush가 IP가 쓴 byte를 ARM이 쓰지 않은 채로 덮음(`flush_clobber`), invalidate가 flush하지 않은 ARM byte를 버림(`inval_discard`). 모든 line이 늘 cache에 있다고 보는 보수적 모델이고, 범위 끝의 부분 line invalidate는 flush로 처리한다(BSP 동작 [미확인]). run 시작의 전체 flush가 이전 run의 IP 데이터를 덮는 것은 오류가 아니라 `old`로 센다.
+- (S5-1 결과, 2026-11-20, 호스트 x86 [측정, 호스트 모델]) `make -C fpga/sys/test test` SYSHOST 34 항목 PASS. mask/opt 21개(4.1절 표 + DEFER_AT 끔, PIM_BATCH 켬, WRGB_SKIP 끔, COH_STRICT, FUSE_AM 끔, G+C PIM_BATCH) x run E/T/P/K/W: 260K 빌드 A, P 전 위치(512), 15M 빌드 A 24 위치와 일부 전 위치(256), 15M 빌드 P 24 위치(7개, 14개 SKIP), `-m32`(260K 64 위치, 15M 16 위치와 mask 0/ff 전 위치). run 684개 모두 PASS(token, logits hash, KCMP 2,029,960 호출 mismatch 0, COH 0, fallback 0, IPERR 0). 결함 주입 11종(3.1 목록 10 + 레지스터 순서)과 보호 조건 fallback이 각각 고유 증거로 FAIL. 상세 `fpga/sys/README.md` 2절. 초기화의 LDW 36개 CYCLES 추정(호스트 PIM 모델, 명령별 점유 합) 36,630은 pim.md 6.2의 측정 36,629와 1 차이다(참고, 추정식).
 
 ### 3.2 RTL 수준: 시스템 TB (같은 드라이버 C 코드가 RTL을 구동)
 구성:

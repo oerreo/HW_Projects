@@ -1,0 +1,12 @@
+### sys_p_top: compile (RTL_DIR=../../rtl)
+### sys_p_top: compile done in 1 s
+### sys_p_top/q_p: vsim tb_sys_top -gBUILD=1 +SEED=11 +MAXD=1 +VEC_AT=../../model/build/vec/m1 (expect pass)
+sys_p_top/q_p: PASS (rc=0 errors=0 RANGE=0 wall=1s) CHECKS [slot_map]: checks=28 mismatches=0 CHECKS [attn]: checks=440 mismatches=0 CHECKS [vec]: checks=29 mismatches=0 CHECKS [status_err]: checks=15 mismatches=0 CHECKS [guard]: checks=16 mismatches=0 CHECKS [hp_ports]: checks=15 mismatches=0 CHECKS [tie_off]: checks=1 mismatches=0 CHECKS [record]: checks=48 mismatches=0 CHECKS [pim]: checks=38 mismatches=0 
+### sys_p_top/q_pd: vsim tb_sys_top -gBUILD=1 -gVAR=1 +SEED=12 +MAXD=2 +VEC_AT=../../model/build/vec/m1 (expect pass)
+sys_p_top/q_pd: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [slot_map]: checks=28 mismatches=0 CHECKS [attn]: checks=440 mismatches=0 CHECKS [vec]: checks=66 mismatches=0 CHECKS [status_err]: checks=9 mismatches=0 CHECKS [guard]: checks=16 mismatches=0 CHECKS [hp_ports]: checks=9 mismatches=0 CHECKS [tie_off]: checks=1 mismatches=0 CHECKS [record]: checks=48 mismatches=0 CHECKS [pim]: checks=17 mismatches=0 
+### sys_p_top/p_xb0: vsim tb_sys_top -gBUILD=1 -gVAR=2 +SEED=13 +MAXD=3 +VEC_AT=../../model/build/vec/m1 (expect pass)
+sys_p_top/p_xb0: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [slot_map]: checks=28 mismatches=0 CHECKS [attn]: checks=440 mismatches=0 CHECKS [vec]: checks=10 mismatches=0 CHECKS [status_err]: checks=15 mismatches=0 CHECKS [guard]: checks=16 mismatches=0 CHECKS [hp_ports]: checks=15 mismatches=0 CHECKS [tie_off]: checks=1 mismatches=0 CHECKS [record]: checks=48 mismatches=0 CHECKS [pim]: checks=43 mismatches=0 
+### sys_p_top/p_seed14: vsim tb_sys_top -gBUILD=1 +SEED=14 +MAXD=0 +VEC_AT=../../model/build/vec/m1 +NGRP=11 (expect pass)
+sys_p_top/p_seed14: PASS (rc=0 errors=0 RANGE=0 wall=2s) CHECKS [slot_map]: checks=28 mismatches=0 CHECKS [attn]: checks=848 mismatches=0 CHECKS [vec]: checks=44 mismatches=0 CHECKS [status_err]: checks=25 mismatches=0 CHECKS [guard]: checks=26 mismatches=0 CHECKS [hp_ports]: checks=25 mismatches=0 CHECKS [tie_off]: checks=1 mismatches=0 CHECKS [record]: checks=88 mismatches=0 CHECKS [pim]: checks=18 mismatches=0 
+### sys_p_top/p_bad_hpar: vsim tb_sys_top -gBUILD=1 -gAT_H_PAR=3 (expect elab_fail:sys_p_top: AT_H_PAR=3 must be 1 or 2)
+sys_p_top/p_bad_hpar: PASS (rc=2 errors=2 RANGE=0 wall=0s) 

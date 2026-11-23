@@ -11,8 +11,12 @@
 L0 = 하위 모듈이 없는 leaf, L1 = L0 조합, L2 = kernel core(로컬 인터페이스, AXI 없음), L3 = AXI가 붙은 IP top, L4 = 시스템(S5).
 
 ```
-L4  sys_p_top        (S5) 260K PIM형 시스템: pim_top + attn(KV는 BRAM) + vec_top              RTL
-L4  sys_a_top        (S5) 15M 가속기형 시스템: gemv_acc_top + attn_top(KV는 DDR) + vec_top     RTL
+L4  sys_a_top        (S5-2) 빌드 A: axil_xbar + gemv_acc_top(slot 0) + attn_top KV DDR(slot 2) + vec_top(slot 3). 인스턴스와 배선만   RTL
+      L4  axil_xbar        AXI4-Lite 1 -> N(4 KiB slot, addr[15:12]), 없는 slot은 읽기 0/OKAY, 경로마다 1 outstanding, REG 0/1   RTL
+      L3  gemv_acc_top, attn_top, vec_top (아래와 같은 모듈, 수정 없음)
+L4  sys_p_top        (S5-2) 빌드 P: axil_xbar + pim_top(slot 1) + attn_top KV BRAM H_PAR 2(slot 2) + vec_top(slot 3). 인스턴스와 배선만   RTL
+      L4  axil_xbar
+      L3  pim_top, attn_top, vec_top (아래와 같은 모듈, 수정 없음)
 
 L3  bw_top           HP 대역폭 측정 top (S4-3, 측정 도구). axil_slave + CSR + axi_rd_eng/axi_wr_eng x P   RTL
       L1  axil_slave, axi_rd_eng, axi_wr_eng, L0 sync_fifo (아래와 같은 모듈)
@@ -284,6 +288,19 @@ L3 top/CSR과 `pim_ctrl`, `kv_rd`의 runtime 곱셈(주소 계산, descriptor �
 - 초안과 다른 점: front의 buffer를 `vec_core`에 하나 두고 op에 따라 `rms_front`(x)나 `swi_front`(silu)가 쓴다(front마다 하나 두는 것보다 BRAM36 1개 적음). `swi_front`는 h1을 받는 동안 silu까지 계산해 buffer에 둔다(HP 포트 하나라 h1 명령 뒤에 h3 명령이 온다). `rsqrt_nr`의 rm은 17비트(초안 32비트; 전수 확인 rm <= 65535). `actq_core`의 `e_o`는 e + f를 SH_W 폭으로 낸다(초안 E_W: f가 8비트 signed 전체 범위면 넘친다).
 - 호출: op RMSNORM, SWIGLU, ACTQ, ARGMAX(D10). descriptor 검사는 shift와 덧셈뿐이라 1 cycle(v = s + 1). runtime 곱셈기와 나눗셈기는 control에 없다(leaf 데이터패스의 곱만).
 - cycle: core `RMSNORM 4n + 87`, `SWIGLU 3n + 67`, `ACTQ 2n + 59`, `ARGMAX n + 1`. top CYCLES는 core + 1 + 쓰기 꼬리(보통 11 + max(L_last, 2), ARGMAX 13). token당 합(stall 없는 모델): 260K 약 15,680(RMSNORM 3,993, SWIGLU 3,005, ACTQ 8,155(85 호출), ARGMAX 527), 15M 약 85,741(16,321, 14,386, 23,019(114 호출), 32,015).
+
+### 3.12 S5-2에서 고정한 세부 (2026-11-20)
+`axil_xbar`, `sys_a_top`, `sys_p_top`(상태: 시뮬레이션 통과). 주소 맵, slot 표, HP 포트 배정, latency, 포트 이름 규칙은 `spec/system.md` 1.7절 "S5-2에서 확정한 세부"가 원본이고 아래는 계층 관점의 요약이다.
+
+| 모듈 | parameter | 포트 요약 | latency | 검증 |
+|---|---|---|---|---|
+| `axil_xbar` (L4, control) | `N` 1..2^SLOT_W, `SLOT_W` 1..4, `S_ADDR_W` 12 + SLOT_W..32, `SLOT_EN`[15:0], `REG` 0/1 | `s_axi_*`(AXI4-Lite slave, `S_ADDR_W` 비트), `m_axi_*[N]`(AXI4-Lite master, 주소 12비트 = slot offset) | `localparam LAT_REQ = LAT_RSP = REG`: REG 1은 요청과 응답 각 1 cycle의 register slice(조합 경로 없음), REG 0은 조합 통과 | 단독 TB `tb/axil_xbar`(reference decode, 도착 slave/offset/data/WSTRB/PROT/응답 대조, cycle 규칙, valid 유지, 음성 시험), `sim/tests/axil_xbar.cfg` |
+| `sys_a_top` (L4) | `S_ADDR_W`, `XB_REG`, `IDW`, `MAX_BURST`, `OUTS`, `FCLK_MHZ`, `GA_*`, `AT_*`, `VE_*`(기본 = 빌드 A) | `clk`, `rst_n`, `s_axi_*`, `m_hp0..3_axi_*`(AXI4 master 64비트, read 묶음과 write 묶음) | xbar `REG` 따름. IP latency는 각 IP 문서 | smoke `tb/sys_top`(BUILD 0), `sim/tests/sys_a_top.cfg` |
+| `sys_p_top` (L4) | 같은 공통 parameter, `PI_*`, `AT_*`, `VE_*`(기본 = 빌드 P) | 같은 포트 목록 | 같음 | smoke `tb/sys_top`(BUILD 1), `sim/tests/sys_p_top.cfg` |
+
+- 두 top은 인스턴스, 배선, 상수 tie-off만 갖는다(xbar의 없는 slot 입력, 쓰지 않는 HP 채널 묶음). HP2 read 채널의 선택(A2의 gemv_acc slice 1, A'/P의 attn engine 1, 그 밖 tie-off)은 parameter에 따른 generate다.
+- 하위 L3 모듈(`gemv_acc_top`, `pim_top`, `attn_top`, `vec_top`)은 수정하지 않았다. 각 IP의 `ADDR_W`는 12(slot 4 KiB)로 고정해 연결한다.
+- HP 포트마다 독립 메모리 모델이라, 포트 사이 공유 버퍼가 필요한 시험은 S5-3(`axi_mem_slave` EXT_STORE)에서 한다.
 
 ## 4. golden에 경계가 없어 `model/`에 추가해야 하는 것
 

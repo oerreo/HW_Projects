@@ -153,3 +153,13 @@
 - UNVERIFIED: `hal_xil.c`(Xilinx API, cache L1/L2 동작, 물리 주소 가정), ARM 컴파일과 실행, 부분 cache line invalidate 동작. 호스트의 시간과 Amdahl 표는 측정값이 아니다.
 - 프로세스 노출(agent 보고): 초기 몇 번 명령 문자열에 `model`, `fpga/sys/test` 경로 조각이 최장 약 2.5분 보임(프로젝트 이름은 아님). 이후 루트의 job 파일로 변경.
 - 다음: S5-2 검수, S5-3(시스템 TB 기반: 공유 메모리, 드라이버 C 코드의 DPI 연결).
+
+## 2026-11-23: S5-2 axil_xbar와 시스템 top  [notion: pending]
+- 한 일(hw-worker, 2026-11-20 작업): `rtl/l4/axil_xbar.sv`(AXI4-Lite 1 -> N, slot 4 KiB, 빈 slot은 읽기 0과 OKAY, register slice parameter), `rtl/l4/sys_a_top.sv`, `sys_p_top.sv`(인스턴스와 배선만)와 TB(`tb_axil_xbar`, 두 top 공용 `tb_sys_top`). system.md 1.7절과 hierarchy.md 3.12절에 확정 세부.
+- 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 465 run, fails 0(기존 424 + axil_xbar 30, sys_a_top 6, sys_p_top 5).
+- agent 보고(재실행 안 함): xbar mutation 8/8, top 배선 mutation 9/9 검출(slot 교환, HP 포트 교환, parameter 값, reset 누락, tie-off, SLOT_EN). lint 경고 0. smoke는 slot별 ID/CONFIG 대조, 빈 slot 0, IP마다 호출 하나를 golden(DPI)과 대조, 호출마다 burst가 나간 HP 포트 집합이 기대와 같은지 검사.
+- xbar latency [측정, 시뮬레이션, TB slave 모델]: register slice 켬(기본)에서 단일 읽기와 쓰기 3 cycle, back-to-back 주기 4 cycle. 실제 GP0 왕복 시간은 보드 측정 전.
+- 배정: GP0 0x43C0_0000, slot = addr[15:12]. 빌드 A는 slot 0 gemv_acc, 2 attn, 3 vec. 빌드 P는 slot 1 pim, 2 attn, 3 vec. HP0 gemv_acc 또는 pim, HP1 attn engine 0(쓰기 포함), HP2 attn engine 1 read(P) 또는 gemv slice 1(A2), HP3 vec.
+- 미룬 것(S5-3): 두 HP 포트가 같은 버퍼를 봐야 하는 kernel 연쇄와 forward, 드라이버 C 구동, smoke에서의 CYCLES 식 대조.
+- 한계: A의 attention H_PAR 2 구성과 P의 H_PAR 1 구성은 elaboration과 lint만. 합성, timing, 보드 동작 미확인.
+- 다음: S5-3(시스템 TB 기반), S5-4(forward G5).
