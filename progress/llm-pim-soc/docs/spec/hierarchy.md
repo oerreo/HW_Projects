@@ -174,7 +174,7 @@ leaf는 처음 쓰이는 단계에서 만든다(`arch.md` 9절). "S4 단계"는 
 | `attn_core` | `KL` = `VL` = 8, `HS_MAX`, `TMAX`, PIPE 4개, `OUT_DEPTH` | start + cfg(`T`, `hs`, `kb`, `qm`, `qe`, `p_en`), q stream(ceil(hs/8) beat), KV pass 요청(`kvreq`, 0 K / 1 V) + KV stream(K beat + 위치 마지막 beat의 ks, vs / V beat) | 출력 stream(p[T] (p_en), o[hs], `last`, `is_o`), `done`, `kv_stall_o` | `(T+1) ceil(hs/8) + T + T ceil(hs/8) + hs + C0`, `C0 = 54 + DOT + SH + RS + LUT PIPE` (기본 60, S4-6 측정으로 확정) | K_ATTN2 |
 | `kv_store` | `NKV`, `NL`, `SEQ`, `KL`, `KW`, `VW`, `H_PAR`, `FIFO_D` | 쓰기(kv head, layer, pos, K/V 16b lane, ks, vs), 포트 p의 pass 요청(kv head j mod H_PAR = p, layer, T) | 포트별 KV pass stream | 1 위치/cycle (요청 후 T + 3 이내) | `fwd_h.c`의 `kc/vc/kcs/vcs` 배치를 KVW로 옮긴 것 |
 | `kv_rd` | `KL` = 8, `HS_MAX`, `TMAX`, `CH` | pass 요청(pass, T, hs, ths = T x hs(요청자가 계산, S4-6b), ek, ev, kv head의 K/V/KS/VS base) | `axi_rd_eng` 명령, KV pass stream | DDR beat 수에 묶임: K pass 위치당 hs ek / 8 + 2 beat, V pass hs ev / 8 beat | 같음 (golden 배치 그대로) |
-| `vec_core` | `N_MAX`, `IDX_W`, `LUT_PIPE`, `Q_DEPTH` | op + cfg, read beat 스트림(명령 IN0, IN1 순서) | q stream + scale, 또는 idx/max | RMSNORM `4n + 87`, SWIGLU `3n + 67`, ACTQ `2n + 59`, ARGMAX `n + 1`(S4-7 측정, `vec.md` 6.1) | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX |
+| `vec_core` | `N_MAX`, `IDX_W`, `LUT_PIPE`, `Q_DEPTH` | op + cfg, read beat 스트림(명령 IN0, IN1 순서; `d_ready_o` = beat pop, `d_valid_i` 포함), `d_want_o`(원소를 원함, `d_valid_i` 무관, RD_STALL용, 2026-11-23 추가) | q stream + scale, 또는 idx/max | RMSNORM `4n + 87`, SWIGLU `3n + 67`, ACTQ `2n + 59`, ARGMAX `n + 1`(S4-7 측정, `vec.md` 6.1) | K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX |
 
 L3의 레지스터 맵과 kernel 호출 순서는 `arch.md` 7절.
 
@@ -286,6 +286,7 @@ L3 top/CSR과 `pim_ctrl`, `kv_rd`의 runtime 곱셈(주소 계산, descriptor �
 
 - 구성: `vec_top` = `axil_slave` + `vec_csr` + 읽기 명령 순서기(IN0, IN1) + `axi_rd_eng` + `vec_core` + 쓰기 명령 순서기(OUT, SCL) + packer + `axi_wr_eng`(HP 포트 하나). `vec_core` = unpacker(int32 2개/beat, int16 4개/beat) + `rms_front` + `swi_front` + 공유 front buffer(`ram_sdp` N_MAX x 32) + `actq_core` + `argmax_red`. 기존 모듈은 수정 없이 인스턴스만 했고, `lut_lerp`에 SIGM을 추가했다(EXP2N 동작 불변, 회귀 확인).
 - 초안과 다른 점: front의 buffer를 `vec_core`에 하나 두고 op에 따라 `rms_front`(x)나 `swi_front`(silu)가 쓴다(front마다 하나 두는 것보다 BRAM36 1개 적음). `swi_front`는 h1을 받는 동안 silu까지 계산해 buffer에 둔다(HP 포트 하나라 h1 명령 뒤에 h3 명령이 온다). `rsqrt_nr`의 rm은 17비트(초안 32비트; 전수 확인 rm <= 65535). `actq_core`의 `e_o`는 e + f를 SH_W 폭으로 낸다(초안 E_W: f가 8비트 signed 전체 범위면 넘친다).
+- RD_STALL(2026-11-23 수정): `vec_core.d_ready_o`는 beat pop이라 `d_valid_i`를 포함한다. `axi_rd_eng.stall_o`(busy && d_ready && !d_valid)는 그래서 항상 0이었고, `vec_core`에 `d_want_o`(busy && 남은 원소 && front/actq/argmax ready)를 추가해 `vec_top`이 `rd_busy && d_want && !d_valid`를 센다. 데이터와 cycle은 불변(`vec.md` 3절 주).
 - 호출: op RMSNORM, SWIGLU, ACTQ, ARGMAX(D10). descriptor 검사는 shift와 덧셈뿐이라 1 cycle(v = s + 1). runtime 곱셈기와 나눗셈기는 control에 없다(leaf 데이터패스의 곱만).
 - cycle: core `RMSNORM 4n + 87`, `SWIGLU 3n + 67`, `ACTQ 2n + 59`, `ARGMAX n + 1`. top CYCLES는 core + 1 + 쓰기 꼬리(보통 11 + max(L_last, 2), ARGMAX 13). token당 합(stall 없는 모델): 260K 약 15,680(RMSNORM 3,993, SWIGLU 3,005, ACTQ 8,155(85 호출), ARGMAX 527), 15M 약 85,741(16,321, 14,386, 23,019(114 호출), 32,015).
 
@@ -307,8 +308,8 @@ L3 top/CSR과 `pim_ctrl`, `kv_rd`의 runtime 곱셈(주소 계산, descriptor �
 |---|---|---|---|---|
 | `tb/sys_top/tb_sys_fwd.sv` | `sys_a_top` / `sys_p_top` (VAR 1: A2, PD; VAR 2: XB_REG 0) | `fpga/sys/sw` 시스템 프로그램(수정 없음)을 DPI-C context task로 실행, HAL `tb/sys_top/hal_dpi.c`가 `axil_bfm`의 exported task로 레지스터 접근 | HP 포트 4개의 `axi_mem_slave`(EXT_STORE 1)가 C cache 모사(`fpga/sys/test/hal_cache.c`)의 DDR 이미지 하나를 공유 | `sim/tests/sys_smoke.cfg`(S5-3), `sys_fwd.cfg`(S5-4) |
 
-- L4 top과 L3 IP는 S5-3/S5-4에서 수정하지 않았다. 판정과 시나리오는 `spec/system.md` 3.2절 "S5-3/S5-4 구현".
-- `axi_mem_slave`는 TB 공통 모듈이라 EXT_STORE 기본 0에서 기존 동작이 같음을 전체 회귀로 확인했다(465 run).
+- L4 top과 L3 IP는 S5-3/S5-4에서 수정하지 않았다. 그 뒤 2026-11-23에 시스템 stall run에서 발견한 vec RD_STALL 버그를 고쳤다(`vec_core` `d_want_o` 추가, `vec_top` RD_STALL 식, 3.11절). 판정과 시나리오는 `spec/system.md` 3.2절 "S5-3/S5-4 구현".
+- `axi_mem_slave`는 TB 공통 모듈이라 EXT_STORE 기본 0에서 기존 동작이 같음을 전체 회귀로 확인했다(S5-3 시점 465 run). S5-4와 RD_STALL 수정 뒤 최종 회귀는 `./sim/run.sh all` **491 run, fails 0**(2026-11-23, `sim/regression_all.log`).
 
 ## 4. golden에 경계가 없어 `model/`에 추가해야 하는 것
 

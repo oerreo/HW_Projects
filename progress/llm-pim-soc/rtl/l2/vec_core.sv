@@ -11,7 +11,10 @@
 // The unpacker (control of this level) takes the elements of a beat in lane order (esz 4: lanes
 // [31:0], [63:32]; esz 2: four 16-bit lanes, sign-extended) and pops the beat after its last lane
 // or after the last element of the command (the rest of a last beat is ignored). One element per
-// cycle at most.
+// cycle at most. d_ready_o is the pop of that beat and so includes d_valid_i (a beat is taken only
+// in the cycle of its last element); d_want_o = the core would take an element now if a beat were
+// there (busy, elements of the call left, the front / actq_core / argmax ready), independent of
+// d_valid_i: vec_top counts RD_STALL as read engine busy && d_want_o && !d_valid_i.
 // The front buffer (ram_sdp N_MAX x 32, read latency 1) is shared: rms_front keeps x in it,
 // swi_front keeps silu (the op selects whose port drives it).
 // Outputs: q stream (valid / ready, int16 container; RMSNORM / SWIGLU / ACTQ), scale m_o / e_o
@@ -44,6 +47,7 @@ module vec_core
   // read beats
   input  logic                   d_valid_i,
   output logic                   d_ready_o,
+  output logic                   d_want_o,  // wants an element (no d_valid_i term), RD_STALL
   input  logic [63:0]            d_data_i,
   input  logic                   d_last_i,
   // q stream
@@ -97,6 +101,7 @@ module vec_core
   assign e_take  = e_valid && e_ready;
   assign pop     = e_take && (e_last || lane_q == (e2 ? 2'd3 : 2'd1));
   assign d_ready_o = pop;
+  assign d_want_o  = busy_q && !ek_q && e_ready;
 
   always_ff @(posedge clk or negedge rst_n)
     if (!rst_n) begin

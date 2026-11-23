@@ -146,7 +146,7 @@ flowchart TD
 | 컨트롤러 MACAB 점유 합 | 4,108 | 4,072 + MACAB 36회 x 1 |
 | `pim_top` CYCLES, token 하나를 한 run(57 명령) | 4,499 ~ 4,506 (4,501 ~ 4,506) | 차이는 TB 무작위 y 주소(`pim.md` 7절). MACAB/WRGB 경로는 바뀌지 않음 |
 | 같은 것, layer마다 한 run(6 run) | 4,663 ~ 4,676 (4,658 ~ 4,676) | run 시작/종료 오버헤드가 run마다 붙음 |
-| 같은 것, 레코드마다 WRGB + MACAB 한 run(36 run) | 약 6,950 | S4-6b 뒤의 값은 `pim.md` 6.2에 같은 값으로 적혀 있음 |
+| 같은 것, 레코드마다 WRGB + MACAB 한 run(36 run) | 5,822 ~ 5,852 | stall 없는 run의 재측정(2026-11-23, `pim.md` 6.2). 이전 값 약 6,950은 random stall run(평균 6,974)의 값이었음 |
 | 초기 적재 LDW 36개 한 run | 36,629 (36,305) | 행 레코드 288,704 B, 초기화 1회. S4-6b: LDW마다 `LDW_CYC` 9 = +324 |
 | MAC 외 고정 항(token 한 run) | 432 / token (S4-5 값) | x 적재와 MACAB 1 cycle, 종료의 y 쓰기 꼬리 |
 | 가속기형 P = 1 (`gemv_acc_top`, 같은 260K, 같은 메모리 모델) | 37,903 ~ 37,938 (37,596) | `l3_gemv_acc_top.md` 5절 |

@@ -38,7 +38,7 @@
 | A2 (선택) | `sys_a_top` | A에서 `gemv_acc_top` P 2(HP0 + HP2) | 15M | D2(포트 수) 결정용. HP 대역폭 측정(`bwtest.md`)에서 포트 2개 동시 대역폭이 포트 하나의 1.5배 이상일 때만 만든다(9절 O12) |
 | 대안 PD | `sys_p_top` | P에서 attention을 KV_SRC 1(DDR), H_PAR 2로 | 260K | 빌드 P가 BRAM 한도를 넘을 때(1.6절)의 대체. PIM GEMV 측정은 그대로 얻고 "KV 상주" 전제만 잃는다 |
 
-- 권장 후보 C(260K 비교용 가속기형 GEMV)는 따로 만들지 않는다. 빌드 A의 IP가 260K를 그대로 받는다: `gemv_acc_top` NMAX 1024 >= 172, `attn_top` DDR 빌드는 HS_MAX 64 >= 8, TMAX 512 = 260K seq_len, KVMUL 2 지원, `vec_top` N_MAX 1024. A의 attention 구성(KV_SRC 1, HS_MAX 64, TMAX 512)은 `attn_top.cfg`의 `D2` 구성으로 이미 15M을 통과했고, 같은 구성에서 260K(hs 8)는 아직 돌려 보지 않았다(S5 시스템 TB에서 확인, 3.2절).
+- 권장 후보 C(260K 비교용 가속기형 GEMV)는 따로 만들지 않는다. 빌드 A의 IP가 260K를 그대로 받는다: `gemv_acc_top` NMAX 1024 >= 172, `attn_top` DDR 빌드는 HS_MAX 64 >= 8, TMAX 512 = 260K seq_len, KVMUL 2 지원, `vec_top` N_MAX 1024. A의 attention 구성(KV_SRC 1, HS_MAX 64, TMAX 512)은 `attn_top.cfg`의 `D2` 구성으로 이미 15M을 통과했고, 같은 구성의 260K(hs 8)는 S5-4 시스템 TB(`a_m1` 등, 3.2절)에서 실행했다.
 - GEMV 두 구조의 공정한 비교: 두 빌드 모두 mask = GEMV만(그 밖은 ARM)으로 260K를 돌리면 ARM 쪽 일이 같고 GEMV만 다르다. attention까지 켠 비교는 attention 구성(BRAM 대 DDR, H_PAR)이 섞이므로 따로 표시한다.
 - 병합안 PC(빌드 P에 `gemv_acc_top` P 1 추가, bitstream 1개로 비교)는 [계산] DSP 160/220, BRAM36 126~128.5/140이라 자원상 불가능하지 않으나, BRAM이 빡빡한 빌드에 IP와 HP 공유(read 채널 5개 > 포트 4개)를 더하는 위험에 비해 얻는 것(같은 bitstream)이 작아 권고하지 않는다(9절 O1).
 - 15M을 빌드 P에서 돌리면 PIM(DEPTH 4096 < 15M 행렬), attention(BRAM KV NKV 4, HS_MAX 8)은 쓸 수 없다. vec는 N_MAX 1024이면 15M의 RMSNORM, SWIGLU, ACTQ를 받는다. 실행기는 초기화 때 CONFIG 레지스터로 IP별 사용 가능 여부를 정한다(2.3절).
@@ -209,7 +209,7 @@ kernel 호출마다 `kcall_t`(kid, prm, 버퍼 포인터)를 받는다. 버퍼 �
 | RMSNORM, SWIGLU, ACTQ | mode = MANT, n <= N_MAX, SWIGLU `sig_bits` = 8, ACTQ qmax in {127, 2047, 32767} |
 | ARGMAX | n <= 2^IDX_W |
 
-**지연 실행과 barrier**: golden은 attention을 head마다, GEMV를 행렬마다 부른다. 그대로 IP를 부르면 (1) H_PAR 2 attention의 두 engine 중 하나만 일한다(op 하나가 head 하나면 engine `(h / KVMUL) mod H_PAR`이 하나뿐), (2) PIM은 레코드마다 run이라 token당 PL cycle이 약 6,950이다(token 한 run 4,499~4,506 [측정, 시뮬레이션]). 그래서 실행기가 호출을 모았다가 한 번에 낸다.
+**지연 실행과 barrier**: golden은 attention을 head마다, GEMV를 행렬마다 부른다. 그대로 IP를 부르면 (1) H_PAR 2 attention의 두 engine 중 하나만 일한다(op 하나가 head 하나면 engine `(h / KVMUL) mod H_PAR`이 하나뿐), (2) PIM은 레코드마다 run이라 token당 PL cycle이 5,822~5,852다(token 한 run 4,499~4,506 [측정, 시뮬레이션, latency 1, stall 없음]. 이전에 적은 약 6,950은 stall이 있는 run의 값이었다, 3.2절 끝). 그래서 실행기가 호출을 모았다가 한 번에 낸다.
 - `DEFER_AT`: ATTN(head j) 호출 때 `qh`, `qhs`를 q 레코드 j에 복사하고, j < nh - 1이면 IP를 부르지 않고 돌아온다. 마지막 head(또는 barrier)에서 ATTN op 하나(HEAD0 0, NHEAD nh)를 낸다. golden에서 그 사이의 호출은 다음 head의 ACTQ(q)뿐이고 이것은 `qr`를 읽고 `qh`에 쓴다. `att`와 `p`를 읽는 호출은 layer의 모든 head 뒤에 온다.
 - `PIM_BATCH`: x 포인터와 x 세대가 같은 연속 K_GEMV는 MACAB만 FIFO에 넣고 돌아온다(layer당 q/k/v, o, w1/w3, w2 묶음 4개 + cls = 260K 21 run [계산, s5calc 2]).
 - **barrier 규칙**: 미뤄 둔 일이 있을 때, 다음 호출이 미뤄 둔 묶음에 들어갈 수 있는 종류(ATTN 묶음에는 ACTQ(q head)와 ATTN, PIM 묶음에는 같은 x의 K_GEMV)가 아니면 먼저 미뤄 둔 것을 실행하고 완료를 기다린다. forward 끝(argmax 뒤)도 barrier다. 이 규칙은 "미뤄 둔 호출의 출력을 읽는 호출은 반드시 barrier를 거친다"를 보장하므로 forward 순서의 세부 지식에 기대지 않는다.
@@ -401,7 +401,7 @@ tb_sys_top (Questa)
 - 공유 메모리: `axi_mem_slave` parameter `EXT_STORE`(기본 0, 기존 동작 불변. 1이면 beat 읽기/쓰기와 backdoor가 DPI `axm_rd64/axm_wr64`로 C 메모리에 간다, 밖이면 tag `AXI_EXT`). C 메모리는 S5-1 cache 모사의 DDR 이미지(`fpga/sys/test/hal_cache.c`, `hal_host.c`에서 분리, 동작 불변)라 IP 쪽 일관성 검사(`ip_rd_dirty`, `ip_wr_dirty`)가 RTL의 beat마다 그대로 돈다. 주입: `inj_hang(r, b)`(R/B 응답 중지).
 - 설정: plusarg가 호스트 환경변수와 같은 이름(`+SX_LIST +SX_RUNS +SX_STEPS +SX_MODELS +SX_FAULT`, 15M 이미지 `+DDR_CK +DDR_TK`). 판정(`tb/sys_top/sys_tb.c`): 프로그램의 SYS 줄이 기대 빌드와 1.7절 slot 표의 ID/CONFIG(`+EXP_BUILD` A, A2, P, PD), CHECK 수 `+EXP_CHECKS`, 모든 CHECK의 tok_mis/hash_mis/kmis/coh 0, (주입 없으면) fb/iperr 0과 RESULT PASS, COH/SKIP/kernel_error 0, gemv_acc(P = 1)와 vec의 모든 op CYCLES == 닫힌 식(gemv_acc.md 5, vec.md 6.2, driver가 쓴 레지스터로 계산), arena 밖 beat 0. SV 쪽은 memory model의 프로토콜 tag 전부와 끝의 idle 검사.
 - IP 오류 주입(`+TB_IPFAULT=rdresp|wrresp|hang`, `+TB_IPFAULT_SLOT`, `+TB_IPFAULT_OP`): n번째 start에서 그 IP의 HP 포트 memory model이 모든 주소에 SLVERR(그 op가 끝날 때까지)이거나 응답을 멈춘다. [측정] 응답 오류에서 네 IP 모두 STATUS = 0x6(done과 err 동시), ERR = RD_RESP(gemv_acc 0x10, pim 0x20) 또는 WR_RESP(attn, vec 0x20)이고 출력 데이터는 맞았다(token, hash, K 비교 0).
-- 회귀: `sim/tests/sys_smoke.cfg`(S5-3, 2 run: 빌드 A/P, 260K 위치 0 mask ff, run P + K), `sim/tests/sys_fwd.cfg`(S5-4, 21 run, 아래 표). q tier는 smoke 2개와 `p_full`, `a_m1`, `a_err_rd`.
+- 회귀: `sim/tests/sys_smoke.cfg`(S5-3, 2 run: 빌드 A/P, 260K 위치 0 mask ff, run P + K), `sim/tests/sys_fwd.cfg`(S5-4, 24 run, 아래 표. memory stall run 3개는 S5-4 후속). q tier는 smoke 2개와 `p_full`, `a_m1`, `a_err_rd`.
 
 | run | 빌드 | 모델, 위치 | mask / opt / run | 확인 |
 |---|---|---|---|---|
@@ -421,8 +421,15 @@ tb_sys_top (Questa)
 | a_m2_warm | A | 15M 0..254 ARM, 255 | ff / W | |
 | a_err_rd, a_err_wr, a_err_hang | A | 260K 0..1 | ff / P | gemv_acc SLVERR 읽기, vec SLVERR 쓰기, attn 응답 없음(timeout) |
 | p_err_rd, p_err_wr, p_err_hang | P | 260K 0..1 | ff / P | pim SLVERR 읽기, attn SLVERR 쓰기, vec timeout |
+| p_stall | P (+PROF=2, MAXD 1) | 260K 0..1 (+ 초기화 LDW) | ff / P, K | HP 4개 모두 AR/AW/W/R/B 50% stall, R latency 1~60, B 1~40 |
+| a_stall | A (+PROF=3) | 260K 0..1 | ff / P, K | 포트마다 다름: HP0 20%/R 1~30/B 1~20, HP1 50%/1~60/1~40, HP2 30%/5~40/1~10, HP3 10%/1~80/1~60 |
+| a_m2_stall | A (+PROF=1) | 15M 0 | ff / P | HP 4개 모두 20% stall, R latency 1~30, B 1~20 |
 
-- CYCLES [측정, 시뮬레이션, latency 1 메모리, stall 없음] token당(위치 평균): 빌드 P 260K 위치 0..3: vec 15,680(RMSNORM 3,993, SWIGLU 3,005, ACTQ 8,155, ARGMAX 527, 4.4절과 같음), PIM 레코드마다 run(WRGB 생략) 5,681, WRGB 생략 끔 5,846, PIM_BATCH 5,156(2 위치), attention BRAM H_PAR 2 + KVW 2,140, 합 23,501(RUN ticks 31,688 = AXI-Lite 포함). 빌드 A 260K: gemv_acc 37,930(4.4절 37,903~37,938 안), DDR attention hs 8 4,115(T 1..4, 이 구성의 첫 측정), 합 57,198(ticks 63,819). 빌드 A 15M 위치 0..3: gemv_acc 1,952,048(그중 cls 1,184,072/호출), vec 53,731, DDR attention 6,756, 합 2,012,535(ticks 2,021,290). 15M 위치 255(warm, 1 위치): ticks 2,209,722(위 4.4절 예상 약 220만). 4.4절 "레코드마다 run 약 6,950"은 시스템 TB 측정 5,846(WRGB 매번)과 다르다(원인 미확인: pim_top TB가 push 검사 중에 RUN했을 가능성 [추정]).
+- memory stall run(`+PROF` != 0, `tb_sys_fwd.sv` 머리 주석): `axi_mem_slave`의 기존 `cfg_stall`/`cfg_lat`(다른 IP TB의 PROF 1/2와 같은 값)을 HP 포트 4개에 건다. `EXT_STORE`와 같이 동작한다(beat를 내보내거나 받는 시점에 C 메모리를 읽고 쓰므로 stall과 latency는 시점만 바꾼다). 판정은 위 기준과 같고 CYCLES만 다르다: 닫힌 식은 latency 1, stall 없음 전제라 하한으로 쓰고(`CYC_LOW` 0), 모든 op에서 RD_STALL, WR_STALL <= CYCLES(`ST_BAD` 0, 이 검사는 PROF 0 run에도 적용). memory model은 끝에 `AXI_MEM_STALL`(채널별로 stall이 실제로 요청이나 beat를 막은 cycle 수, 뽑힌 R latency 평균), C 쪽은 `SYSTB STALL`(slot별 CYCLES, RD_STALL, WR_STALL, 식 대비 초과 합)을 찍는다.
+- 결과 [측정, 시뮬레이션, TB의 random memory model이라 보드 값이 아님]: 세 run 모두 token, logits hash, K 비교, COH, fallback, IPERR, AXI 프로토콜 검사 0, `CYC_LOW` 0, `ST_BAD` 0. RUN ticks(AXI-Lite 포함) token당: p_stall 43,613(stall 없는 p_full 31,688), a_stall 85,953(a_m1 63,819), a_m2_stall 위치 0 2,514,750(a_m2 위치 0..3 평균 2,021,290). stall 증거: p_stall HP0(pim) R beat가 stall로 막힌 cycle 37,069, pim RD_STALL 합 39,860(LDW 포함 74 op); a_m2_stall HP0(gemv_acc) R 487,420, gemv_acc RD_STALL 488,213, CYCLES가 닫힌 식보다 488,598 많음.
+- 발견과 수정(2026-11-23): `vec_top`의 RD_STALL이 구조상 항상 0이었다. `axi_rd_eng.stall_o = busy && d_ready && !d_valid`를 셌는데 `vec_core`의 `d_ready_o`는 beat pop이라 `d_valid_i`를 포함해 d_ready와 !d_valid가 함께 참일 수 없었다(수정 전 stall run의 vec RD_STALL 전부 0, HP3 R stall 8,493 cycle). `tb_vec_top`의 참조 모델이 DUT 내부 event를 그대로 세어 놓쳤다. 수정: `vec_core`에 `d_want_o`(원소를 원함, `d_valid` 무관)를 추가하고 `vec_top`이 `rd_busy && d_want && !d_valid`를 센다(`d_ready_o`를 valid와 무관하게 바꾸면 unpacker의 lane 동작과 cycle이 바뀌어 택하지 않음, vec.md 3절 주). 데이터와 CYCLES는 불변(CYC_MIS 0 유지). 수정 후 [측정, 시뮬레이션]: stall 없는 run에서 vec RD_STALL = op당 4(p_full 408 op 1,632, a_m1 404 op 1,616, a_m2 532 op 2,128), stall run의 vec RD_STALL 합 p_stall 7,381(204 op, HP3 R stall 8,493), a_stall 9,021(202 op, 844), a_m2_stall 2,662(133 op, 2,742). `sys_tb.c`가 PROF != 0에서 "HP3 R stall > 0이면 vec RD_STALL 합 > 0"(`VE_RDST`)을 검사하고, 수정 전 RTL로 세 stall run이 모두 이 검사로 FAIL함을 확인했다. vec WR_STALL은 모든 시스템 run에서 0이며 구조상 정상이다(vec.md 3절 주: packer가 1 beat/4~8 cycle이라 32 beat write buffer가 차지 않음; W를 길게 막는 `tb_vec_top` WBLK run에서는 > 0). 다른 IP의 stall 계수는 core ready가 상태로만 정해져(valid 무관) 같은 문제가 없다: stall run에서 gemv_acc RD_STALL 20,020(a_stall)/488,213(a_m2_stall), pim 39,860(p_stall), attn 39/5,314/1,007.
+
+- CYCLES [측정, 시뮬레이션, latency 1 메모리, stall 없음] token당(위치 평균): 빌드 P 260K 위치 0..3: vec 15,680(RMSNORM 3,993, SWIGLU 3,005, ACTQ 8,155, ARGMAX 527, 4.4절과 같음), PIM 레코드마다 run(WRGB 생략) 5,681, WRGB 생략 끔 5,846, PIM_BATCH 5,156(2 위치), attention BRAM H_PAR 2 + KVW 2,140, 합 23,501(RUN ticks 31,688 = AXI-Lite 포함). 빌드 A 260K: gemv_acc 37,930(4.4절 37,903~37,938 안), DDR attention hs 8 4,115(T 1..4, 이 구성의 첫 측정), 합 57,198(ticks 63,819). 빌드 A 15M 위치 0..3: gemv_acc 1,952,048(그중 cls 1,184,072/호출), vec 53,731, DDR attention 6,756, 합 2,012,535(ticks 2,021,290). 15M 위치 255(warm, 1 위치): ticks 2,209,722(위 4.4절 예상 약 220만). 이전 4.4절의 "레코드마다 run 약 6,950"과 시스템 TB 5,846(WRGB 매번)의 차이는 측정 조건 차이다(S5-4 확인): 그 값은 `pim_top` TB의 run `m1_perrec`(`sim/tests/pim_top.cfg`, `+MODE=2 +PROF=1 +MAXD=1`)에서 나왔고, PROF 1은 memory model의 AR/AW/W/R/B 20% random stall, R latency 1~30, B latency 1~20이다(12 위치 6,878~7,096, 평균 6,974; 같은 run의 LDW도 46,251로 stall 없는 36,629보다 크다). 명령 구성(레코드마다 WRGB + MACAB 한 run, 36 run)과 RUN 시점(push 검사가 끝난 뒤)은 시스템 TB와 같다. 같은 TB를 `+PROF=0 +MAXD=0 +MODE=2`로 다시 돌리면 위치 0..3이 5,822 / 5,845 / 5,852 / 5,837 [측정, 시뮬레이션]이고 LDW 36,629로 시스템 TB와 같은 범위다. 남는 수십 cycle 차는 `pim_top` TB가 x와 y 주소를 run마다 random으로 두어 burst 분할(16 beat, 4 KiB)이 달라지는 것으로 본다 [추정, 레코드별 대조 안 함]. 4.4절 표와 s5calc를 고쳤다.
 - 호스트 IP 모델 CYCLES 대 RTL(같은 프로그램, 같은 설정의 op별 trace, `tb/sys_top/cyc_cmp.py`): gemv_acc P = 1, vec 4종, KVW는 모든 op 일치. 추정인 것: PIM run(LDW, WRGB, MACAB 목록) RTL이 +0.02~+0.35%(run당 최대 +7), attention BRAM 묶음 op +0.26%(op마다 +1), head 하나씩(DEFER_AT 0) -5.8%(op당 최대 -19), DDR attention 260K -4.7~-4.9%(op당 최대 -46), 15M -2.6%(최대 -30), gemv_acc P = 2는 짝수 ROWS에서 op마다 +1(gemv_acc.md 5절 6번 규칙. S5-4에서 호스트 모델에 반영해 일치).
 - 실행기 수정(S5-4): IP timeout으로 IP를 끄면 드라이버가 D-cache 전체를 clean + invalidate한다(`drv_com.c`). 그 전에는 "소비자가 IP라 invalidate하지 않은" 버퍼(예: vec이 쓴 K/V slot)를 ARM 대체 실행이 cache의 옛 값으로 읽거나(`arm_rd_stale`, 빌드 A에서 logits hash 불일치) 그 line을 덮어 썼다(`flush_clobber`). 생산자 규칙으로 ARM이 쓴 line은 모두 clean이라 이 flush는 쓰기를 만들지 않는다.
 
@@ -477,13 +484,13 @@ measure.md 6절의 식을 그대로 쓰고, mask 집합 O에 대해:
 |---|---|---|---|---|---|
 | 260K | PIM GEMV, token 한 run | 4,499 ~ 4,506 | 45.0 ~ 45.1 | | |
 | 260K | PIM GEMV, layer마다 run | 4,663 ~ 4,676 | 46.6 ~ 46.8 | | |
-| 260K | PIM GEMV, 레코드마다 run(호출 단위, 묶음 없음) | 약 6,950 | 약 69.5 | | |
+| 260K | PIM GEMV, 레코드마다 run(호출 단위, 묶음 없음, WRGB 매번) | 5,822 ~ 5,852 | 58.2 ~ 58.5 | | |
 | 260K | 가속기형 GEMV P 1 / P 2 | 37,903 ~ 37,938 / 19,895 ~ 19,930 | 379.0 ~ 379.4 / 198.9 ~ 199.3 | | |
 | 260K | attention BRAM KV H_PAR 2 + KVW, T 1 / 64 / 256 / 512 | 2,050 / 5,830 / 17,350 / 32,710 | 20.5 / 58.3 / 173.5 / 327.1 | | |
 | 260K | 같은 것, 위치 0..511 평균 | 17,380 | 173.8 | | |
 | 260K | attention DDR KV(빌드 A) | 미측정(구성은 시스템 TB에서 처음 실행) | - | | |
 | 260K | vec 전부(RMSNORM 3,993, SWIGLU 3,005, ACTQ 8,155, ARGMAX 527) | 15,680 | 156.8 | | |
-| 260K | **빌드 P 전부, 위치 평균** | 37,559 ~ 40,010 | **375.6 ~ 400.1** | | |
+| 260K | **빌드 P 전부, 위치 평균** | 37,559 ~ 38,912 | **375.6 ~ 389.1** | | |
 | 15M | 가속기형 GEMV P 1 (cls 포함, 1 위치) | 1,951,992 | 19,519.9 | | |
 | 15M | 그중 cls (y_en, argmax_en) | 1,184,069 ~ 1,184,077 | 11,840.7 ~ 11,840.8 | | |
 | 15M | attention DDR H_PAR 1, T 1 / 128 / 256 | 5,622 / 101,634 / 198,403 | 56.2 / 1,016.3 / 1,984.0 | | |
@@ -514,10 +521,8 @@ v1은 kernel 경계를 DDR 버퍼로 둔다(D11). 아래는 S6 측정(특히 호
 ## 6. 확인하지 못한 것
 - 보드 수치 전부: ARM baseline, HP 대역폭과 latency, 호출 비용(AXI-Lite 왕복, polling), cache 유지 비용, 100 MHz timing, LUT 수.
 - Vivado가 144비트와 210비트 `ram_sdp`에 512 x 72의 parity 비트를 데이터로 매핑하는지(빌드 P의 BRAM 성립 조건).
-- (S5-3에서 확인, 3.2절) Questa에서 DPI imported context task가 시간 소비 exported task를 부르는 구성.
-- 빌드 A 구성(KV_SRC 1, HS_MAX 64, TMAX 512)에서 260K(hs 8) attention, `vec_top` N_MAX 256(O7) 구성은 아직 시뮬레이션하지 않았다.
+- `vec_top` N_MAX 256(O7) 구성은 아직 시뮬레이션하지 않았다.
 - HP DDR segment 범위, HP0/HP1과 HP2/HP3의 DDR 포트 공유, AXI4 -> AXI3 변환, `Xil_DCacheInvalidateRange`의 부분 line 처리, cache line 크기와 `dsb` 포함 여부, SLCR PL reset 주소(모두 Xilinx 문서를 이 작업에서 열지 않음).
-- (S5-4에서 측정, 3.2절) attention DDR KV를 260K에 쓸 때의 token cycle. 빌드 A 구성(KV_SRC 1, HS_MAX 64, TMAX 512)의 260K는 시스템 TB에서 실행했다.
 - `vt` job bimg의 행렬 순서(bank base 배정을 같게 맞출 수 있는지).
 
 ## 7. 제안 하위 단계 (plan.md S5-1 ~ S5-6과 같음)

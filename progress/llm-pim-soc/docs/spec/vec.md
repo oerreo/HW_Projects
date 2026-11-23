@@ -51,8 +51,8 @@
 | 0x0C | STATUS | R | 0 | bit0 busy(검사 중 또는 op 중), bit1 done_sticky, bit2 err_any |
 | 0x10 | ERR | R/W1C | 0 | bit0 START_BUSY, bit1 BAD_OP, bit2 BAD_DESC, bit3 MISALIGN, bit4 RD_RESP, bit5 WR_RESP |
 | 0x14 | CYCLES | R | 0 | 마지막으로 수락된 호출의 cycle 수(e - s, 검사 1 cycle 포함. 검사에서 거절되면 1) |
-| 0x18 | RD_STALL | R | 0 | 같은 구간에서 `axi_rd_eng.stall_o`(core가 read 데이터를 기다림)인 cycle 수 |
-| 0x1C | WR_STALL | R | 0 | 같은 구간에서 packer의 beat를 `axi_wr_eng`가 받지 못한 cycle 수 |
+| 0x18 | RD_STALL | R | 0 | 같은 구간에서 core가 read 데이터를 기다린 cycle 수: read engine busy이고 `vec_core.d_want_o` = 1(원소를 받을 수 있고 원함, `d_valid` 무관)인데 beat가 없음(`d_valid` = 0). stall 없는 메모리(latency 1)에서는 모든 op에서 **4**(read 시작 지연: 명령 handshake s + 2, engine busy s + 3, ARVALID s + 4, 첫 R s + 6, 첫 beat가 core에 s + 7. stall cycle s + 3..s + 6) [측정, 아래 주] |
+| 0x1C | WR_STALL | R | 0 | 같은 구간에서 packer의 beat를 `axi_wr_eng`가 받지 못한 cycle 수(`axi_wr_eng.stall_o` = in_valid && !in_ready, write buffer full). stall 없는 메모리에서 0 |
 | 0x20 | OPS | R | 0 | reset 이후 끝난 op 수, 2^32 wrap |
 | 0x24 | ARGMAX_IDX | R | 0 | [IDX_W-1:0] 마지막 ARGMAX 호출의 index |
 | 0x28 | ARGMAX_VAL | R | 0 | 그 최댓값(int32) |
@@ -67,6 +67,9 @@
 
 - 정의되지 않은 주소는 0을 읽고 쓰기는 무시한다. 주소 bit[1:0]과 WSTRB는 무시한다. 응답은 항상 OKAY(`axil_slave`). 같은 cycle의 읽기는 쓰기 전 값을 본다(`attn.md`, `gemv_acc.md`와 같은 규칙). descriptor 레지스터는 필드 비트만 저장한다.
 - golden의 `fx`(K_RMSNORM prm)는 golden이 쓰지 않으므로(`epsc`에 접힘) 레지스터가 없다. SWIGLU의 출력 지수 오프셋은 K_FX = 16 고정이다. mode POW2와 sb != 8은 BAD_DESC다(K12V8 형식, MANT만).
+
+- RD_STALL 주(2026-11-23 수정): 처음에는 `axi_rd_eng.stall_o`(= busy && d_ready && !d_valid)를 셌으나 `vec_core`의 `d_ready_o`는 beat의 pop(마지막 lane의 원소를 받는 cycle)이라 `d_valid_i`를 포함해 이 식이 구조상 항상 0이었다. `d_ready_o`를 valid와 무관하게 바꾸는 것은 불가능했다: unpacker는 beat 하나에서 원소를 lane 순서로 1개/cycle 꺼내고 마지막 lane에서만 pop하므로, beat를 기다리는 cycle(lane 0)에 ready = 1로 두면 beat가 오는 cycle에 바로 pop되어 동작(cycle 수)이 바뀐다. 그래서 `vec_core`에 `d_want_o = busy && 남은 원소 있음 && (front/actq_core/argmax가 원소를 받을 수 있음)`을 추가하고 `vec_top`이 `rd_busy && d_want && !d_valid`를 센다. 출력 데이터와 CYCLES는 바뀌지 않았다(6.2 모델 불일치 0 유지).
+- WR_STALL이 시스템 stall run(system.md 3.2)에서 0인 이유: packer는 최대 1 beat/4 cycle(int16, int8은 1 beat/8 cycle)로 beat를 내고, write buffer는 32 beat다. buffer가 차려면 W 채널이 대략 128 cycle 이상 연속으로 막혀야 하는데, 시스템 TB의 stall profile(cycle마다 독립인 W stall 10~50 %, B latency 최대 60, outstanding 4)에서는 그런 구간이 사실상 나오지 않는다 [분석; 측정: 시스템 stall run 3개와 `tb_vec_top`의 MSTALL-only run에서 WR_STALL 0]. W를 100..1000 cycle 막는 `tb_vec_top`의 WBLK run에서는 WR_STALL > 0이다(아래 7절).
 
 ## 4. 실행 규칙
 
@@ -180,9 +183,9 @@ s = CTRL 쓰기 cycle, D = s + 1 + C(6.1의 core 식, core는 s + 1에 시작).
 | `actq_core` | 두 모델 K_ACTQ 레코드 전부(1,704 호출), 합성(n 1..N_MAX, qmax 127/2047/32767, f random, amax 0, 1, 2^31 - 1, 2^31, 같은 크기, 포화), q, scale, stage(amax, L, e, num, M, R), cycle 식, 입력 gap, q_ready stall, 긴 q_ready 차단(q FIFO full과 credit 정지 도달 요구), done cycle의 start, N_MAX 64/Q_DEPTH 5, Q_DEPTH 4 elaboration 실패 | 8 |
 | `rms_front` | + buffer + `actq_core`. 두 모델 K_RMSNORM 레코드 전부(210 호출), 합성(n 1..N_MAX, k 0..17, x 0/-2^31/2^31 - 1, g 극값, ge/epsc/fy random), stage(amax, k, ss, u, rm, re, sh), y, q, scale, actq M/R/e, cycle 식, 원소 gap, q 차단(FIFO full 요구), N_MAX 64 | 6 |
 | `swi_front` | + buffer + `actq_core`. 두 모델 K_SWIGLU 레코드 전부(96 호출, LUT == `k_sig_lut(8)` 확인), 합성(sigmoid 포화, h1/h3 = -2^31, 2^31 - 1로 62비트 clamp 구간), buffer의 silu(white-box, `kd_sigmoid`/`kd_rshr`), g, q, scale, actq M/R/e, cycle 식, gap, 차단, N_MAX 64 | 6 |
-| `vec_core` | TB가 read engine 역할. 네 kernel 레코드 전부(두 모델, op를 번갈아), 합성(ARGMAX n 65,536과 tie 포함), q, scale, argmax index와 값, op별 cycle 식, beat gap, q 차단(FIFO full 요구), done cycle의 start, N_MAX 64/IDX_W 8/Q_DEPTH 5, IDX_W 9 elaboration 실패 | 8 |
+| `vec_core` | TB가 read engine 역할. 네 kernel 레코드 전부(두 모델, op를 번갈아), 합성(ARGMAX n 65,536과 tie 포함), q, scale, argmax index와 값, op별 cycle 식, `d_want_o` lane 모델(beat가 있는 cycle에 want = 원소 하나를 받음, pop은 마지막 lane 또는 마지막 원소, GAP run에서 beat 없이 want인 cycle 요구, 2026-11-23 추가), beat gap, q 차단(FIFO full 요구), done cycle의 start, N_MAX 64/IDX_W 8/Q_DEPTH 5, IDX_W 9 elaboration 실패 | 8 |
 | `vec_csr` | 단독. spec 참조 모델과 매 cycle 대조(임의 주소 읽기 값, start_o, busy_o, latch된 출력, 내부 상태). 방향성: op마다 정상, BAD_DESC 이유 하나씩(첫 오류 값과 마지막 정상 값), 범위 끝이 정확히 2^32(수락)와 + 8(거절), 쓰지 않는 필드/주소(오류 없음), MISALIGN 각각, BAD_DESC + MISALIGN, BAD_OP, 판정 cycle과 op 중의 START_BUSY, done cycle의 CTRL(start 1/0), 판정 cycle의 descriptor 쓰기, W1C와 set 충돌. 이어서 random 3 x 10^5 ~ 2 x 10^6 cycle. N_MAX 64/IDX_W 8, N_MAX 1000/IDX_W 10, IDX_W 9 elaboration 실패. 요구에서 뺀 것: SCL 범위 단독(정렬된 SCL은 끝이 2^32를 넘을 수 없어 MISALIGN과 함께만 남) | 6 |
-| `vec_top` | AXI-Lite BFM + memory model. 두 모델 forward 순서 전 레코드(260K 1,224 호출, 15M 804 호출), 합성 1,500, q/scale/idx 메모리와 ARGMAX 레지스터, guard 16 B, 매 cycle CSR 참조 모델(독립 descriptor 검사), CYCLES == 6.2 모델, ERR 원인별과 복구(BAD_OP, BAD_DESC 이유별, MISALIGN, 둘 다, START_BUSY, SLVERR/DECERR 읽기와 쓰기), random 레지스터 traffic, memory stall, 긴 write 차단(write buffer full, packer 대기, q FIFO full 요구), MAX_BURST 8/OUTS 2/Q_DEPTH 5, N_MAX 64/IDX_W 8 | 12 |
+| `vec_top` | AXI-Lite BFM + memory model. 두 모델 forward 순서 전 레코드(260K 1,224 호출, 15M 804 호출), 합성 1,500, q/scale/idx 메모리와 ARGMAX 레지스터, guard 16 B, 매 cycle CSR 참조 모델(독립 descriptor 검사), CYCLES == 6.2 모델, 호출마다 RD_STALL/WR_STALL <= CYCLES, `CYC=1` run에서 RD_STALL == 4와 WR_STALL == 0, MSTALL run에서 RD_STALL 합 > 0, WBLK run에서 WR_STALL 합 > 0(2026-11-23 추가), ERR 원인별과 복구(BAD_OP, BAD_DESC 이유별, MISALIGN, 둘 다, START_BUSY, SLVERR/DECERR 읽기와 쓰기), random 레지스터 traffic, memory stall, 긴 write 차단(write buffer full, packer 대기, q FIFO full 요구), MAX_BURST 8/OUTS 2/Q_DEPTH 5, N_MAX 64/IDX_W 8 | 12 |
 
 - quick tier: 각 test의 `q_` run(축소판: 15M은 1 위치).
 - 회귀: `./sim/run.sh all` **424 run, fails 0**(기존 368 + `lut_lerp` SIGM 4 + 신규 52, `sim/regression_all.log`, wall 1,553 s).

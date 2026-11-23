@@ -8,7 +8,9 @@
 // kernels are taken round-robin (rmsnorm, actq, swiglu, actq, argmax ...) so that consecutive calls
 // change the op; +NSYN synthetic calls of a random op (n 1..N_MAX, ARGMAX up to +AMAXN, ties).
 // Checks: every q (in order) and the scale {m, e} at done, ARGMAX index and value, done once per
-// call, busy_o; +CYC=1 (no gaps, no stalls): start-to-done == the op formula (docs/spec/vec.md 6):
+// call, busy_o; d_want_o against a lane model (in a beat cycle d_want_o = an element is taken, the
+// pop d_ready_o after the beat's last lane or the array's last element; d_ready_o only with
+// d_want_o and d_valid_i; +GAP runs must see d_want_o without a beat); +CYC=1 (no gaps, no stalls): start-to-done == the op formula (docs/spec/vec.md 6):
 // RMSNORM 4n + 87 (ymax 0: 4n + 34), SWIGLU 3n + 67 (3n + 14), ACTQ 2n + 59 (2n + 6), ARGMAX n + 1.
 // Stimulus: beat gaps (+GAP), q_ready stalls (+QSTALL), +QBLK long q_ready blocks (q FIFO full
 // required), start in the done cycle of the previous call (+B2B). Watchdog TB_TIMEOUT.
@@ -27,7 +29,7 @@ module tb_vec_core;
   logic clk = 1'b0, rst_n = 1'b0;
   always #5 clk = ~clk;
 
-  logic                   start_i = 1'b0, d_valid_i = 1'b0, d_ready_o, d_last_i = 1'b0;
+  logic                   start_i = 1'b0, d_valid_i = 1'b0, d_ready_o, d_want_o, d_last_i = 1'b0;
   logic [1:0]             op_i = '0;
   logic [NV_W-1:0]        n_i = '0;
   logic signed [E_W-1:0]  f_i = '0, ge_i = '0;
@@ -42,12 +44,13 @@ module tb_vec_core;
   logic signed [31:0]     am_max_o;
 
   vec_core #(.N_MAX(N_MAX), .IDX_W(IDX_W), .Q_DEPTH(Q_DEPTH)) dut (
-    .clk, .rst_n, .start_i, .op_i, .n_i, .f_i, .qmax_i, .ge_i, .epsc_i, .d_valid_i, .d_ready_o,
+    .clk, .rst_n, .start_i, .op_i, .n_i, .f_i, .qmax_i, .ge_i, .epsc_i, .d_valid_i, .d_ready_o, .d_want_o,
     .d_data_i, .d_last_i, .q_valid_o, .q_ready_i, .q_o, .m_o, .e_o, .scl_valid_o, .am_idx_o,
     .am_max_o, .busy_o, .done_o);
 
   tb_checker c_q = new("q"), c_s = new("scale"), c_am = new("argmax"), c_hs = new("handshake"),
-             c_cyc = new("cycles"), c_rec = new("record"), c_cov = new("coverage");
+             c_cyc = new("cycles"), c_rec = new("record"), c_cov = new("coverage"),
+             c_want = new("want");
 
   function automatic int opof(vcase c);
     return c.kid == K_RMSNORM ? 0 : c.kid == K_SWIGLU ? 1 : c.kid == K_ACTQ ? 2 : 3;
@@ -131,9 +134,20 @@ module tb_vec_core;
   end
 
   // ---------------- driver ----------------
-  // beats of one array: esz 4 (two per beat) or 2 (four per beat), random bytes after the end
+  // beats of one array: esz 4 (two per beat) or 2 (four per beat), random bytes after the end.
+  // d_want_o model: in a cycle with a beat, d_want_o = 1 means the core takes the beat's next
+  // element (lane); the beat is popped (d_ready_o) exactly when that element is the beat's last
+  // lane or the array's last element; with d_want_o = 0 nothing is taken and no pop.
+  longint n_wgap = 0;   // cycles busy && d_want_o && !d_valid_i (the core waits for a beat)
+  always @(negedge clk)
+    if (rst_n) begin
+      if (busy_o === 1'b1 && d_want_o === 1'b1 && d_valid_i === 1'b0) n_wgap++;
+      if (d_ready_o === 1'b1 && (d_want_o !== 1'b1 || d_valid_i !== 1'b1))
+        c_want.fail($sformatf("d_ready_o with d_want_o %b d_valid_i %b", d_want_o, d_valid_i));
+    end
   task automatic send(int a[], int esz);
-    int n = a.size(), per = 8 / esz, nb = (n + per - 1) / per;
+    int n = a.size(), per = 8 / esz, nb = (n + per - 1) / per, lane = 0;
+    bit xpop;
     for (int b = 0; b < nb; ) begin
       logic [63:0] w = {$urandom(), $urandom()};
       for (int l = 0; l < per && b * per + l < n; l++)
@@ -149,7 +163,16 @@ module tb_vec_core;
       d_data_i  <= w;
       d_last_i  <= b == nb - 1;
       @(negedge clk);
-      if (d_ready_o === 1'b1) b++;
+      xpop = 1'b0;
+      if (d_want_o === 1'b1) begin
+        xpop = lane == per - 1 || b * per + lane == n - 1;
+        lane++;
+      end
+      if (d_ready_o !== xpop)
+        c_want.fail($sformatf("beat %0d lane %0d of %0d (n %0d): d_ready_o %b d_want_o %b, model pop %b",
+                              b, lane, per, n, d_ready_o, d_want_o, xpop));
+      else c_want.pass();
+      if (d_ready_o === 1'b1) begin b++; lane = 0; end
       @(posedge clk);
     end
     d_valid_i <= 1'b0;
@@ -247,11 +270,15 @@ module tb_vec_core;
     end
     while (cq.size() > 0) @(posedge clk);
     repeat (10) @(posedge clk);
-    $display("tb_vec_core: %0d records, %0d synthetic, %0d calls (rms %0d swi %0d actq %0d argmax %0d), %0d back-to-back, q FIFO full %0d cycles",
-             nrec, nsyn, n_calls, ncall_op[0], ncall_op[1], ncall_op[2], ncall_op[3], n_b2b, n_full);
+    $display("tb_vec_core: %0d records, %0d synthetic, %0d calls (rms %0d swi %0d actq %0d argmax %0d), %0d back-to-back, q FIFO full %0d cycles, want without beat %0d cycles",
+             nrec, nsyn, n_calls, ncall_op[0], ncall_op[1], ncall_op[2], ncall_op[3], n_b2b, n_full, n_wgap);
     if (n_calls != nrec + nsyn) c_hs.fail($sformatf("%0d calls done of %0d", n_calls, nrec + nsyn));
     begin
-      automatic tb_checker_q l = '{c_q, c_s, c_am, c_hs};
+      automatic tb_checker_q l = '{c_q, c_s, c_am, c_hs, c_want};
+      // beat gaps must show cycles in which the core wants an element and has no beat (RD_STALL)
+      if (gap > 0) begin
+        if (n_wgap > 0) c_want.pass(); else c_want.fail("GAP run: d_want_o never 1 without a beat");
+      end
       if (nrec > 0) l.push_back(c_rec);
       if (chk_cyc) l.push_back(c_cyc);
       if (qblk) begin

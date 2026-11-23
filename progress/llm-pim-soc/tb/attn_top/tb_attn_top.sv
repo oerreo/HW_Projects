@@ -22,6 +22,8 @@
 // +RND=1: random register traffic (writes to every register, reads) between ops.
 // +MSTALL: memory stalls and latency; +WBLK=1: long write-channel blocks (WREADY 0 for 100..1200
 // cycles): the write buffer, the packer and a core's output credit must be held (coverage).
+// Stall counters: +MSTALL runs must count RD_STALL > 0 and +WBLK runs WR_STALL > 0 (sums over the
+// run), so that a counter whose event can never be true is not hidden by the per-cycle CSR model.
 // Plusargs: +SEED +VEC +NH +NKV +SEQ +MAXGRP +MAXPOS +MSTALL +WBLK +ERR +RND +MAXD.
 `timescale 1ns / 1ps
 module tb_attn_top;
@@ -121,7 +123,7 @@ module tb_attn_top;
 
   tb_checker c_o = new("o"), c_p = new("p"), c_guard = new("guard"), c_err = new("err"),
              c_csr = new("csr_model"), c_rd = new("csr_read"), c_cov = new("coverage"),
-             c_rec = new("record");
+             c_rec = new("record"), c_stl = new("stall_count");
 
   // ---------------- memory helpers ----------------
   function automatic void rmem_w64(longint unsigned a, logic [63:0] d);
@@ -193,6 +195,9 @@ module tb_attn_top;
   localparam int W_HS = $clog2(9), W_KV = (NKV > 1) ? $clog2(NKV) : 1;
   localparam int CHK  = KV_SRC ? 18 : ((W_KV + W_HS + 2 > 10) ? W_KV + W_HS + 2 : 10);
   longint unsigned m_cyc = 0, m_rdst = 0, m_wrst = 0, m_ops = 0;
+  // RD_STALL / WR_STALL cycles of all ops (the counters the CSR model checks every cycle): a
+  // counter that never moves is caught by the stall-run requirements at the end
+  longint n_rdst = 0, n_wrst = 0;
   logic [31:0] m_rd_exp;
   bit    m_rd_pend = 0;
 
@@ -313,8 +318,8 @@ module tb_attn_top;
       if (acc) begin m_cyc = 0; m_rdst = 0; m_wrst = 0; end
       else if (was_busy) begin
         m_cyc++;
-        if (dut.rd_stall_ev) m_rdst++;
-        if (dut.wr_stall_ev) m_wrst++;
+        if (dut.rd_stall_ev) begin m_rdst++; n_rdst++; end
+        if (dut.wr_stall_ev) begin m_wrst++; n_wrst++; end
       end
       if (done) m_ops++;
       if (wr_hit)
@@ -707,6 +712,14 @@ module tb_attn_top;
              ngrp, n_ops, n_starts, n_wfull, n_pkhold, n_credit, n_pkv, n_blk);
     if (kvw_n > 0) $display("tb_attn_top: KVW ops %0d, CYCLES sum %0d (%0d heads each)", kvw_n, kvw_cyc, nkv);
     foreach (tok_cyc[T]) $display("tb_attn_top: ATTN CYCLES sum over layers at T %0d: %0d", T, tok_cyc[T]);
+    $display("tb_attn_top: RD_STALL sum %0d, WR_STALL sum %0d", n_rdst, n_wrst);
+    // memory stalls: some core must wait for a KV beat (RD_STALL); write blocks: WR_STALL
+    if (mstall) begin
+      if (n_rdst > 0) c_stl.pass(); else c_stl.fail("memory stall run: RD_STALL 0 in every op");
+    end
+    if (wblk) begin
+      if (n_wrst > 0) c_stl.pass(); else c_stl.fail("write block run: WR_STALL 0 in every op");
+    end
     if (wblk) begin
       if (n_wfull > 0 && n_pkhold > 0 && n_credit > 0) c_cov.pass();
       else c_cov.fail($sformatf("blocks did not reach the limits: wfull %0d pk %0d credit %0d", n_wfull, n_pkhold, n_credit));
@@ -720,6 +733,7 @@ module tb_attn_top;
       automatic tb_checker_q l = '{c_o, c_guard, c_err, c_csr, c_rd, c_rec};
       if (c_p.n_checks > 0) l.push_back(c_p);
       if (wblk || (KV_SRC == 0 && split && nkv > 1)) l.push_back(c_cov);
+      if (c_stl.n_checks > 0) l.push_back(c_stl);
       void'(tb_final_report(l));
     end
     $finish;

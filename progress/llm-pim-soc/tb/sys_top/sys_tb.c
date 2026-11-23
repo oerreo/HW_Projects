@@ -15,6 +15,10 @@
  *           +EXP_FB=<n>: fallback calls allowed (hang: later calls of the disabled IP)
  *   other   no COH, SKIP, kernel_error, MSUM errors, INIT rc != 0; CYCLES closed form
  *           mismatches (hal_dpi.c) = 0; no memory beat outside the arena; program RESULT PASS
+ *   stall   +PROF != 0 (memory stall and random latency): CYCLES >= closed form (CYC_LOW = 0)
+ *           instead of equality, every RD_STALL / WR_STALL <= its CYCLES (ST_BAD = 0); a
+ *           "SYSTB STALL" line per slot with the sums; R stalls of the HP3 memory model (vec
+ *           port, tb_sys_fwd.sv sv_mem_rstall) imply a vec RD_STALL sum > 0 (VE_RDST)
  * Output: every program line in the transcript and in sys.log, then "SYSTB ..." summary lines.
  */
 #include <stdio.h>
@@ -25,6 +29,7 @@
 extern void sv_puts(const char *s);
 extern int sys_prog_main(void);
 extern const char *hal_env(const char *key);
+extern long long sv_mem_rstall(int k);
 
 static FILE *lf;
 static struct {
@@ -143,6 +148,7 @@ static void req(int ok, const char *what) {
 
 int sys_tb_main(int *rc) {
   long exp_checks, exp_iperr, exp_fb;
+  long long hp3_rst = -1;
   char b[400];
   memset(&S, 0, sizeof(S));
   memset(&TB, 0, sizeof(TB));
@@ -162,6 +168,12 @@ int sys_tb_main(int *rc) {
   req(S.skip_lines == 0, "SKIP (mask not available in this build)");
   req(S.kerr == 0 && S.msum_err == 0, "kernel_error / setup error");
   req(TB.cyc_mis == 0, "CYCLES differ from the closed form (CYC_MIS)");
+  req(TB.cyc_low == 0, "CYCLES below the stall-free closed form (CYC_LOW)");
+  req(TB.st_bad == 0, "RD_STALL / WR_STALL larger than CYCLES (ST_BAD)");
+  if (TB.prof) {
+    hp3_rst = sv_mem_rstall(3);
+    req(hp3_rst == 0 || TB.rd_st[3] > 0, "HP3 R stalled but vec RD_STALL sum 0 (VE_RDST)");
+  }
   req(TB.beats_bad == 0, "AXI beat outside the arena");
   req(S.fb <= exp_fb, "fallback calls (CHECK fb)");
   if (exp_iperr == 0) {
@@ -184,6 +196,17 @@ int sys_tb_main(int *rc) {
            TB.n_rd, TB.n_wr, TB.n_start, TB.beats_rd, TB.beats_wr, TB.cyc_reads, TB.cyc_checked, TB.cyc_mis,
            TB.inj_done, TB.prog_rc);
   tb_print(b);
+  {
+    int s;
+    for (s = 0; s < 4; s++) {
+      snprintf(b, sizeof(b),
+               "SYSTB STALL prof=%d slot=%d ops=%ld cycles=%lld rd_stall=%lld wr_stall=%lld "
+               "over_form=%lld cyc_low=%ld st_bad=%ld st_reads=%ld hp3_rstall=%lld",
+               TB.prof, s, TB.cyc_ops[s], TB.cyc_sum[s], TB.rd_st[s], TB.wr_st[s], TB.cyc_excess[s],
+               TB.cyc_low, TB.st_bad, TB.st_reads, hp3_rst);
+      tb_print(b);
+    }
+  }
   snprintf(b, sizeof(b), "SYSTB RESULT %s fails=%d", nfail ? "FAIL" : "PASS", nfail);
   tb_print(b);
   if (lf) fclose(lf);

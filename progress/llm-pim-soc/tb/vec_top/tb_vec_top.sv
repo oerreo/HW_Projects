@@ -16,6 +16,9 @@
 // an independent descriptor check of the descriptor latched in s, CYCLES / RD_STALL / WR_STALL /
 // OPS, ARGMAX registers, the read data of every register read.
 // +CYC=1 (no memory stalls): CYCLES == the model of docs/spec/vec.md 6.2 (top_cyc, every call).
+// Stall counters read after every call (not the DUT event the CSR model uses): RD_STALL and
+// WR_STALL <= CYCLES; +CYC=1: RD_STALL == RD_STALL0 (read start-up, vec.md 3) and WR_STALL == 0;
+// +MSTALL: RD_STALL sum > 0; +WBLK: WR_STALL sum > 0 (a stall event that can never be true fails).
 // +ERR=1: error paths and recovery (BAD_OP, each BAD_DESC reason, MISALIGN, both, START_BUSY,
 // SLVERR / DECERR on a read (RD_RESP) and on a write (WR_RESP)).
 // +RND=1 random register traffic between calls; +MSTALL memory stalls and latency; +WBLK=1 long
@@ -98,7 +101,8 @@ module tb_vec_top;
 
   tb_checker c_q = new("q"), c_s = new("scale"), c_am = new("argmax"), c_guard = new("guard"),
              c_err = new("err"), c_csr = new("csr_model"), c_rd = new("csr_read"),
-             c_cyc = new("cycles"), c_cov = new("coverage"), c_rec = new("record");
+             c_cyc = new("cycles"), c_cov = new("coverage"), c_rec = new("record"),
+             c_stl = new("stall_count");
 
   // ---------------- CSR access ----------------
   localparam int A_ID = 'h00, A_CONFIG = 'h04, A_CTRL = 'h08, A_STATUS = 'h0C, A_ERR = 'h10,
@@ -262,11 +266,20 @@ module tb_vec_top;
   // ---------------- one call ----------------
   longint unsigned ibase = 64'h1000_0000, obase = 64'h4000_0000;
   bit chk_cyc = 0, back = 0;
+  // RD_STALL of a call with no memory stall, latency 1 (read start-up, docs/spec/vec.md 3): the
+  // read command handshake is in s + 2 (engine busy from s + 3), ARVALID s + 4, first R s + 6, first
+  // beat at the core s + 7: stall cycles s + 3 .. s + 6. Same for every op and n (later beats are
+  // buffered before the core wants them).
+  localparam longint RD_STALL0 = 4;
   int err_allow = 0;
   logic [31:0] last_err;
   longint op_cyc[4][int];     // CYCLES sum per op and position
   longint op_n[4] = '{0, 0, 0, 0}, op_sum[4] = '{0, 0, 0, 0};
   longint dmin[4] = '{1 << 30, 1 << 30, 1 << 30, 1 << 30}, dmax[4] = '{-(1 << 30), -(1 << 30), -(1 << 30), -(1 << 30)};
+  // RD_STALL / WR_STALL of the calls (read after each call; not the CSR model's per-cycle event):
+  // per op min / max of RD_STALL, sums over the run
+  longint rsmin[4] = '{1 << 30, 1 << 30, 1 << 30, 1 << 30}, rsmax[4] = '{-1, -1, -1, -1};
+  longint rs_sum = 0, ws_sum = 0;
 
   // CYCLES model (docs/spec/vec.md 6.2, no memory stalls, latency 1). s = CTRL cycle, the core runs
   // from s + 1 and is done at D = s + 1 + C_core. Ops 1..3: q value i is handed to the packer at
@@ -322,7 +335,7 @@ module tb_vec_top;
   task automatic do_call(vcase c, output longint cycles);
     int op = opof(c), qb = (op == 3 && c.p1 != 127) ? 2 : 1;
     longint unsigned a0, a1 = 0, ao, as;
-    logic [31:0] st, err, cy, d;
+    logic [31:0] st, err, cy, d, rst, wst;
     a0 = alloc_in(4 * c.n);
     put_arr(a0, c.in0, 4);
     if (op == 1) begin a1 = alloc_in(2 * c.n); put_arr(a1, c.in1, 2); end
@@ -355,6 +368,8 @@ module tb_vec_top;
     do csr_r(A_STATUS, st); while (st[0] !== 1'b0);
     csr_r(A_ERR, err);
     csr_r(A_CYCLES, cy);
+    csr_r(A_RDST, rst);
+    csr_r(A_WRST, wst);
     cycles = cy;
     last_err = err;
     if ((err & ~32'(err_allow)) != 0 || st[1] !== 1'b1) c_err.fail($sformatf("%s: ERR 0x%0h STATUS 0x%0h", c.desc(), err, st));
@@ -395,6 +410,22 @@ module tb_vec_top;
       op_sum[op - 1] += cycles;
       if (dlt < dmin[op - 1]) dmin[op - 1] = dlt;
       if (dlt > dmax[op - 1]) dmax[op - 1] = dlt;
+      // stall counters (docs/spec/vec.md 3): never above CYCLES; with no memory stall and latency
+      // 1 (chk_cyc) RD_STALL is the read start-up only (RD_STALL0) and WR_STALL 0 (the write buffer
+      // never fills)
+      rs_sum += rst;
+      ws_sum += wst;
+      if (longint'(rst) < rsmin[op - 1]) rsmin[op - 1] = rst;
+      if (longint'(rst) > rsmax[op - 1]) rsmax[op - 1] = rst;
+      if (rst > cycles || wst > cycles)
+        c_stl.fail($sformatf("%s: RD_STALL %0d / WR_STALL %0d > CYCLES %0d", c.desc(), rst, wst, cycles));
+      else c_stl.pass();
+      if (chk_cyc) begin
+        if (rst !== RD_STALL0 || wst !== 0)
+          c_stl.fail($sformatf("%s: RD_STALL %0d (model %0d) WR_STALL %0d (model 0), no memory stall",
+                               c.desc(), rst, RD_STALL0, wst));
+        else c_stl.pass();
+      end
       if (chk_cyc) begin
         if (dlt !== 0) c_cyc.fail($sformatf("%s: CYCLES %0d, model %0d (OUT 0x%0h)", c.desc(), cycles,
                                             top_cyc(c, ao, qb), ao));
@@ -595,8 +626,9 @@ module tb_vec_top;
              nrec, nsyn, n_starts, n_wfull, n_pkhold, n_qfull, n_blk);
     for (int k = 0; k < 4; k++)
       if (op_n[k] > 0)
-        $display("tb_vec_top: op %0d: %0d calls, CYCLES sum %0d, CYCLES - model %0d..%0d", k + 1, op_n[k],
-                 op_sum[k], dmin[k], dmax[k]);
+        $display("tb_vec_top: op %0d: %0d calls, CYCLES sum %0d, CYCLES - model %0d..%0d, RD_STALL %0d..%0d", k + 1, op_n[k],
+                 op_sum[k], dmin[k], dmax[k], rsmin[k], rsmax[k]);
+    $display("tb_vec_top: RD_STALL sum %0d, WR_STALL sum %0d", rs_sum, ws_sum);
     for (int k = 0; k < 4; k++) begin
       automatic longint tot = 0, np = 0;
       automatic longint m[int] = op_cyc[k];
@@ -612,6 +644,17 @@ module tb_vec_top;
       if (c_am.n_checks > 0) l.push_back(c_am);
       if (fwd) l.push_back(c_rec);
       if (chk_cyc) l.push_back(c_cyc);
+      // memory stalls (read latency up to 16, R / AR stalls) must show up in RD_STALL, write blocks
+      // (write buffer full) in WR_STALL
+      if (mstall) begin
+        if (rs_sum > 0) c_stl.pass();
+        else c_stl.fail("memory stall run: RD_STALL 0 in every call");
+      end
+      if (wblk) begin
+        if (ws_sum > 0) c_stl.pass();
+        else c_stl.fail("write block run: WR_STALL 0 in every call");
+      end
+      l.push_back(c_stl);
       if (wblk) begin
         if (n_wfull > 0 && n_pkhold > 0 && n_qfull > 0) c_cov.pass();
         else c_cov.fail($sformatf("limits not reached: wfull %0d pk %0d qfull %0d", n_wfull, n_pkhold, n_qfull));

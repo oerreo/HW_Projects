@@ -34,3 +34,5 @@ sim/.o*
 sim/.cc/
 sim/.x0/
 sim/.j*
+sim/.k*
+sim/.pre/

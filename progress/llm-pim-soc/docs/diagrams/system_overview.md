@@ -143,10 +143,10 @@ flowchart TD
 
 | 빌드 | 구성 (전부 오프로드) | token당 PL 시간 [계산, 100 MHz 가정] | 근거 |
 |---|---|---|---|
-| P (260K, PIM형 + BRAM KV attention H_PAR 2 + vec) | 시뮬레이션 cycle 37,559 ~ 40,010, 위치 0..511 평균 | **375.6 ~ 400.1 us/token** | `log.md` S5-0, `system.md` 4.4절 |
+| P (260K, PIM형 + BRAM KV attention H_PAR 2 + vec) | 시뮬레이션 cycle 37,559 ~ 38,912, 위치 0..511 평균 | **375.6 ~ 389.1 us/token** | `log.md` S5-0, `system.md` 4.4절 |
 | A (15M, 가속기형 P 1 + DDR KV attention H_PAR 1 + vec, `FUSE_AM`) | 시뮬레이션 cycle 2,107,730, 위치 0..255 평균 | **21.08 ms/token** (21,077 us) | 같음 |
 
 - 빌드 A 21.08 ms 중 GEMV가 92.6% [계산]이고, 15M 행 레코드 15,586,816 B를 HP 포트 하나의 이론 대역폭(800 MB/s 가정)으로 읽는 시간 19.48 ms가 하한이다 [계산]. 실제 효율(eta)이 1보다 작으면 PL 시간은 더 길어진다.
-- 빌드 P의 범위(375.6 ~ 400.1)는 PIM GEMV 호출 묶음 방식(token 한 run 4,499~4,506 cycle 대 레코드마다 run 약 6,950)에 따른 것으로, `system.md` 4.4절 표에서 확인한 구성이다.
+- 빌드 P의 범위(375.6 ~ 389.1)는 PIM GEMV 호출 묶음 방식(token 한 run 4,499~4,506 cycle 대 레코드마다 run 5,822 ~ 5,852. 이전에 적었던 약 6,950은 memory stall을 건 run의 값이었고 2026-11-23에 stall 없는 재측정값으로 고침)에 따른 것으로, `system.md` 4.4절 표에서 확인한 구성이다.
 - ARM baseline(S3)과 HP 대역폭 실측이 없으므로 가속비와 end-to-end 추정은 이 문서에 쓰지 않는다. 참고로 PC(x86) baseline 15M K12V8은 6.650 ms/token이었다(`log.md` S3, ARM 아님).
 - 자원 [계산, 합성 안 함, LUT는 추정]: 빌드 A는 DSP 60/220, BRAM36 약 3. 빌드 P는 DSP 149/220, BRAM36 128/140이고 bank(144비트)와 kv_store(210비트)가 parity 비트를 데이터로 쓰는 매핑을 전제로 한다(안 되면 180/140으로 넘침). S4-7 로그의 129는 이중 계산이라 S5-0에서 128로 정정됐다.

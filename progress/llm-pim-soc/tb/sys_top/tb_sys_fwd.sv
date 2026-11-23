@@ -16,7 +16,17 @@
 // Fault injection (+TB_IPFAULT, hal_dpi.c) reaches the memory models through sv_inj: SLVERR
 // windows on all addresses (read or write) or no responses (hang) on the HP ports of one IP.
 // A hung port is left out of the idle check (its IP never finishes; the program disabled it).
-// Plusargs: +SEED +MAXD (AXI-Lite gaps, default 0) +WDOG (cycles, default 60,000,000), the
+// Memory stall (S5-4): +PROF=<n> sets random backpressure and latency on all four HP memory
+// models (axi_mem_slave cfg_stall / cfg_lat, the profiles of tb_pim_top / tb_bw_top):
+//   0 (default) no stall, latency 1 (the runs whose CYCLES the C side compares with closed forms)
+//   1 AR/AW/W/R/B 20 % stall, R latency 1..30, B latency 1..20
+//   2 AR/AW/W/R/B 50 % stall, R latency 1..60, B latency 1..40
+//   3 per port different (HP0 1's, HP1 2's, HP2 30 % / R 5..40 / B 1..10, HP3 10 % / R 1..80 / B 1..60)
+// The C side (hal_dpi.c) reads the same +PROF: with PROF != 0 the CYCLES closed forms become
+// lower bounds and every RD_STALL / WR_STALL must be <= its CYCLES; sys_tb.c also requires a vec
+// RD_STALL sum > 0 when the HP3 model stalled R (exported sv_mem_rstall). The models print their
+// stall statistics (AXI_MEM_STALL) at the end.
+// Plusargs: +SEED +MAXD (AXI-Lite gaps, default 0) +WDOG (cycles, default 60,000,000) +PROF, the
 // program settings (+SX_LIST +SX_RUNS +SX_STEPS +SX_MODELS +SX_FAULT +DDR_CK +DDR_TK) and the
 // expectations (+EXP_BUILD +EXP_CHECKS +EXP_IPERR +EXP_IPERR_IP +EXP_IPERR_KIND +EXP_FB).
 `timescale 1ns / 1ps
@@ -140,6 +150,7 @@ module tb_sys_fwd;
   export "DPI-C" function sv_puts;
   export "DPI-C" function sv_plusarg;
   export "DPI-C" function sv_inj;
+  export "DPI-C" function sv_mem_rstall;
 
   task automatic sv_axil_wr(input int unsigned a, input int unsigned d);
     bfm.write0(16'(a), d);
@@ -158,6 +169,17 @@ module tb_sys_fwd;
   function automatic int sv_plusarg(input string k, output string v);
     v = "";
     return $value$plusargs({k, "=%s"}, v);
+  endfunction
+
+  // cycles in which the memory model of HP port k held back an R beat (axi_mem_slave n_st_r);
+  // sys_tb.c: R stalls on HP3 (vec) must show up in the vec RD_STALL sum
+  function automatic longint sv_mem_rstall(input int k);
+    case (k)
+      0: return longint'(g_hp[0].mem.n_st_r);
+      1: return longint'(g_hp[1].mem.n_st_r);
+      2: return longint'(g_hp[2].mem.n_st_r);
+      default: return longint'(g_hp[3].mem.n_st_r);
+    endcase
   endfunction
 
   // HP ports of the IP in slot s (system.md 1.3): bit k = HP k
@@ -214,15 +236,43 @@ module tb_sys_fwd;
 
   // ---------------- main ----------------
   longint wdog = 60_000_000;
+  int prof = 0;
+  // stall profile of HP port k (see the header)
+  function automatic void cfg_port(int k, int st, int rmin, int rmax, int bmin, int bmax);
+    case (k)
+      0: begin g_hp[0].mem.cfg_stall(st, st, st, st, st); g_hp[0].mem.cfg_lat(rmin, rmax, bmin, bmax); end
+      1: begin g_hp[1].mem.cfg_stall(st, st, st, st, st); g_hp[1].mem.cfg_lat(rmin, rmax, bmin, bmax); end
+      2: begin g_hp[2].mem.cfg_stall(st, st, st, st, st); g_hp[2].mem.cfg_lat(rmin, rmax, bmin, bmax); end
+      default: begin g_hp[3].mem.cfg_stall(st, st, st, st, st); g_hp[3].mem.cfg_lat(rmin, rmax, bmin, bmax); end
+    endcase
+  endfunction
+  function automatic void cfg_prof(int p);
+    for (int k = 0; k < 4; k++)
+      case (p)
+        0: cfg_port(k, 0, 1, 1, 1, 1);
+        1: cfg_port(k, 20, 1, 30, 1, 20);
+        2: cfg_port(k, 50, 1, 60, 1, 40);
+        default:
+          case (k)
+            0: cfg_port(k, 20, 1, 30, 1, 20);
+            1: cfg_port(k, 50, 1, 60, 1, 40);
+            2: cfg_port(k, 30, 5, 40, 1, 10);
+            default: cfg_port(k, 10, 1, 80, 1, 60);
+          endcase
+      endcase
+  endfunction
+
   initial begin
     automatic int unsigned seed;
     automatic int maxd = 0, rc = -1, viol;
     seed = tb_seed_from_plusarg();
     void'($value$plusargs("MAXD=%d", maxd));
     void'($value$plusargs("WDOG=%d", wdog));
+    void'($value$plusargs("PROF=%d", prof));
     bfm.maxd = maxd;
-    $display("tb_sys_fwd: BUILD %s VAR %0d seed %0d MAXD %0d watchdog %0d cycles",
-             BUILD == 0 ? "A (sys_a_top)" : "P (sys_p_top)", VAR, seed, maxd, wdog);
+    cfg_prof(prof);
+    $display("tb_sys_fwd: BUILD %s VAR %0d seed %0d MAXD %0d PROF %0d watchdog %0d cycles",
+             BUILD == 0 ? "A (sys_a_top)" : "P (sys_p_top)", VAR, seed, maxd, prof, wdog);
     fork
       begin
         repeat (wdog) @(posedge clk);
@@ -239,6 +289,10 @@ module tb_sys_fwd;
     if (!hung[2]) g_hp[2].mem.check_idle();
     if (!hung[3]) g_hp[3].mem.check_idle();
     g_hp[0].mem.report(); g_hp[1].mem.report(); g_hp[2].mem.report(); g_hp[3].mem.report();
+    if (prof != 0) begin
+      g_hp[0].mem.report_stall(); g_hp[1].mem.report_stall();
+      g_hp[2].mem.report_stall(); g_hp[3].mem.report_stall();
+    end
     viol = g_hp[0].mem.n_viol + g_hp[1].mem.n_viol + g_hp[2].mem.n_viol + g_hp[3].mem.n_viol;
     $display("tb_sys_fwd: program checks %0d failed, AXI memory model violations %0d, hung ports %b, cycles %0d",
              rc, viol, hung, cyc);

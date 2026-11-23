@@ -151,7 +151,7 @@ pim_core:
 | 컨트롤러 MACAB 점유 합 | 4,108 / token | 4,072 + MACAB 36회 x 1 |
 | `pim_top` run CYCLES 합, token 하나를 한 run(57 명령) | 4,499 ~ 4,506 (S4-6b 재측정; S4-6 4,501 ~ 4,506) | `axi_mem_slave` latency 1, stall 없음. TB는 push 검사가 끝난 뒤 RUN(4.3) |
 | 같은 것, layer마다 한 run(6 run: layer 5 + cls) | 4,663 ~ 4,676 (S4-6: 4,658 ~ 4,676) | run 시작/종료(마지막 B) 오버헤드가 run마다 붙음 |
-| 같은 것, 레코드마다 WRGB + MACAB 한 run(36 run) | 약 6,950 | |
+| 같은 것, 레코드마다 WRGB + MACAB 한 run(36 run) | 5,822 ~ 5,852 (S5-4 재측정, 위치 0..3) | 이전에 적은 약 6,950은 stall run `m1_perrec`(PROF 1: 20% stall, R latency 1~30, B latency 1~20)의 값이었다 |
 | LDW 36개(가중치 전체 적재) 한 run | 36,629 (S4-6: 36,305) | 행 레코드 288,704 B = 36,088 beat + 오버헤드, 초기화 1회. S4-6b: LDW마다 LDW_CYC 9 = +324 |
 
 - GEMV 가속기형 P = 1의 같은 260K token은 37,903~37,938 CYCLES(S4-6b 재측정, `gemv_acc.md` 5절, 같은 메모리 모델. S4-6까지는 37,596)다. 비율: MAC cycle만 36,446 / 4,072 = 8.95배(`arch.md` 3.4 [계산]), run CYCLES 37,903~37,938 / 4,499~4,506 = **8.41~8.43배**(token 한 run), / 4,663~4,676 = 8.11~8.14배(layer마다 run) [측정, 시뮬레이션].

@@ -148,7 +148,8 @@ hdr("4. token당 PL 쪽 시간, 100 MHz 가정 [계산, 입력은 시뮬레이�
 SIM = dict(
     pim_tok_run=(4499, 4506),        # pim.md 6.2: token 한 run
     pim_layer_run=(4663, 4676),      # layer마다 run
-    pim_rec_run=(6950, 6950),        # 레코드마다 WRGB + MACAB 한 run (약)
+    pim_rec_run=(5822, 5852),        # 레코드마다 WRGB + MACAB 한 run: pim_top TB MODE 2, 위치 0..3
+                                     # (S5-4 재측정. 이전 값 약 6,950은 PROF 1 stall run m1_perrec)
     pim_ldw=(36629, 36629),          # LDW 36개 (초기화 1회)
     ga260_p1=(37903, 37938), ga260_p2=(19895, 19930),  # gemv_acc.md 5절
     ga15_p1=(1951992, 1951992), ga15_cls=(1184069, 1184077),
@@ -211,7 +212,7 @@ for mdl, what, (lo, hi) in rows:
 print(f"260K PIM LDW 초기화 {SIM['pim_ldw'][0]:,} cycle = {us(SIM['pim_ldw'][0]):.1f} us (1회)")
 
 hdr("4b. 전부 오프로드했을 때 token당 PL 합(위치 평균, 데이터 이동의 ARM 쪽과 호출 비용 제외) [계산]")
-p_all = (SIM["pim_tok_run"][0], SIM["pim_rec_run"][0])
+p_all = (SIM["pim_tok_run"][0], SIM["pim_rec_run"][1])
 at260 = avg_attn("260K BRAM H2", 512) + SIM["kvw260_tok"][0]
 print(f"260K 빌드 P: PIM {p_all[0]:,}~{p_all[1]:,} + attention {at260:,.0f} + vec {SIM['ve260'][0]:,} = "
       f"{p_all[0] + at260 + SIM['ve260'][0]:,.0f}~{p_all[1] + at260 + SIM['ve260'][0]:,.0f} cycle "

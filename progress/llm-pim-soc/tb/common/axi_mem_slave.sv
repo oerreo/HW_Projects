@@ -12,7 +12,9 @@
 //     written with WSTRB in AW order; B is returned in order, random [lat_bmin, lat_bmax]
 //     cycles after the last beat was written.
 //   - Random backpressure: ARREADY, AWREADY, WREADY low, RVALID / BVALID gap with the
-//     percentages set by cfg_stall (default 0: always ready, no gaps).
+//     percentages set by cfg_stall (default 0: always ready, no gaps). report_stall() prints
+//     how many cycles each channel was held back by it (n_st_*: ready low / gap drawn while a
+//     handshake or beat could otherwise happen, S5-4 system TB evidence).
 //   - Error injection (S4-3): inj_rd_err(lo, hi, resp) / inj_wr_err(lo, hi, resp) add an
 //     address window [lo, hi) (byte addresses, compared with the 8-byte-aligned word address
 //     of each beat). A read beat whose word lies in a read window gets RRESP = resp
@@ -277,6 +279,10 @@ module axi_mem_slave #(
   function automatic bit stall(int pct);
     return pct > 0 && $urandom_range(99) < pct;
   endfunction
+  // stall statistics: cycles in which a drawn stall held back a waiting request / beat
+  longint unsigned n_st_ar = 0, n_st_aw = 0, n_st_w = 0, n_st_r = 0, n_st_b = 0;
+  longint unsigned n_rlat = 0, sum_rlat = 0;  // AR handshakes and their drawn latencies
+  bit s_ar, s_aw, s_w, s_r, s_b;              // stall draws of this cycle
 
   // ---------------- error injection ----------------
   typedef struct {
@@ -454,12 +460,17 @@ module axi_mem_slave #(
         if ($isunknown(ar_pl)) viol("AXI_X", "X/Z on the AR payload at the handshake");
         q.id = arid_i; q.addr = araddr_i; q.len = arlen_i; q.size = arsize_i; q.burst = arburst_i;
         q.t = cyc + $urandom_range(lat_rmax, lat_rmin);
+        n_rlat++;
+        sum_rlat += q.t - cyc;
         check_req("AR", q);
         arq.push_back(q);
         n_rd_burst++;
         if (arq.size() > max_rd_outs) max_rd_outs = arq.size();
       end
-      arready_o <= (arq.size() < MAX_OUTS) && !stall(st_ar);
+      // stall drawn only when there is room (same random sequence as before the counters)
+      s_ar = arq.size() < MAX_OUTS && stall(st_ar);
+      if (s_ar && arvalid_i === 1'b1) n_st_ar++;
+      arready_o <= (arq.size() < MAX_OUTS) && !s_ar;
 
       // ---- R ----
       if (!(rvalid_o && !rready_i)) begin  // not holding a beat
@@ -470,7 +481,10 @@ module axi_mem_slave #(
             rbeat = 0;
           end else rbeat++;
         end
-        if (arq.size() > 0 && cyc >= arq[0].t && !hang_r && !stall(st_r)) begin
+        // stall drawn only when a beat is due (same random sequence as before the counters)
+        s_r = arq.size() > 0 && cyc >= arq[0].t && !hang_r && stall(st_r);
+        if (s_r) n_st_r++;
+        if (arq.size() > 0 && cyc >= arq[0].t && !hang_r && !s_r) begin
           logic [1:0] rr;
           rr = win_resp(rd_errw, beat_addr(arq[0], rbeat));
           if (rr != 2'b00) n_rd_err++;
@@ -528,13 +542,19 @@ module axi_mem_slave #(
           wlast_bad = 1'b0;
         end else wbeat++;
       end
-      awready_o <= (awq.size() < MAX_OUTS) && !stall(st_aw);
-      wready_o  <= (wq.size() < WBUF) && !stall(st_w);
+      s_aw = awq.size() < MAX_OUTS && stall(st_aw);
+      s_w  = wq.size() < WBUF && stall(st_w);
+      if (s_aw && awvalid_i === 1'b1) n_st_aw++;
+      if (s_w && wvalid_i === 1'b1) n_st_w++;
+      awready_o <= (awq.size() < MAX_OUTS) && !s_aw;
+      wready_o  <= (wq.size() < WBUF) && !s_w;
 
       // ---- B ----
       if (!(bvalid_o && !bready_i)) begin
         if (bvalid_o && bready_i) void'(bq.pop_front());
-        if (bq.size() > 0 && cyc >= bq[0].t && !hang_b && !stall(st_b)) begin
+        s_b = bq.size() > 0 && cyc >= bq[0].t && !hang_b && stall(st_b);
+        if (s_b) n_st_b++;
+        if (bq.size() > 0 && cyc >= bq[0].t && !hang_b && !s_b) begin
           bvalid_o <= 1'b1;
           bid_o    <= bq[0].id;
           bresp_o  <= bq[0].resp;
@@ -554,6 +574,12 @@ module axi_mem_slave #(
     $display("AXI_MEM %s: rd bursts %0d beats %0d max outstanding %0d | wr bursts %0d beats %0d max outstanding %0d | uninit reads %0d | injected rd err beats %0d wr err bursts %0d | violations %0d",
              NAME, n_rd_burst, n_rd_beat, max_rd_outs, n_wr_burst, n_wr_beat, max_wr_outs,
              n_uninit, n_rd_err, n_wr_err, n_viol);
+  endfunction
+
+  function automatic void report_stall();
+    $display("AXI_MEM_STALL %s: cfg stall %%(ar aw w r b) %0d %0d %0d %0d %0d lat r %0d..%0d b %0d..%0d | stalled cycles ar %0d aw %0d w %0d r %0d b %0d | AR %0d mean drawn R latency %0.2f",
+             NAME, st_ar, st_aw, st_w, st_r, st_b, lat_rmin, lat_rmax, lat_bmin, lat_bmax,
+             n_st_ar, n_st_aw, n_st_w, n_st_r, n_st_b, n_rlat, n_rlat ? real'(sum_rlat) / n_rlat : 0.0);
   endfunction
 
 endmodule

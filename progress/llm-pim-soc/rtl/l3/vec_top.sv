@@ -23,7 +23,9 @@
 // Run end e: vec_core done seen, the packer has handed every beat to the write engine, every write
 // command issued and the write engine idle (last B). CYCLES = e - s (check included).
 // Addresses: byte counts are shifts of N (4N, 2N, N qb), no multiplier.
-// RD_STALL: axi_rd_eng stall_o (the core waits for read data); WR_STALL: axi_wr_eng stall_o.
+// RD_STALL: the core waits for read data: read engine busy && vec_core d_want_o && no beat
+// (d_valid 0). Not axi_rd_eng stall_o: that uses d_ready, which vec_core raises only together with
+// d_valid (pop of a beat), so it would never count. WR_STALL: axi_wr_eng stall_o.
 module vec_top
   import llm_pkg::*;
 #(
@@ -167,14 +169,14 @@ module vec_top
       rc_k_q <= 1'b1;
     end
 
-  logic        d_valid, d_ready, d_last, rd_ecmd;
+  logic        d_valid, d_ready, d_want, d_last, rd_busy, rd_ecmd;
   logic [63:0] d_data;
   axi_rd_eng #(.AW(32), .IDW(IDW), .LEN_W(32), .MAX_BURST(MAX_BURST), .OUTS(OUTS),
                .FIFO_DEPTH(RD_FIFO)) u_rd (
     .clk, .rst_n, .cfg_burst_i(9'd0), .cfg_outs_i(7'd0),
     .cmd_valid_i(rc_valid), .cmd_ready_o(rc_ready), .cmd_addr_i(rc_addr), .cmd_bytes_i(rc_bytes),
     .d_valid_o(d_valid), .d_ready_i(d_ready), .d_data_o(d_data), .d_last_o(d_last),
-    .busy_o(), .done_o(), .stall_o(rd_stall_ev), .err_resp_o(), .err_cmd_o(rd_ecmd),
+    .busy_o(rd_busy), .done_o(), .stall_o(), .err_resp_o(), .err_cmd_o(rd_ecmd),
     .err_clr_i(start),
     .m_axi_arid_o, .m_axi_araddr_o, .m_axi_arlen_o, .m_axi_arsize_o, .m_axi_arburst_o,
     .m_axi_arlock_o, .m_axi_arcache_o, .m_axi_arprot_o, .m_axi_arqos_o, .m_axi_arvalid_o,
@@ -188,7 +190,8 @@ module vec_top
   logic signed [SH_W-1:0] e;
   vec_core #(.N_MAX(N_MAX), .IDX_W(IDX_W), .LUT_PIPE(LUT_PIPE), .Q_DEPTH(Q_DEPTH)) u_core (
     .clk, .rst_n, .start_i(start), .op_i(d_op), .n_i(d_n), .f_i(d_f), .qmax_i(d_qmax), .ge_i(d_ge),
-    .epsc_i(d_epsc), .d_valid_i(d_valid), .d_ready_o(d_ready), .d_data_i(d_data), .d_last_i(d_last),
+    .epsc_i(d_epsc), .d_valid_i(d_valid), .d_ready_o(d_ready), .d_want_o(d_want), .d_data_i(d_data),
+    .d_last_i(d_last),
     .q_valid_o(q_valid), .q_ready_i(q_ready), .q_o(q), .m_o(m), .e_o(e), .scl_valid_o(scl_valid),
     .am_idx_o(am_idx), .am_max_o(am_max), .busy_o(c_busy), .done_o(c_done));
 
@@ -289,6 +292,7 @@ module vec_top
   assign run_done    = busy && !start && cd_q && ph_q == PK_D && !pk_valid_q && wc_n_q == '0 &&
                        rc_n_q == '0 && !wr_busy;
   assign am_valid    = run_done && d_op == OP_AMAX;
+  assign rd_stall_ev = rd_busy && d_want && !d_valid;
   assign rd_err_ev   = m_axi_rvalid_i && m_axi_rready_o && m_axi_rresp_i[1];
   assign wr_err_ev   = m_axi_bvalid_i && m_axi_bready_o && m_axi_bresp_i[1];
 

@@ -181,3 +181,12 @@
 - 결과: stub 검사 `STUBCHECK runs=43 fail=0` [수퍼바이저 재실행]. shell lint 9구성 경고 0, 오류 4종 주입 시 stub 검출 4/4 [agent 보고]. 스크립트와 system.md 사이 불일치 없음.
 - UNVERIFIED: Vivado와 XSCT에서 한 번도 실행하지 않음(속성 이름, module reference의 인터페이스 추론, 연결하지 않은 m02_axi의 validate, 합성 결과 전부, 100 MHz timing, BRAM parity 매핑).
 - 다음: 사용자 빌드(S5-6 리포트 분석), S4-8 정리.
+
+## 2026-11-23: S5-4 보완: stall 아래 forward, PIM cycle 수치 정정, vec RD_STALL 수정  [notion: pending]
+- PIM "레코드마다 run" cycle 차이의 원인(hw-worker): `system.md` 4.4절의 "약 6,950"은 `pim_top` TB의 random stall run(20% stall, R latency 1~30) 값(평균 6,974)이었다. stall 없이 같은 TB를 다시 돌리면 위치 0..3에서 5,822~5,852이고 시스템 TB의 5,846과 맞는다. RTL 차이 없음. `system.md`, `pim.md`, `s5calc.py`와 다이어그램 두 곳을 고침. 빌드 P의 PL 시간 [계산, 100 MHz 가정]은 375.6~389.1 us/token(이전 상한 400.1). 이 로그의 이전 항목에 적힌 6,950과 400.1은 이 항목으로 대체한다.
+- stall 아래 시스템 forward(hw-worker): `tb_sys_fwd`에 `+PROF`(HP 메모리 모델의 random stall과 latency), run 3개 추가(`p_stall` 빌드 P 260K, `a_stall` 빌드 A 260K, `a_m2_stall` 빌드 A 15M 위치 0). token, logits hash, K 비교, COH, fallback, IPERR, AXI 위반 모두 0. stall run에서는 CYCLES 닫힌 식을 하한으로 검사.
+- RTL 버그(성능 계수기, 데이터 영향 없음): `vec_top`의 RD_STALL이 구조상 항상 0이었다(`vec_core`의 `d_ready_o`가 `d_valid_i`를 포함해 `axi_rd_eng.stall_o` 조건이 성립하지 않음). `vec_core`에 `d_want_o`를 추가하고 `vec_top`이 `rd_busy && d_want && !d_valid`로 세게 수정. `d_ready_o`와 cycle 수는 불변. unit TB가 DUT 내부 event를 그대로 세어 놓쳤던 것이라 `tb_vec_top`, `tb_vec_core`, `tb_attn_top`, 시스템 TB에 기대값과 "> 0" 검사 추가. 호스트 모델 `ipm_ve.c`도 맞춤(latency 1에서 op당 4).
+- 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 491 run, fails 0. 시스템 호스트 테스트 `SYSHOST items=36 fail=0`. stall run 로그: vec RD_STALL 합 7,381(p_stall, HP3 R stall 8,493), 2,662(a_m2_stall, 2,742). gemv_acc RD_STALL 488,213(a_m2_stall), pim 39,860(p_stall).
+- agent 보고(재실행 안 함): 수정 전 RTL로 `tb_vec_top` 12 run 중 11 FAIL, 시스템 stall run 3개 FAIL. mutation 3종 검출. lint 경고 0. 다른 IP(gemv_acc, pim, attn)는 ready가 valid에 의존하지 않아 같은 문제 없음.
+- stall run의 RUN ticks/token [측정, 시뮬레이션, TB random 모델이라 보드 값 아님]: p_stall 43,613(stall 없음 31,688), a_stall 85,953(63,819), a_m2_stall 2,514,750(2,021,290).
+- 미확인: 메모리 모델의 random 패턴은 `+SEED`로 바뀌지 않음(시뮬레이터 기본 seed). stall 아래 오류 주입 조합, 변형 빌드의 stall run, gemv_acc WR_STALL이 시스템 run에서 0인 이유, vec N_MAX 256 구성의 시뮬레이션.

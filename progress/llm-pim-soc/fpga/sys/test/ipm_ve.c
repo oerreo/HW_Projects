@@ -5,6 +5,8 @@
  * (int32) to OUT_ADDR and ARGMAX_IDX/VAL. fx of RMSNORM (not a register) is K_FX.
  * CYCLES: vec.md 6.2 closed form 1 + C + 11 + max(L_last, 2) with C of 6.1 (zero-output forms
  * when the pre-quantization maximum is 0), ARGMAX n + 15.
+ * RD_STALL: vec.md 3, latency-1 value VE_RDST0 (the read start-up) for every op that runs;
+ * WR_STALL 0.
  */
 #include <string.h>
 #include "ipm.h"
@@ -17,11 +19,12 @@
 #define E_MISALIGN 0x08u
 #define E_RD_RESP 0x10u
 #define E_WR_RESP 0x20u
+#define VE_RDST0 4u /* RD_STALL of an op with no memory stall, latency 1 (vec.md 3) */
 
 static struct {
   uint32_t in0, in1, out, scl, n, fmt, exp, epsc, am_idx, am_val;
   int busy, done;
-  uint32_t err, cyc, ops;
+  uint32_t err, cyc, rds, ops;
 } V;
 
 static uint32_t cdiv(uint32_t a, uint32_t b) { return (a + b - 1u) / b; }
@@ -61,6 +64,7 @@ static void run(uint32_t op, int fault) {
   int16_t *g = ipm_scr(2, 2u * (size_t)n);
   uint8_t *q = ipm_scr(3, 2u * (size_t)n), *d;
   kscl_t s;
+  V.rds = VE_RDST0;
   if (!a || fault == 1) V.err |= E_RD_RESP;
   if (a) memcpy(x, a, 4u * n);
   else memset(x, 0, 4u * n);
@@ -136,6 +140,7 @@ static void wr(uint32_t off, uint32_t v) {
     }
     V.done = 0;
     V.cyc = 0;
+    V.rds = 0;
     bad = check(op);
     if (bad) {
       V.err |= bad;
@@ -172,7 +177,7 @@ static uint32_t rd(uint32_t off) {
   case R_STATUS: return (V.busy ? ST_BUSY : 0u) | (V.done ? ST_DONE : 0u) | (V.err ? ST_ERR : 0u);
   case R_ERR: return V.err;
   case R_CYCLES: return V.cyc;
-  case R_RD_STALL: return 0;
+  case R_RD_STALL: return V.rds;
   case R_WR_STALL: return 0;
   case R_OPS: return V.ops;
   case VE_AM_IDX: return V.am_idx;

@@ -23,6 +23,11 @@
  *                    traced. Trace file +CYCTRACE=<file> (default cyc.txt): "slot ctrl cycles" per
  *                    read, the format of the host model trace (fpga/sys/test/hal_host.c
  *                    SX_CYCTRACE); tb/sys_top/cyc_cmp.py compares the two.
+ *                    Memory stall runs (+PROF != 0, the stall profile of tb_sys_fwd.sv): the
+ *                    closed forms assume latency 1 and no stall, so there they are lower bounds
+ *                    (CYC_LOW if CYCLES < form); every RD_STALL / WR_STALL read after a CYCLES
+ *                    read of the same slot must be <= that CYCLES (ST_BAD). Per slot the sums of
+ *                    CYCLES, RD_STALL, WR_STALL and CYCLES - form are reported (sys_tb.c).
  *   IP fault         +TB_IPFAULT=rdresp|wrresp|hang +TB_IPFAULT_SLOT=<slot> +TB_IPFAULT_OP=<n>:
  *                    at the n-th start of that IP the memory models of its HP ports answer
  *                    with SLVERR (until the driver sees busy = 0) or stop answering (hang).
@@ -47,6 +52,8 @@ systb_t TB;
 static uint32_t rg[SYS_NSLOT][32];  /* last value written to offsets 0x00..0x7C */
 static uint32_t op_rg[SYS_NSLOT][32]; /* registers at the last start */
 static uint32_t cfgv[SYS_NSLOT];    /* CONFIG read by sys_detect */
+static uint32_t last_cyc[SYS_NSLOT]; /* last CYCLES read per slot */
+static int have_cyc[SYS_NSLOT];
 static int busy_op[SYS_NSLOT];      /* a start was written, busy = 0 not yet seen */
 static FILE *ctr;
 static int inj_kind, inj_slot = -1, inj_on, inj_err_rd;
@@ -92,6 +99,7 @@ int hal_init(void) {
   }
   inj_slot = (int)tb_env_l("TB_IPFAULT_SLOT", -1);
   inj_op = tb_env_l("TB_IPFAULT_OP", 1);
+  TB.prof = (int)tb_env_l("PROF", 0);
   {
     const char *cf = hal_env("CYCTRACE");
     ctr = fopen(cf ? cf : "cyc.txt", "w");
@@ -163,8 +171,27 @@ static void cyc_read(int s, uint32_t v) {
   long e = cyc_exp(s, ctrl, &cls);
   if (ctr) fprintf(ctr, "%d %x %u\n", s, (unsigned)ctrl, (unsigned)v);
   TB.cyc_reads++;
+  last_cyc[s] = v;
+  have_cyc[s] = 1;
+  if (s < 4) {
+    TB.cyc_ops[s]++;
+    TB.cyc_sum[s] += v;
+  }
   if (e < 0) return;
   TB.cyc_checked++;
+  if (TB.prof) { /* stall run: the latency-1 closed form is a lower bound */
+    if (s < 4) TB.cyc_excess[s] += (long)v - e;
+    if ((long)v < e) {
+      TB.cyc_low++;
+      if (TB.cyc_low <= 10) {
+        char b[200];
+        snprintf(b, sizeof(b), "SYSTB CYC_LOW cls=%s slot=%d ctrl=0x%x cycles=%u formula=%ld", cls, s,
+                 (unsigned)ctrl, (unsigned)v, e);
+        tb_print(b);
+      }
+    }
+    return;
+  }
   if ((long)v != e) {
     TB.cyc_mis++;
     if (TB.cyc_mis <= 10) {
@@ -202,6 +229,22 @@ uint32_t hal_rd(int slot, uint32_t off) {
     inj_err_rd = 0;
   }
   if (off == R_CYCLES) cyc_read(slot, d);
+  if ((off == R_RD_STALL || off == R_WR_STALL) && have_cyc[slot]) {
+    TB.st_reads++;
+    if (slot < 4) {
+      if (off == R_RD_STALL) TB.rd_st[slot] += d;
+      else TB.wr_st[slot] += d;
+    }
+    if (d > last_cyc[slot]) {
+      TB.st_bad++;
+      if (TB.st_bad <= 10) {
+        char b[160];
+        snprintf(b, sizeof(b), "SYSTB ST_BAD slot=%d %s=%u > cycles=%u", slot,
+                 off == R_RD_STALL ? "rd_stall" : "wr_stall", d, last_cyc[slot]);
+        tb_print(b);
+      }
+    }
+  }
   return d;
 }
 
