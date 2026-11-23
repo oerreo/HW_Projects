@@ -143,3 +143,13 @@
 - 결정(오케스트레이터): 열린 결정 O1~O13을 권고대로 확정(`spec/system.md` 10절). 융합은 v1에 분류기 + argmax만.
 - 미확인: 보드 수치 전부(ARM baseline, HP 대역폭, 호출 비용, timing, LUT), parity 매핑, Questa에서 시간을 쓰는 DPI exported task, 빌드 A 구성의 260K attention과 vec N_MAX 256 구성(시뮬레이션 안 함), Xilinx cache 관련 세부.
 - 다음: S5-1(시스템 SW와 호스트 모델), S5-2(`axil_xbar`, 시스템 top).
+
+## 2026-11-20: S5-1 시스템 SW와 호스트 검증  [notion: pending]
+- 한 일(hw-worker): `model/src`에 실행기 끼움점 `lm_h_forward_x`(kernel 호출을 실행기 포인터로 넘김, 기존 `lm_h_forward`는 불변). `fpga/sys/sw/`: 실행기 `sx_exec`(오프로드 mask 8비트, opt 비트, fallback 계수, 지연 실행과 barrier, WRGB 생략, KVW 발행), IP 드라이버 4개, 초기화(행 레코드 재배치, bank 적재, KV 관리), 측정 분해와 로그, K 모드(kernel 단위 그림자 비교), 보드용 HAL(`hal_xil.c`). `fpga/sys/test/`: spec 문서 기반 호스트 IP 레지스터 모델 4개와 cache 모사, 호스트 테스트.
+- 결과 [측정, 수퍼바이저 재실행, PC x86-64]: `make test` TOTAL 16,686,497 항목 mismatch 0(새 그룹 `forward_x executor` 포함). 시스템 호스트 테스트 `SYSHOST items=34 fail=0`, PASS. baseline `HOSTTEST items=23 fail=0`, PASS.
+- agent 보고(재실행한 테스트의 내부 수치, 개별 확인 안 함): 684 run(빌드 A/P, 두 모델, mask와 opt 21종, run 종류 E/T/P/K/W, 64비트와 `-m32`)에서 token, logits hash, KCMP, COH, fallback, IPERR 모두 0. KCMP 2,029,960 호출 mismatch 0. 결함 주입 12종(flush 누락, invalidate 누락, q 레코드 순서, KV layer base, bank base 겹침, WRGB 생략 오류, barrier 위반, 응답 오류, timeout, 보호 조건 우회, 레지스터 순서)이 각각 고유한 증거로 검출됨. 덤프 4종은 변경 전과 `cmp` 동일.
+- 줄인 것: 15M은 mask 전체 조합을 24 위치로, 전 위치(256)는 mask 0/ff와 9개 mask의 E run만. `-m32`는 260K 64 위치, 15M 16 위치.
+- spec 보완 대상(agent가 가정으로 정한 것, RTL은 보지 않음): cache 일관성 검사를 읽는 쪽별로 나눈 규칙(system.md 3.1에 기록), vec RMSNORM의 fx, attention q 레코드의 kb = 8 container, 응답 오류 때 STATUS의 done과 err 동시 표시, ARGMAX의 OUT_ADDR, 닫힌 CYCLES 식이 없는 경우(PIM 여러 명령 run, attention op 단위, gemv_acc P = 2)의 추정. S5-3/S5-4에서 RTL과 대조해 확정한다.
+- UNVERIFIED: `hal_xil.c`(Xilinx API, cache L1/L2 동작, 물리 주소 가정), ARM 컴파일과 실행, 부분 cache line invalidate 동작. 호스트의 시간과 Amdahl 표는 측정값이 아니다.
+- 프로세스 노출(agent 보고): 초기 몇 번 명령 문자열에 `model`, `fpga/sys/test` 경로 조각이 최장 약 2.5분 보임(프로젝트 이름은 아님). 이후 루트의 job 파일로 변경.
+- 다음: S5-2 검수, S5-3(시스템 TB 기반: 공유 메모리, 드라이버 C 코드의 DPI 연결).

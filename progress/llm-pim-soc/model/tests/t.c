@@ -1135,6 +1135,110 @@ static void t_dumpf(const char *ck, const char *tk, const char *pa, const char *
   free(b.tk);
 }
 
+/* ================= S5-1 addition: executor insertion point (lm_h_forward_x) =================
+   Two copies of the K12V8 variant. Copy 0 runs lm_h_forward, copy 1 runs lm_h_forward_x with
+   an executor that executes each call on private copies of its output buffers (k_exec on a
+   descriptor whose outputs point to scratch memory, then copies them back). A hook on both
+   records every call (kid, prm, buffer shape and FNV-1a of the buffer contents after the call).
+   Items per position: the call stream, the logits and the argmax are identical; the executor
+   is called once per call. No random numbers are drawn. */
+typedef struct {
+  long n, cap;
+  uint32_t *h; /* one hash per call */
+} xrec_t;
+static uint32_t xfnv(uint32_t h, const void *p, size_t n) {
+  const uint8_t *b = (const uint8_t *)p;
+  size_t i;
+  for (i = 0; i < n; i++) h = (h ^ b[i]) * 16777619u;
+  return h;
+}
+static void xrec_hook(void *user, int phase, const kcall_t *c) {
+  xrec_t *r = (xrec_t *)user;
+  uint32_t h = 2166136261u;
+  int i;
+  if (phase != 1) return;
+  h = xfnv(h, &c->kid, sizeof(c->kid));
+  h = xfnv(h, &c->np, sizeof(c->np));
+  h = xfnv(h, &c->nb, sizeof(c->nb));
+  h = xfnv(h, c->prm, sizeof(int32_t) * (size_t)c->np);
+  for (i = 0; i < c->nb; i++) {
+    h = xfnv(h, &c->b[i].esz, sizeof(int32_t) * 3);
+    h = xfnv(h, c->b[i].p, (size_t)c->b[i].esz * (size_t)c->b[i].n);
+  }
+  if (r->n < r->cap) r->h[r->n] = h;
+  r->n++;
+}
+typedef struct {
+  long calls;
+  uint8_t *scr;
+  size_t scrn;
+} xexec_t;
+static int xexec_fn(void *user, const kcall_t *c) {
+  xexec_t *x = (xexec_t *)user;
+  kcall_t d = *c;
+  size_t off = 0, sz;
+  int i, rc;
+  x->calls++;
+  for (i = 0; i < d.nb; i++)
+    if (d.b[i].out) {
+      sz = (size_t)d.b[i].esz * (size_t)d.b[i].n;
+      if (off + sz > x->scrn) return -100;
+      d.b[i].p = x->scr + off;
+      memset(d.b[i].p, 0xA5, sz);
+      off += (sz + 7u) & ~(size_t)7u;
+    }
+  rc = k_exec(&d);
+  for (i = 0; i < d.nb; i++)
+    if (d.b[i].out) memcpy(c->b[i].p, d.b[i].p, (size_t)d.b[i].esz * (size_t)d.b[i].n);
+  return rc;
+}
+static void t_fwdx(const char *ck, const char *tk, int steps, const char *tag) {
+  bundle_t b;
+  char nm[64];
+  long n = 0, bad = 0, ncall = 0;
+  int pos, cur = 1, k;
+  xrec_t r[2];
+  xexec_t x;
+  k_hook_t hk[2];
+  k_exec_t ex;
+  if (bundle_load(&b, ck, tk, "K12V8,K12V8")) { check("fwdx load", 1, 1, "%g%g", 0, 0); return; }
+  memset(&x, 0, sizeof(x));
+  x.scrn = 4u * (size_t)(b.c.vocab_size + b.c.hidden_dim + b.c.dim + b.c.seq_len) + 4096u;
+  x.scr = malloc(x.scrn);
+  ex.fn = xexec_fn;
+  ex.user = &x;
+  for (k = 0; k < 2; k++) {
+    r[k].cap = 4096;
+    r[k].h = malloc(sizeof(uint32_t) * (size_t)r[k].cap);
+    hk[k].fn = xrec_hook;
+    hk[k].user = &r[k];
+  }
+  for (pos = 0; pos < steps && pos < b.c.seq_len; pos++) {
+    const int32_t *l0, *l1;
+    long c0 = x.calls, i;
+    r[0].n = r[1].n = 0;
+    l0 = lm_h_forward(&b.v[0].hs, &b.c, &b.v[0].hw, cur, pos, &hk[0]);
+    l1 = lm_h_forward_x(&b.v[1].hs, &b.c, &b.v[1].hw, cur, pos, &hk[1], &ex);
+    bad += !l0 || !l1;
+    if (!l0 || !l1) break;
+    bad += r[0].n != r[1].n || r[0].n > r[0].cap || x.calls - c0 != r[0].n;
+    for (i = 0; i < r[0].n && i < r[0].cap && i < r[1].n; i++) bad += r[0].h[i] != r[1].h[i];
+    bad += memcmp(l0, l1, 4 * (size_t)b.c.vocab_size) != 0;
+    bad += b.v[0].hs.argmax[0] != b.v[1].hs.argmax[0];
+    n += r[0].n + 2;
+    ncall += r[0].n;
+    cur = b.v[0].hs.argmax[0];
+    if (cur == 1 || cur < 0) cur = 2; /* keep going past BOS */
+  }
+  sprintf(nm, "%s forward_x executor", tag);
+  check(nm, n, bad, "calls %.0f positions %.0f", (double)ncall, (double)pos);
+  for (k = 0; k < 2; k++) free(r[k].h);
+  free(x.scr);
+  free(b.mem);
+  free(b.ck);
+  free(b.tk);
+}
+
 int main(void) {
   char **pr;
   int np;
@@ -1186,6 +1290,8 @@ int main(void) {
   t_rrec(cfg_s("ck1", ""), cfg_s("tk1", ""), "m1");
   t_rrec(cfg_s("ck2", ""), cfg_s("tk2", ""), "m2");
   t_dumpf(cfg_s("ck1", ""), cfg_s("tk1", ""), cfg_s("dumpf", "k.bin"), cfg_s("dumpf2", "k2.bin"), "m1");
+  t_fwdx(cfg_s("ck1", ""), cfg_s("tk1", ""), 64, "m1");
+  t_fwdx(cfg_s("ck2", ""), cfg_s("tk2", ""), 16, "m2");
   {
     FILE *f = fopen(cfg_s("chkres", "build/chk.res"), "r");
     long ci = 0, cb = 1;

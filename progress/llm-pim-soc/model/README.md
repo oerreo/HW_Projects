@@ -75,6 +75,11 @@ trace 내용: gemv는 행별 `S`, actq는 `amax`와 `k_aq_t`, rmsnorm은 `k, ss,
 - PIM bank image의 물리 배치(144비트 중 tag 16비트를 두 BRAM36의 parity 비트에 나누는 방법)는 `fpga/` wrapper의 일이다. image 형식은 논리 word(데이터 128 + tag 16)로 정했다.
 - DPI-C: `tb/dpi/kdpi.c`가 `src/kern.c`, `tabs.c`, `bank.c`, `core.c`를 Questa에서 직접 부른다(레코드 파일 reader, kernel 재생, stage 함수, 행 레코드 beat, bank image). 연산은 모두 `src/`의 함수다.
 
+## 실행기 끼움점 `lm_h_forward_x` (S5-1, `docs/spec/system.md` 2.1, 결정 O3)
+- `lm_h_forward_x(s, c, w, tok, pos, hook, ex)`: `lm_h_forward`와 같은 호출 순서와 descriptor로 forward를 돌리되, 모든 kernel 호출을 `k_exec(c)` 대신 `ex->fn(ex->user, c)`로 낸다(`ex` 또는 `ex->fn`이 NULL이면 `k_exec`). hook은 그대로 호출 앞(phase 0)과 뒤(phase 1)에 불린다. 반환값 규칙도 같다(호출 중 하나라도 음수면 NULL).
+- `k_exec_t { k_exec_fn fn; void *user; }`, `k_exec_fn(void *user, const kcall_t *c)`는 `src/llm.h`. 실행기는 descriptor의 버퍼에 결과를 써야 한다(forward가 이어서 그 버퍼를 읽는다). `fpga/sys/sw/sx_exec.c`의 `sx_exec`가 이 자리에서 kernel을 ARM 또는 PL IP로 보낸다.
+- `lm_h_forward(...)`는 `lm_h_forward_x(..., NULL)`이다. 바꾼 뒤 기존 덤프 4종(`cfg/d1.cfg`, `cfg/d2.cfg`의 HB와 K12V8, 260K와 15M)이 변경 전 바이너리의 출력과 `cmp` 동일함을 확인했고(2026-11-20, `model/.job51a`, `.job51b`), `make test`에 그룹 `m1/m2 forward_x executor`를 더했다: K12V8 두 사본에서 `lm_h_forward`와, 출력을 사본 버퍼에서 계산해 되돌려 쓰는 실행기를 낀 `lm_h_forward_x`를 260K 64 위치, 15M 16 위치 돌려 호출마다 (kid, prm, 버퍼 모양, 호출 뒤 버퍼 내용 hash)와 logits, argmax, 실행기 호출 수를 비교한다. 결과: TOTAL items 16,686,497(16,669,793 + 12,864 + 3,840), mismatches 0. 로그 `results/maketest_s5_1.txt`.
+
 ## make test 추가 그룹 (S4-1)
 | 그룹 | 내용 |
 |---|---|

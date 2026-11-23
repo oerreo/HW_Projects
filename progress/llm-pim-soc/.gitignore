@@ -27,3 +27,6 @@ fpga/bw/test/build/
 sim/.out*
 sim/.env*
 model/.job*
+.j*
+fpga/sys/test/build/
+fpga/sys/test/.j*

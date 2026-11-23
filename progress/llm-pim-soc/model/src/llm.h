@@ -118,6 +118,15 @@ void lm_h_build(lm_hw_t *w, const lm_cfg_t *c, const lm_fw_t *fw, const lm_hfmt_
 void lm_h_alloc(lm_hs_t *s, const lm_cfg_t *c, const lm_hfmt_t *f, lm_arena_t *a);
 const int32_t *lm_h_forward(lm_hs_t *s, const lm_cfg_t *c, const lm_hw_t *w, int tok, int pos,
                             const k_hook_t *hook);
+/* Executor insertion point (S5-1, system.md 2.1 / O3). Every kernel call of the forward pass
+ * goes through fn(user, c) instead of k_exec(c) when ex and ex->fn are not NULL; the call
+ * order and the descriptors are the same. fn returns 0 or a negative error like k_exec. The
+ * hook (if any) still sees phase 0 before and phase 1 after each call. lm_h_forward(...) is
+ * lm_h_forward_x(..., NULL) and its results are unchanged bit for bit. */
+typedef int (*k_exec_fn)(void *user, const kcall_t *c);
+typedef struct { k_exec_fn fn; void *user; } k_exec_t;
+const int32_t *lm_h_forward_x(lm_hs_t *s, const lm_cfg_t *c, const lm_hw_t *w, int tok, int pos,
+                              const k_hook_t *hook, const k_exec_t *ex);
 
 /* ---------------- PIM-style banked gemv model ---------------- */
 #define BANK_ROW 0 /* rows interleaved over banks, each bank produces whole outputs */

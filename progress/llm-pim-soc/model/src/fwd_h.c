@@ -47,15 +47,21 @@ static void kb(kcall_t *c, const void *p, int esz, int n, int out) {
   b->n = n;
   b->out = out;
 }
-static int run(const k_hook_t *h, kcall_t *c) {
+/* hook and executor of one forward pass */
+typedef struct {
+  const k_hook_t *hk;
+  const k_exec_t *ex;
+} fx_t;
+
+static int run(const fx_t *h, kcall_t *c) {
   int rc;
-  if (h && h->fn) h->fn(h->user, 0, c);
-  rc = k_exec(c);
-  if (h && h->fn) h->fn(h->user, 1, c);
+  if (h->hk && h->hk->fn) h->hk->fn(h->hk->user, 0, c);
+  rc = (h->ex && h->ex->fn) ? h->ex->fn(h->ex->user, c) : k_exec(c);
+  if (h->hk && h->hk->fn) h->hk->fn(h->hk->user, 1, c);
   return rc;
 }
 
-static int gemv(const k_hook_t *h, const lm_hm_t *m, const int8_t *x, const kscl_t *xs, int32_t *y) {
+static int gemv(const fx_t *h, const lm_hm_t *m, const int8_t *x, const kscl_t *xs, int32_t *y) {
   kcall_t c;
   kc0(&c, K_GEMV);
   kp(&c, m->rows); kp(&c, m->n); kp(&c, m->gs); kp(&c, m->we);
@@ -67,7 +73,7 @@ static int gemv(const k_hook_t *h, const lm_hm_t *m, const int8_t *x, const kscl
   return run(h, &c);
 }
 
-static int rmsnorm(const k_hook_t *h, const int32_t *x, int n, const lm_hg_t *g, int32_t epsc,
+static int rmsnorm(const fx_t *h, const int32_t *x, int n, const lm_hg_t *g, int32_t epsc,
                    int mode, int8_t *q, kscl_t *s) {
   kcall_t c;
   kc0(&c, K_RMSNORM);
@@ -79,7 +85,7 @@ static int rmsnorm(const k_hook_t *h, const int32_t *x, int n, const lm_hg_t *g,
   return run(h, &c);
 }
 
-static int actq(const k_hook_t *h, const int32_t *v, int n, int mode, int qmax, void *q, kscl_t *s) {
+static int actq(const fx_t *h, const int32_t *v, int n, int mode, int qmax, void *q, kscl_t *s) {
   kcall_t c;
   kc0(&c, K_ACTQ);
   kp(&c, n); kp(&c, K_FX); kp(&c, mode); kp(&c, qmax);
@@ -89,7 +95,7 @@ static int actq(const k_hook_t *h, const int32_t *v, int n, int mode, int qmax, 
   return run(h, &c);
 }
 
-static int rope(const k_hook_t *h, const int32_t *v, int n, int hs, const int16_t *cs, int32_t *o) {
+static int rope(const fx_t *h, const int32_t *v, int n, int hs, const int16_t *cs, int32_t *o) {
   kcall_t c;
   kc0(&c, K_ROPE);
   kp(&c, n); kp(&c, hs);
@@ -99,7 +105,7 @@ static int rope(const k_hook_t *h, const int32_t *v, int n, int hs, const int16_
   return run(h, &c);
 }
 
-static int add(const k_hook_t *h, const int32_t *a, const int32_t *b, int n, int32_t *o) {
+static int add(const fx_t *h, const int32_t *a, const int32_t *b, int n, int32_t *o) {
   kcall_t c;
   kc0(&c, K_ADD);
   kp(&c, n);
@@ -111,6 +117,12 @@ static int add(const k_hook_t *h, const int32_t *a, const int32_t *b, int n, int
 
 const int32_t *lm_h_forward(lm_hs_t *s, const lm_cfg_t *cf, const lm_hw_t *w, int tok, int pos,
                             const k_hook_t *h) {
+  return lm_h_forward_x(s, cf, w, tok, pos, h, NULL);
+}
+
+const int32_t *lm_h_forward_x(lm_hs_t *s, const lm_cfg_t *cf, const lm_hw_t *w, int tok, int pos,
+                              const k_hook_t *hook, const k_exec_t *ex) {
+  fx_t hx, *h = &hx;
   const lm_hfmt_t *f = &w->f;
   int D = cf->dim, H = cf->hidden_dim, hs = D / cf->n_heads, nkv = cf->n_kv_heads;
   int kv = hs * nkv, kvmul = cf->n_heads / nkv;
@@ -121,6 +133,8 @@ const int32_t *lm_h_forward(lm_hs_t *s, const lm_cfg_t *cf, const lm_hw_t *w, in
   const int16_t *cs = w->rope + (size_t)pos * hs;
   int rc = 0, l, j;
   kcall_t c;
+  hx.hk = hook;
+  hx.ex = ex;
   if (tok < 0 || tok >= cf->vocab_size || pos < 0 || pos >= cf->seq_len) return NULL;
   kc0(&c, K_EMBED);
   kp(&c, D); kp(&c, w->cls.gs); kp(&c, w->cls.we); kp(&c, K_FX);
