@@ -134,7 +134,7 @@
 - 프로세스 노출(agent 보고): 1초 미만 명령 두 건에 테스트 이름과 경로가 보임. TB 버그로 4.8 GB 로그가 생겨 즉시 중단하고 삭제, 이후 job에 파일 크기 제한을 넣음.
 - 다음: S4-8(전체 정리, viewer), S5(시스템 통합) 계획.
 
-## 2026-11-20: S5-0 시스템 통합 스펙  [notion: pending]
+## 2026-11-20: S5-0 시스템 통합 스펙  [notion: synced]
 - 한 일(hw-worker): `spec/system.md`(빌드 목록, HP/GP 배정과 주소 맵, 자원, SW 실행기와 오프로드 mask, 드라이버, golden 배치와 IP 배치의 차이, 호스트와 RTL 검증 방안, 측정과 추정 계획, 융합 후보), `spec/s5calc.py`, plan의 S5-1~S5-6.
 - 구조: bitstream 2개. A = `gemv_acc` P 1 + `attn`(DDR KV, H_PAR 1) + `vec`, 15M 주 대상이고 260K도 실행 가능(가속기형 대 PIM 비교를 같은 빌드로). P = `pim` + `attn`(BRAM KV, H_PAR 2) + `vec`, 260K. kernel별 오프로드는 한 bitstream 안에서 SW의 런타임 mask로 켜고 끈다(kernel 경계가 DDR 버퍼이고 forward가 순차라서 가능).
 - 자원 [계산, LUT는 추정]: A는 DSP 60/220, BRAM36 약 3. P는 DSP 149/220, BRAM36 128/140(S4-7 로그의 129는 이중 계산, 정정). P의 BRAM은 bank(144비트)와 kv_store(210비트)가 parity 비트를 데이터로 쓰는 매핑을 전제로 하며, 안 되면 180/140으로 넘친다. 대안 순서: primitive wrapper, vec N_MAX 256, KV를 DDR로 옮긴 빌드, 빌드 분할.
@@ -144,7 +144,7 @@
 - 미확인: 보드 수치 전부(ARM baseline, HP 대역폭, 호출 비용, timing, LUT), parity 매핑, Questa에서 시간을 쓰는 DPI exported task, 빌드 A 구성의 260K attention과 vec N_MAX 256 구성(시뮬레이션 안 함), Xilinx cache 관련 세부.
 - 다음: S5-1(시스템 SW와 호스트 모델), S5-2(`axil_xbar`, 시스템 top).
 
-## 2026-11-20: S5-1 시스템 SW와 호스트 검증  [notion: pending]
+## 2026-11-20: S5-1 시스템 SW와 호스트 검증  [notion: synced]
 - 한 일(hw-worker): `model/src`에 실행기 끼움점 `lm_h_forward_x`(kernel 호출을 실행기 포인터로 넘김, 기존 `lm_h_forward`는 불변). `fpga/sys/sw/`: 실행기 `sx_exec`(오프로드 mask 8비트, opt 비트, fallback 계수, 지연 실행과 barrier, WRGB 생략, KVW 발행), IP 드라이버 4개, 초기화(행 레코드 재배치, bank 적재, KV 관리), 측정 분해와 로그, K 모드(kernel 단위 그림자 비교), 보드용 HAL(`hal_xil.c`). `fpga/sys/test/`: spec 문서 기반 호스트 IP 레지스터 모델 4개와 cache 모사, 호스트 테스트.
 - 결과 [측정, 수퍼바이저 재실행, PC x86-64]: `make test` TOTAL 16,686,497 항목 mismatch 0(새 그룹 `forward_x executor` 포함). 시스템 호스트 테스트 `SYSHOST items=34 fail=0`, PASS. baseline `HOSTTEST items=23 fail=0`, PASS.
 - agent 보고(재실행한 테스트의 내부 수치, 개별 확인 안 함): 684 run(빌드 A/P, 두 모델, mask와 opt 21종, run 종류 E/T/P/K/W, 64비트와 `-m32`)에서 token, logits hash, KCMP, COH, fallback, IPERR 모두 0. KCMP 2,029,960 호출 mismatch 0. 결함 주입 12종(flush 누락, invalidate 누락, q 레코드 순서, KV layer base, bank base 겹침, WRGB 생략 오류, barrier 위반, 응답 오류, timeout, 보호 조건 우회, 레지스터 순서)이 각각 고유한 증거로 검출됨. 덤프 4종은 변경 전과 `cmp` 동일.
@@ -154,7 +154,7 @@
 - 프로세스 노출(agent 보고): 초기 몇 번 명령 문자열에 `model`, `fpga/sys/test` 경로 조각이 최장 약 2.5분 보임(프로젝트 이름은 아님). 이후 루트의 job 파일로 변경.
 - 다음: S5-2 검수, S5-3(시스템 TB 기반: 공유 메모리, 드라이버 C 코드의 DPI 연결).
 
-## 2026-11-23: S5-2 axil_xbar와 시스템 top  [notion: pending]
+## 2026-11-23: S5-2 axil_xbar와 시스템 top  [notion: synced]
 - 한 일(hw-worker, 2026-11-20 작업): `rtl/l4/axil_xbar.sv`(AXI4-Lite 1 -> N, slot 4 KiB, 빈 slot은 읽기 0과 OKAY, register slice parameter), `rtl/l4/sys_a_top.sv`, `sys_p_top.sv`(인스턴스와 배선만)와 TB(`tb_axil_xbar`, 두 top 공용 `tb_sys_top`). system.md 1.7절과 hierarchy.md 3.12절에 확정 세부.
 - 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 465 run, fails 0(기존 424 + axil_xbar 30, sys_a_top 6, sys_p_top 5).
 - agent 보고(재실행 안 함): xbar mutation 8/8, top 배선 mutation 9/9 검출(slot 교환, HP 포트 교환, parameter 값, reset 누락, tie-off, SLOT_EN). lint 경고 0. smoke는 slot별 ID/CONFIG 대조, 빈 slot 0, IP마다 호출 하나를 golden(DPI)과 대조, 호출마다 burst가 나간 HP 포트 집합이 기대와 같은지 검사.

@@ -1,7 +1,7 @@
 # 시스템 개요: 통과한 L3 IP 4종과 token 한 개의 흐름
 
-- 원본과 확인일: 확인일 2026-11-20(S4-7 완료 뒤). kernel 호출 순서는 `model/src/fwd_h.c`의 `lm_h_forward`를 읽어 확인했다(golden이자 SW baseline). IP의 op와 데이터 배치는 `docs/spec/gemv_acc.md` 1절, `docs/spec/pim.md` 1~2절, `docs/spec/attn.md` 2절, `docs/spec/vec.md` 1~2절, ARM에 남기는 kernel은 `docs/spec/arch.md` 5.5절, HP 포트 배분은 `arch.md` 7절(초안)이다. 수치는 `docs/log.md` S4-4~S4-7 항목에서 가져왔다.
-- **이 문서의 시스템 통합(L4 `sys_p_top`, `sys_a_top`)은 계획(S5)이다.** RTL이 없고, 이 문서의 연결 그림은 각 IP의 단독 인터페이스를 이어 놓은 개념도다. 아직 어떤 시스템 빌드도 시뮬레이션되지 않았다.
+- 원본과 확인일: 확인일 2026-11-20(S4-7 완료 뒤), 시스템 통합 부분(머리말 4번째 항목, 2절, 5절)은 2026-11-23(S5-0~S5-2 반영)에 갱신. kernel 호출 순서는 `model/src/fwd_h.c`의 `lm_h_forward`를 읽어 확인했다(golden이자 SW baseline). IP의 op와 데이터 배치는 `docs/spec/gemv_acc.md` 1절, `docs/spec/pim.md` 1~2절, `docs/spec/attn.md` 2절, `docs/spec/vec.md` 1~2절, ARM에 남기는 kernel은 `docs/spec/arch.md` 5.5절, HP 포트 배분의 원본은 `docs/spec/system.md` 1.3절(S5-0 스펙, S5-2 RTL로 구현 확인)이다. 4절 수치는 `docs/log.md` S4-4~S4-7 항목, 5절 수치는 S5-0, S5-2 항목에서 가져왔다.
+- **시스템 통합 상태(2026-11-23)**: L4 `axil_xbar`, `sys_a_top`, `sys_p_top`은 RTL이 있고 smoke 시뮬레이션을 통과했다(S5-2, `./sim/run.sh all` 465 run fails 0 [측정, 수퍼바이저 재실행]). smoke는 slot별 ID/CONFIG, IP마다 호출 하나의 golden 대조, HP 포트 집합 검사까지이고, **IP 사이 kernel 연쇄와 forward는 아직 시뮬레이션하지 않았다**(S5-3, S5-4. S5-4는 진행 중). 합성, 타이밍, 보드는 미확인. 상세 block diagram은 `l4_sys_top.md`, SW 쪽은 `sw_executor.md`.
 - **cycle 값은 모두 Questa 시뮬레이션 모델의 값이다**(`axi_mem_slave`, stall 없음, read/B latency 1, 100 MHz 타이밍 미확인). 보드 값이 아니고 HP 포트의 실제 latency와 대역폭, ARM 호출 비용, 캐시 flush 비용은 들어 있지 않다. 합계는 [계산]이다.
 - 통과한 L3 IP 4종: `gemv_acc_top`(S4-4), `pim_top`(S4-5), `attn_top`(S4-6, S4-6b), `vec_top`(S4-7). 회귀 `./sim/run.sh all` 424 run, fails 0 [측정, 수퍼바이저 재실행].
 
@@ -17,7 +17,7 @@
 - IP는 모두 AXI4-Lite slave(레지스터 `ID`, `CONFIG`, `CTRL`, `STATUS`, `ERR`, `CYCLES`, `RD_STALL`, `WR_STALL`, `OPS` 틀이 공통)와 HP 포트용 AXI4 read/write master를 가진다(`gemv_acc_top`은 slice P개의 read master, 나머지는 각 1개). 호출은 PS가 descriptor 레지스터를 쓰고 `CTRL`로 start, `STATUS` polling이다.
 - ARM에 남기는 kernel(v1): embed, rope, add(`arch.md` 5.5: PC 비중 합 0.5% 이하, `measure.md` 7절). head별 ACTQ를 `vec_top`에 보낼지 ARM에 둘지는 S5에서 정한다(`arch.md` 5.1은 ARM 유지를 권고, `vec.md` 6.3은 ARM 호출 비용과의 비교를 보드 측정 전이라 판단하지 않음).
 
-## 2. 계획(S5): 시스템 구성 개념도
+## 2. 시스템 구성: 빌드 2개 (S5-0 스펙, S5-2 RTL)
 
 ```mermaid
 flowchart LR
@@ -27,7 +27,7 @@ flowchart LR
 
     ddr[("DDR<br/>활성(x, a8, y, h1, h3, logits), q 레코드, o, p<br/>가중치(가속기형), KV(15M), 모델 상수 표")]:::mem
 
-    subgraph PL["PL (계획, S5 통합 전)"]
+    subgraph PL["PL (L4 top: sys_a_top 또는 sys_p_top, axil_xbar로 slot 분할)"]
         gemv["gemv_acc_top (S4-4, 통과)<br/>GEMV, 15M 주 대상"]:::ip
         pim["pim_top (S4-5, 통과)<br/>LDW, WRGB, MACAB (260K)"]:::ip
         attn["attn_top (S4-6, 통과)<br/>ATTN, KVW"]:::ip
@@ -55,8 +55,9 @@ flowchart LR
 ```
 
 - 초록 = RTL 시뮬레이션을 통과한 IP(S4), 노랑 = ARM, 파랑 = DDR, 회색 점선 = IP 내부 BRAM.
-- 한 시스템에서 gemv 쪽은 하나만 쓴다: 260K PIM형 시스템(`sys_p_top`)은 `pim_top` + `attn_top` + `vec_top`, 15M 가속기형 시스템(`sys_a_top`)은 `gemv_acc_top` + `attn_top` + `vec_top`(`hierarchy.md` 1절 L4). 이 그림은 두 구성을 겹쳐 그렸다.
-- HP 포트 배분은 `arch.md` 7절의 초안이다: 가속기형 시스템은 `gemv_acc_top` HP0, `attn_top` HP1, `vec_top` HP3. PIM형 시스템은 트래픽이 작아 HP 하나를 interconnect로 공유. 이 배분과 DDR 포트 독립성은 [미확인]이다.
+- 한 시스템에서 gemv 쪽은 하나만 쓴다: 빌드 P(260K, `sys_p_top`)는 `pim_top` + `attn_top` + `vec_top`, 빌드 A(15M 주 대상, 260K도 실행 가능, `sys_a_top`)는 `gemv_acc_top` + `attn_top` + `vec_top`. 이 그림은 두 구성을 겹쳐 그렸고 빌드별 그림은 `l4_sys_top.md`에 있다.
+- GP0 레지스터: `axil_xbar`가 0x43C0_0000 기준 4 KiB slot으로 나눈다(slot 0 `gemv_acc_top`, 1 `pim_top`, 2 `attn_top`, 3 `vec_top`. 빌드 A는 slot 1, 빌드 P는 slot 0이 비어 읽기 0).
+- HP 포트 배정(RTL 구현, `l4_sys_top.md` 1.4절): 빌드 A는 HP0 `gemv_acc_top`, HP1 `attn_top`, HP3 `vec_top`, HP2 미사용. 빌드 P는 HP0 `pim_top`, HP1 `attn_top` engine 0, HP2 `attn_top` engine 1 read, HP3 `vec_top`(이전 초안의 "PIM형은 HP 하나를 공유"에서 바뀜). HP 포트 사이 DDR 컨트롤러 독립성은 [미확인]이다.
 - 같은 HP 포트에서 여러 IP가 동시에 요구하는지는 이 그림에서 정하지 않았다(forward가 순차라 한 번에 한 IP만 일한다고 보는 것이 `arch.md` D10의 전제).
 
 ## 3. token 한 개의 layer 흐름 (`fwd_h.c` 기준)
@@ -104,7 +105,7 @@ flowchart TD
 
 ## 4. token당 cycle 표 [측정, Questa 시뮬레이션 모델, 보드 값 아님]
 
-조건: 모든 IP가 `axi_mem_slave` 모델(stall 없음, read/B latency 1), 기본 parameter, 100 MHz 타이밍 미확인. 시스템 통합과 ARM 연산은 포함하지 않는다. attention은 위치 T에 따라 커지므로 표의 값은 각 모델의 **최대 위치**(260K T 512, 15M T 256) 값이다. GEMV와 vec는 위치와 거의 무관하다(vec는 위치 평균, `vec.md` 6.3).
+조건: 모든 IP가 `axi_mem_slave` 모델(stall 없음, read/B latency 1), 기본 parameter, 100 MHz 타이밍 미확인. 시스템 통합(xbar, 호출 순서)과 ARM 연산은 포함하지 않는다(이 표는 S4 시점의 IP 단독 값이고, S5-2의 시스템 smoke는 CYCLES를 대조하지 않았다). attention은 위치 T에 따라 커지므로 표의 값은 각 모델의 **최대 위치**(260K T 512, 15M T 256) 값이다. GEMV와 vec는 위치와 거의 무관하다(vec는 위치 평균, `vec.md` 6.3).
 
 | IP | op | 260K (PIM형 시스템) | 260K (가속기형, 비교) | 15M (가속기형 시스템) | 출처 |
 |---|---|---|---|---|---|
@@ -130,4 +131,21 @@ flowchart TD
 - 비중은 합 대비 [계산]이고 반올림했다. 합은 위 표 값에서 직접 더했다(예: 260K PIM형 4,500 + 32,470 + 15,680 = 52,650, GEMV 약 4,500은 4,499~4,506의 근삿값).
 - 같은 값 비교: 260K에서 가속기형 P = 1 대비 PIM형의 GEMV cycle은 약 8.4배 적다(`log.md` S4-6b: 약 8.4배 유지, 시뮬레이션 모델). 합 기준으로는 attention과 vec가 같이 있어 약 1.6배(86,053~86,088 대 52,650)다 [계산].
 - 관찰(`log.md` S4-7의 오케스트레이터 관찰): GEMV를 PIM으로 줄이면 260K의 병목이 attention(T 512에서 약 32,500)과 양자화(vec 약 15,700)로 옮겨 간다. head별 ACTQ를 attention 앞단에 융합하는 것은 S5의 검토 대상이다(`arch.md` 5.1의 권고와 같은 방향).
-- 이 표는 시뮬레이션 모델의 합이다. 시스템의 end-to-end 시간은 S5 통합과 S6 보드 측정 뒤에 추정과 실측을 구분해 적는다(Amdahl 추정과 실측 비교는 `project-flow.md`의 시스템 프로젝트 방식).
+- 이 표는 시뮬레이션 모델의 합이다. 시스템의 end-to-end 시간은 S6 보드 측정 뒤에 추정과 실측을 구분해 적는다(Amdahl 추정과 실측 비교는 `project-flow.md`의 시스템 프로젝트 방식).
+
+## 5. PL 시간 [계산, S5-0] (보드 값 아님)
+
+원본: `docs/log.md` S5-0, `docs/spec/system.md` 4.4절, 재현 `docs/spec/s5calc.py`. 4절의 시뮬레이션 cycle을 100 MHz로 환산하고 위치 평균으로 모은 값이다.
+
+- 조건: **100 MHz 가정**, 입력은 latency 1 시뮬레이션 cycle(`axi_mem_slave`, stall 없음), **ARM 쪽 비용(embed, rope, add, 호출과 cache 오버헤드, 데이터 이동)과 HP latency를 제외**한 PL 시간이다. 보드 값이 아니다. timing 달성 여부는 미확인.
+- 4절 표(T 최대 위치)와 아래 표(위치 평균)의 attention 값이 다른 것은 위치 기준이 달라서다(260K attention은 직선 `60 T + 1,750`, 15M DDR H_PAR 1은 `756 T + 4,866` [계산]).
+
+| 빌드 | 구성 (전부 오프로드) | token당 PL 시간 [계산, 100 MHz 가정] | 근거 |
+|---|---|---|---|
+| P (260K, PIM형 + BRAM KV attention H_PAR 2 + vec) | 시뮬레이션 cycle 37,559 ~ 40,010, 위치 0..511 평균 | **375.6 ~ 400.1 us/token** | `log.md` S5-0, `system.md` 4.4절 |
+| A (15M, 가속기형 P 1 + DDR KV attention H_PAR 1 + vec, `FUSE_AM`) | 시뮬레이션 cycle 2,107,730, 위치 0..255 평균 | **21.08 ms/token** (21,077 us) | 같음 |
+
+- 빌드 A 21.08 ms 중 GEMV가 92.6% [계산]이고, 15M 행 레코드 15,586,816 B를 HP 포트 하나의 이론 대역폭(800 MB/s 가정)으로 읽는 시간 19.48 ms가 하한이다 [계산]. 실제 효율(eta)이 1보다 작으면 PL 시간은 더 길어진다.
+- 빌드 P의 범위(375.6 ~ 400.1)는 PIM GEMV 호출 묶음 방식(token 한 run 4,499~4,506 cycle 대 레코드마다 run 약 6,950)에 따른 것으로, `system.md` 4.4절 표에서 확인한 구성이다.
+- ARM baseline(S3)과 HP 대역폭 실측이 없으므로 가속비와 end-to-end 추정은 이 문서에 쓰지 않는다. 참고로 PC(x86) baseline 15M K12V8은 6.650 ms/token이었다(`log.md` S3, ARM 아님).
+- 자원 [계산, 합성 안 함, LUT는 추정]: 빌드 A는 DSP 60/220, BRAM36 약 3. 빌드 P는 DSP 149/220, BRAM36 128/140이고 bank(144비트)와 kv_store(210비트)가 parity 비트를 데이터로 쓰는 매핑을 전제로 한다(안 되면 180/140으로 넘침). S4-7 로그의 129는 이중 계산이라 S5-0에서 128로 정정됐다.
