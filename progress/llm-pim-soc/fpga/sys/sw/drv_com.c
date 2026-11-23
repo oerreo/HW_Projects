@@ -66,6 +66,13 @@ int drv_go(sx_t *x, int slot, uint32_t op, uint64_t est_cyc, dres_t *r) {
     iperr_line(x, slot, "timeout", 0);
     x->sys->dead[slot] = 1;
     dw_reset(x, slot);
+    /* the calls of this IP now run on the ARM, which reads data that earlier IP calls wrote
+       and the consumer rule left in the cache unread because an IP was to consume it (e.g. K/V
+       slots written by vec for attention): clean + invalidate the whole D-cache so that every
+       later ARM read comes from DDR and no stale line is written back (S5-4, RTL system TB:
+       arm_rd_stale / flush_clobber after a timeout). Every ARM-written line is already clean
+       (producer rule), so this writes nothing back. */
+    hal_flush_all();
     return DRV_TIMEOUT;
   }
   if (st & ST_ERR) err = hal_rd(slot, R_ERR);

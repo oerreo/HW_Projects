@@ -302,6 +302,14 @@ L3 top/CSR과 `pim_ctrl`, `kv_rd`의 runtime 곱셈(주소 계산, descriptor �
 - 하위 L3 모듈(`gemv_acc_top`, `pim_top`, `attn_top`, `vec_top`)은 수정하지 않았다. 각 IP의 `ADDR_W`는 12(slot 4 KiB)로 고정해 연결한다.
 - HP 포트마다 독립 메모리 모델이라, 포트 사이 공유 버퍼가 필요한 시험은 S5-3(`axi_mem_slave` EXT_STORE)에서 한다.
 
+### 3.13 S5-3/S5-4 시스템 TB (2026-11-23)
+| TB | DUT | 구동 | 메모리 | 회귀 |
+|---|---|---|---|---|
+| `tb/sys_top/tb_sys_fwd.sv` | `sys_a_top` / `sys_p_top` (VAR 1: A2, PD; VAR 2: XB_REG 0) | `fpga/sys/sw` 시스템 프로그램(수정 없음)을 DPI-C context task로 실행, HAL `tb/sys_top/hal_dpi.c`가 `axil_bfm`의 exported task로 레지스터 접근 | HP 포트 4개의 `axi_mem_slave`(EXT_STORE 1)가 C cache 모사(`fpga/sys/test/hal_cache.c`)의 DDR 이미지 하나를 공유 | `sim/tests/sys_smoke.cfg`(S5-3), `sys_fwd.cfg`(S5-4) |
+
+- L4 top과 L3 IP는 S5-3/S5-4에서 수정하지 않았다. 판정과 시나리오는 `spec/system.md` 3.2절 "S5-3/S5-4 구현".
+- `axi_mem_slave`는 TB 공통 모듈이라 EXT_STORE 기본 0에서 기존 동작이 같음을 전체 회귀로 확인했다(465 run).
+
 ## 4. golden에 경계가 없어 `model/`에 추가해야 하는 것
 
 kernel 단위(K_GEMV, K_ACTQ, K_RMSNORM, K_ATTN2, K_SWIGLU, K_ARGMAX)는 기존 덤프 레코드로 검증할 수 있다. 아래는 leaf와 L1 단위의 경계가 없거나, kernel 덤프만으로는 부족한 것이다. 원칙: **kern.c의 kernel 함수가 스스로 호출하는 stage 함수로 쪼개서 export한다**(별도 재구현 금지). 바꾼 뒤 `make test` PASS와 기존 덤프 `cmp` 동일로 golden이 변하지 않았음을 확인한다.

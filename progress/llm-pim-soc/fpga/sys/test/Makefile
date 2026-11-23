@@ -4,6 +4,7 @@
 #   make bins    t (64-bit), t32 (-m32), both with fault injection hooks, and the
 #                -fsyntax-only checks of the board files against stub BSP headers
 #   make test    bins + run.sh (last line: SYSHOST RESULT: PASS|FAIL)
+#   make stub    tclsh stub check of the Vivado / XSCT scripts (S5-5, STUBCHECK RESULT: ...)
 #   make clean
 #
 # Needs fpga/sw/gen/m1_data.c (make -C ../../sw/test data) and the expected-value headers
@@ -25,7 +26,7 @@ STRICT := -std=c99 -pedantic $(WARN) -Werror
 CORE   := core tok fwd_f fwd_q hq fwd_h kern tabs bank
 BSRC   := out lmhash exp plat_host prof
 SSRC   := sys_main sbench sx_exec sysmem drv_com drv_ga drv_pi drv_at drv_ve
-TSRC   := hal_host ipm_ga ipm_pi ipm_at ipm_ve
+TSRC   := hal_host hal_cache ipm_ga ipm_pi ipm_at ipm_ve
 INC    := -I$(SW) -I. -I$(BSW)/src -I$(BSW)/expect -I$(MSRC)
 HOST   := -DHAL_HOST -DSX_FAULT_INJ=1
 M32    := -m32 -msse2 -mfpmath=sse
@@ -37,7 +38,7 @@ objs = $(addprefix $(1)/m_,$(addsuffix .o,$(CORE))) $(addprefix $(1)/b_,$(addsuf
        $(addprefix $(1)/s_,$(addsuffix .o,$(SSRC))) $(addprefix $(1)/t_,$(addsuffix .o,$(TSRC))) \
        $(1)/d_m1.o
 
-.PHONY: all bins test clean
+.PHONY: all bins test stub clean
 all: bins
 
 $(B) $(B)/o64 $(B)/o32 $(B)/logs:
@@ -75,6 +76,9 @@ bins: $(B)/t $(B)/t32 $(B)/xilsyntax.ok
 
 test: bins | $(B)/logs
 	sh ./run.sh
+
+stub:
+	tclsh stub_check.tcl
 
 clean:
 	rm -rf $(B)

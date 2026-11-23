@@ -24,6 +24,17 @@
 //     word per line, word i at base + 8 i), load_bin/dump_bin (raw little-endian bytes),
 //     clear(). A testbench loads golden data from a file or from DPI-C (tb/dpi/kdpi_pkg.sv)
 //     through these.
+//   - Shared store (EXT_STORE = 1, S5-3, docs/spec/system.md 3.2): the bytes are not kept in
+//     this instance but in one C memory reached through DPI-C (axm_rd64 / axm_wr64, 64-bit
+//     beats with WSTRB, implemented by the testbench's C side, e.g. tb/sys_top/hal_dpi.c), so
+//     that the instances of several HP ports see the same DDR image as the C program. The
+//     backdoor functions go to the same store (bd_written is then always 1, clear() does
+//     nothing, there are no uninitialized reads). A beat outside the C memory is an error
+//     (tag AXI_EXT). EXT_STORE = 0 (default) is the behaviour above, unchanged; the imports
+//     are then never called and need no C implementation.
+//   - Hang injection (S5-4): inj_hang(r, b) stops returning R beats (r) and / or B responses
+//     (b) from now on (requests are still accepted up to MAX_OUTS): a master waiting for them
+//     never finishes (timeout path of a driver). inj_hang(0, 0) resumes.
 //
 // Protocol assertions on the master inputs. Every message starts with its tag so that
 // sim/run.sh (expect assert:<TAG>=<n>) can count them; each one fires once per event:
@@ -38,6 +49,7 @@
 //               (once per burst)
 //   AXI_IDLE    check_idle(): requests, beats or responses still pending at the end
 //   AXI_UNINIT  read of an unwritten byte (only after cfg_uninit_err(1))
+//   AXI_EXT     (EXT_STORE) beat outside the shared C memory
 // RVALID/RDATA/RLAST/RID and BVALID/BID are held until RREADY / BREADY (model side, checked
 // by the self-test tb/axi_mem/tb_axi_mem.sv).
 module axi_mem_slave #(
@@ -48,6 +60,7 @@ module axi_mem_slave #(
   parameter int    MAX_OUTS  = 8,    // AR and AW requests accepted ahead
   parameter int    WBUF      = 64,   // W beats accepted ahead of their AW
   parameter bit    REQ_ALIGN = 1'b1, // AXI_ALIGN check
+  parameter bit    EXT_STORE = 1'b0, // 1: bytes in the shared C memory (DPI-C), DW must be 64
   parameter string NAME      = "mem"
 ) (
   input  logic               clk,
@@ -99,6 +112,12 @@ module axi_mem_slave #(
   if (AW < 12 || AW > 64) $error("axi_mem_slave: AW=%0d must be 12..64", AW);
   if (MAX_LEN < 0 || MAX_LEN > 255) $error("axi_mem_slave: MAX_LEN=%0d must be 0..255", MAX_LEN);
   if (MAX_OUTS < 1 || WBUF < 1) $error("axi_mem_slave: MAX_OUTS and WBUF must be >= 1");
+  if (EXT_STORE && DW != 64) $error("axi_mem_slave: EXT_STORE needs DW=64 (DW=%0d)", DW);
+
+  // shared store (EXT_STORE): 8-byte word at a (a % 8 == 0); return 0 = inside the C memory
+  import "DPI-C" function int axm_rd64(input longint unsigned a, output longint unsigned d);
+  import "DPI-C" function int axm_wr64(input longint unsigned a, input longint unsigned d,
+                                       input int unsigned strb);
 
   // ---------------- memory ----------------
   typedef byte unsigned page_t[PG];
@@ -111,6 +130,10 @@ module axi_mem_slave #(
 
   function automatic void bd_write8(longint unsigned a, byte unsigned d);
     longint unsigned p = a / PG;
+    if (EXT_STORE) begin
+      void'(axm_wr64(a & ~longint'(7), longint'(d) << (8 * (a % 8)), 1 << (a % 8)));
+      return;
+    end
     if (!mem.exists(p)) begin
       page_t z;
       page_v_t zv;
@@ -125,6 +148,11 @@ module axi_mem_slave #(
   // unwritten bytes read as 8'hA5; *u is set if any byte was unwritten
   function automatic byte unsigned rd8(longint unsigned a, ref bit u);
     longint unsigned p = a / PG;
+    if (EXT_STORE) begin
+      longint unsigned w;
+      void'(axm_rd64(a & ~longint'(7), w));
+      return w[8 * (a % 8) +: 8];
+    end
     if (!mem.exists(p) || !vld[p][a % PG]) begin
       u = 1'b1;
       return 8'hA5;
@@ -139,6 +167,7 @@ module axi_mem_slave #(
 
   function automatic bit bd_written(longint unsigned a);
     longint unsigned p = a / PG;
+    if (EXT_STORE) return 1'b1;
     return mem.exists(p) && vld[p][a % PG];
   endfunction
 
@@ -154,6 +183,7 @@ module axi_mem_slave #(
   endfunction
 
   function automatic void clear();
+    if (EXT_STORE) return;
     mem.delete();
     vld.delete();
     n_uninit = 0;
@@ -236,6 +266,12 @@ module axi_mem_slave #(
   endfunction
   function automatic void cfg_uninit_err(bit e);
     uninit_err = e;
+  endfunction
+
+  bit hang_r = 1'b0, hang_b = 1'b0;
+  function automatic void inj_hang(bit r, bit b);
+    hang_r = r;
+    hang_b = b;
   endfunction
 
   function automatic bit stall(int pct);
@@ -329,6 +365,11 @@ module axi_mem_slave #(
     logic [DW-1:0] d;
     bit u = 1'b0;
     longint unsigned w0 = a & ~longint'(NBY - 1);
+    if (EXT_STORE) begin
+      longint unsigned w;
+      if (axm_rd64(w0, w) != 0) viol("AXI_EXT", $sformatf("read beat at 0x%0h outside the shared memory", w0));
+      return DW'(w);
+    end
     for (int i = 0; i < NBY; i++) d[8*i +: 8] = rd8(w0 + i, u);
     if (u) begin
       n_uninit++;
@@ -339,6 +380,11 @@ module axi_mem_slave #(
 
   function automatic void wr_word(longint unsigned a, logic [DW-1:0] d, logic [NBY-1:0] s);
     longint unsigned w0 = a & ~longint'(NBY - 1);
+    if (EXT_STORE) begin
+      if (axm_wr64(w0, 64'(d), 32'(s)) != 0)
+        viol("AXI_EXT", $sformatf("write beat at 0x%0h outside the shared memory", w0));
+      return;
+    end
     for (int i = 0; i < NBY; i++)
       if (s[i]) bd_write8(w0 + i, d[8*i +: 8]);
   endfunction
@@ -424,7 +470,7 @@ module axi_mem_slave #(
             rbeat = 0;
           end else rbeat++;
         end
-        if (arq.size() > 0 && cyc >= arq[0].t && !stall(st_r)) begin
+        if (arq.size() > 0 && cyc >= arq[0].t && !hang_r && !stall(st_r)) begin
           logic [1:0] rr;
           rr = win_resp(rd_errw, beat_addr(arq[0], rbeat));
           if (rr != 2'b00) n_rd_err++;
@@ -488,7 +534,7 @@ module axi_mem_slave #(
       // ---- B ----
       if (!(bvalid_o && !bready_i)) begin
         if (bvalid_o && bready_i) void'(bq.pop_front());
-        if (bq.size() > 0 && cyc >= bq[0].t && !stall(st_b)) begin
+        if (bq.size() > 0 && cyc >= bq[0].t && !hang_b && !stall(st_b)) begin
           bvalid_o <= 1'b1;
           bid_o    <= bq[0].id;
           bresp_o  <= bq[0].resp;

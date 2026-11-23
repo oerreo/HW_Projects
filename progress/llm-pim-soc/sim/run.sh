@@ -37,6 +37,12 @@
 #   TB_FILES="common/tb_util_pkg.sv axi_mem/tb_axi_mem.sv"  relative to $TB_DIR
 #   DPI=1                                  1: compile the golden model C sources
 #                                          (model/src) and tb/dpi/kdpi.c via vlog
+#   DPI_C="model/src/core.c ..."           optional (DPI=1): C sources of dpi.so
+#                                          (relative to the project) instead of the
+#                                          golden model + tb/dpi/kdpi.c; built with
+#                                          the same flags plus DPI_DEFS and -I for
+#                                          every directory of DPI_INC (relative to
+#                                          the project), linked with -lm
 #   NEED="model/build/vec/m1/gemv.bin"     files (relative to the project) that
 #                                          must exist; missing -> compile FAIL with
 #                                          a hint ("make vec" in model/)
@@ -61,6 +67,8 @@
 #   T         test name for a single-test run (sim/tests/$T.cfg).
 #   RTL_DIR   RTL source root (default ../../rtl, i.e. <project>/rtl seen from
 #             sim/<name>/). Used for mutation tests.
+#   DPI_DIR   root of the DPI_C / DPI_INC paths seen from sim/<name>/ (default ../..,
+#             the project); a copy of the C tree there is used for C mutation tests.
 #   SIM_TAG   suffix of the run directory (sim/<name><SIM_TAG>), default empty.
 #   ONLY      run only the runs whose label matches this regex.
 #
@@ -76,6 +84,7 @@ RTL_DIR=${RTL_DIR:-../../rtl}
 TB_DIR=../../tb
 MODEL_DIR=../../model
 SIM_TAG=${SIM_TAG:-}
+DPI_DIR=${DPI_DIR:-../..}
 ONLY=${ONLY:-.}
 
 # golden model C (model/src, no file I/O) + DPI wrapper; same flags as model/Makefile
@@ -112,7 +121,7 @@ has_tier() {
   local cfg=$1 tier=$2
   [[ -z $tier ]] && return 0
   local -a RUNS=()
-  local TOP="" RTL_FILES="" TB_FILES="" DPI=0 NEED=""
+  local TOP="" RTL_FILES="" TB_FILES="" DPI=0 NEED="" DPI_C="" DPI_INC="" DPI_DEFS=""
   # shellcheck disable=SC1090
   source "$cfg"
   local entry label args expect rtier
@@ -130,7 +139,7 @@ run_test() {
   local cfg=$SIM_ROOT/tests/$name.cfg
   [[ -f $cfg ]] || { echo "no config for test '$name'"; N_FAILS=$((N_FAILS + 1)); return 2; }
 
-  local TOP="" RTL_FILES="" TB_FILES="" DPI=0 NEED=""
+  local TOP="" RTL_FILES="" TB_FILES="" DPI=0 NEED="" DPI_C="" DPI_INC="" DPI_DEFS=""
   local -a RUNS=()
   # shellcheck disable=SC1090
   source "$cfg"
@@ -151,8 +160,15 @@ run_test() {
   } > c.f
   if [[ $DPI == 1 ]]; then
     {
-      echo "-shared -fPIC $DPI_CCFLAGS -I$MTI_INC"
-      for f in $MODEL_C; do echo "$f"; done
+      if [[ -n $DPI_C ]]; then
+        echo "-shared -fPIC -std=gnu99 -O2 -ffp-contract=off $DPI_DEFS -I$MTI_INC"
+        for f in $DPI_INC; do echo "-I$DPI_DIR/$f"; done
+        for f in $DPI_C; do echo "$DPI_DIR/$f"; done
+        echo "-lm"
+      else
+        echo "-shared -fPIC $DPI_CCFLAGS -I$MTI_INC"
+        for f in $MODEL_C; do echo "$f"; done
+      fi
       echo "-o dpi.so"
     } > g.f
   fi

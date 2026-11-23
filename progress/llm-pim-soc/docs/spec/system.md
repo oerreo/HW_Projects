@@ -395,6 +395,37 @@ tb_sys_top (Questa)
 - **비용** [추정]: 새 코드는 `axil_xbar` + TB, L4 top 2개(배선), `tb_sys_top.sv`, `hal_dpi.c`, `axi_mem_slave` EXT_STORE. 드라이버와 실행기는 3.1과 같은 코드라 새로 쓰는 것이 아니다. 15M 위치 하나가 약 200만 cycle이라 wall time이 IP TB보다 길다(백그라운드 실행, 순차). DPI 빌드는 기존 `run.sh`의 `gcc @g.f` 방식으로 하고 실행 설정은 인자 파일과 환경변수로 준다(`process-privacy.md`).
 - **대안(O8 b)**: SV 쪽에서 덤프 레코드로 호출 순서를 재현하고 ARM 쪽 kernel을 DPI로 부르는 TB. 드라이버 C 코드가 RTL에 닿지 않아 보드에서 처음 만나는 통합 문제(레지스터 순서, 정렬, 일관성)를 못 잡는다. 권고하지 않는다.
 
+**S5-3/S5-4 구현 (2026-11-23, Questa 2024.2 시뮬레이션 통과, 보드 전)**
+- DPI 구조(채택: 위 구성 그대로): `tb/sys_top/tb_sys_fwd.sv`의 `import "DPI-C" context task sys_tb_main`이 `fpga/sys/sw/sys_main.c`의 main(이름만 `sys_main_dpi.c`에서 바꿈)을 돌리고, `hal_rd/hal_wr`(`tb/sys_top/hal_dpi.c`)는 exported task `sv_axil_rd/sv_axil_wr`(axil_bfm 트랜잭션 하나, 시뮬레이션 시간 소비)를 부른다. 먼저 작은 실험(`sim/.x0`)으로 imported context task 안에서 시간 소비 exported task 2,000회 왕복, C 재귀 깊이 200(약 1 MB 스택)이 되는 것과, 쓰지 않는 DPI import는 C 구현 없이 경고 0임을 확인했다. `fpga/sys/sw`의 실행기, 드라이버, 초기화, sbench는 수정 없이 같은 소스를 컴파일한다(바꾼 것은 HAL과 platform 계층: `hal_dpi.c`, `plat_dpi.c`).
+- 시간: `plat_now` = 시뮬레이션 cycle(exported `sv_cycles`), `plat_tps` = 100,000,000(tick = PL cycle). ARM 쪽 일(k_exec, cache 모사, 로그)은 시뮬레이션 시간 0이라 KERN/RUN ticks는 PL 시간 + AXI-Lite 시간만이다.
+- 공유 메모리: `axi_mem_slave` parameter `EXT_STORE`(기본 0, 기존 동작 불변. 1이면 beat 읽기/쓰기와 backdoor가 DPI `axm_rd64/axm_wr64`로 C 메모리에 간다, 밖이면 tag `AXI_EXT`). C 메모리는 S5-1 cache 모사의 DDR 이미지(`fpga/sys/test/hal_cache.c`, `hal_host.c`에서 분리, 동작 불변)라 IP 쪽 일관성 검사(`ip_rd_dirty`, `ip_wr_dirty`)가 RTL의 beat마다 그대로 돈다. 주입: `inj_hang(r, b)`(R/B 응답 중지).
+- 설정: plusarg가 호스트 환경변수와 같은 이름(`+SX_LIST +SX_RUNS +SX_STEPS +SX_MODELS +SX_FAULT`, 15M 이미지 `+DDR_CK +DDR_TK`). 판정(`tb/sys_top/sys_tb.c`): 프로그램의 SYS 줄이 기대 빌드와 1.7절 slot 표의 ID/CONFIG(`+EXP_BUILD` A, A2, P, PD), CHECK 수 `+EXP_CHECKS`, 모든 CHECK의 tok_mis/hash_mis/kmis/coh 0, (주입 없으면) fb/iperr 0과 RESULT PASS, COH/SKIP/kernel_error 0, gemv_acc(P = 1)와 vec의 모든 op CYCLES == 닫힌 식(gemv_acc.md 5, vec.md 6.2, driver가 쓴 레지스터로 계산), arena 밖 beat 0. SV 쪽은 memory model의 프로토콜 tag 전부와 끝의 idle 검사.
+- IP 오류 주입(`+TB_IPFAULT=rdresp|wrresp|hang`, `+TB_IPFAULT_SLOT`, `+TB_IPFAULT_OP`): n번째 start에서 그 IP의 HP 포트 memory model이 모든 주소에 SLVERR(그 op가 끝날 때까지)이거나 응답을 멈춘다. [측정] 응답 오류에서 네 IP 모두 STATUS = 0x6(done과 err 동시), ERR = RD_RESP(gemv_acc 0x10, pim 0x20) 또는 WR_RESP(attn, vec 0x20)이고 출력 데이터는 맞았다(token, hash, K 비교 0).
+- 회귀: `sim/tests/sys_smoke.cfg`(S5-3, 2 run: 빌드 A/P, 260K 위치 0 mask ff, run P + K), `sim/tests/sys_fwd.cfg`(S5-4, 21 run, 아래 표). q tier는 smoke 2개와 `p_full`, `a_m1`, `a_err_rd`.
+
+| run | 빌드 | 모델, 위치 | mask / opt / run | 확인 |
+|---|---|---|---|---|
+| p_full | P | 260K 0..3 (+ 초기화 LDW 36개) | ff / 기본 / P, K | token, hash, KCMP, CYCLES |
+| p_warm | P | 260K 0..510 ARM, KVW 2,555개, 511 | ff / 기본 / W | 512 위치 token, hash |
+| p_single | P | 260K 0..1 | 비트 8개 각각 / P, K | |
+| p_masks | P | 260K 0..1 | 0, 3, 82, 7, f8, df / P, K | |
+| p_opt | P | 260K 0..1 | ff:0c(DEFER_AT 0), ff:0f(PIM_BATCH 1), ff:09(WRGB_SKIP 0), ff:1d(COH_STRICT), 3:0f / P, K | |
+| p_xb0, a_xb0 | P, A (XB_REG 0, AXI-Lite 간격) | 260K 0..1 | ff / K | |
+| pd_m1 | PD (KV_SRC 1, H_PAR 2) | 260K 0..1 | ff, 4 / P, K | |
+| a_m1 | A | 260K 0..3 | ff, 3 / P, K | DDR KV attention hs 8 on HS_MAX 64 |
+| a_m1_single | A | 260K 0..1 | 비트 각각, 82, ff:05(FUSE_AM 0) / P, K | |
+| a_m1_warm | A | 260K 0..510 ARM, 511 | ff / W | |
+| a2_m1 | A2 (GA_P 2) | 260K 0..1 | ff, 3 / P, K | |
+| a_m2 | A | 15M 0..3 | ff / P | |
+| a_m2_k | A | 15M 0..1 | ff / K | |
+| a_m2_warm | A | 15M 0..254 ARM, 255 | ff / W | |
+| a_err_rd, a_err_wr, a_err_hang | A | 260K 0..1 | ff / P | gemv_acc SLVERR 읽기, vec SLVERR 쓰기, attn 응답 없음(timeout) |
+| p_err_rd, p_err_wr, p_err_hang | P | 260K 0..1 | ff / P | pim SLVERR 읽기, attn SLVERR 쓰기, vec timeout |
+
+- CYCLES [측정, 시뮬레이션, latency 1 메모리, stall 없음] token당(위치 평균): 빌드 P 260K 위치 0..3: vec 15,680(RMSNORM 3,993, SWIGLU 3,005, ACTQ 8,155, ARGMAX 527, 4.4절과 같음), PIM 레코드마다 run(WRGB 생략) 5,681, WRGB 생략 끔 5,846, PIM_BATCH 5,156(2 위치), attention BRAM H_PAR 2 + KVW 2,140, 합 23,501(RUN ticks 31,688 = AXI-Lite 포함). 빌드 A 260K: gemv_acc 37,930(4.4절 37,903~37,938 안), DDR attention hs 8 4,115(T 1..4, 이 구성의 첫 측정), 합 57,198(ticks 63,819). 빌드 A 15M 위치 0..3: gemv_acc 1,952,048(그중 cls 1,184,072/호출), vec 53,731, DDR attention 6,756, 합 2,012,535(ticks 2,021,290). 15M 위치 255(warm, 1 위치): ticks 2,209,722(위 4.4절 예상 약 220만). 4.4절 "레코드마다 run 약 6,950"은 시스템 TB 측정 5,846(WRGB 매번)과 다르다(원인 미확인: pim_top TB가 push 검사 중에 RUN했을 가능성 [추정]).
+- 호스트 IP 모델 CYCLES 대 RTL(같은 프로그램, 같은 설정의 op별 trace, `tb/sys_top/cyc_cmp.py`): gemv_acc P = 1, vec 4종, KVW는 모든 op 일치. 추정인 것: PIM run(LDW, WRGB, MACAB 목록) RTL이 +0.02~+0.35%(run당 최대 +7), attention BRAM 묶음 op +0.26%(op마다 +1), head 하나씩(DEFER_AT 0) -5.8%(op당 최대 -19), DDR attention 260K -4.7~-4.9%(op당 최대 -46), 15M -2.6%(최대 -30), gemv_acc P = 2는 짝수 ROWS에서 op마다 +1(gemv_acc.md 5절 6번 규칙. S5-4에서 호스트 모델에 반영해 일치).
+- 실행기 수정(S5-4): IP timeout으로 IP를 끄면 드라이버가 D-cache 전체를 clean + invalidate한다(`drv_com.c`). 그 전에는 "소비자가 IP라 invalidate하지 않은" 버퍼(예: vec이 쓴 K/V slot)를 ARM 대체 실행이 cache의 옛 값으로 읽거나(`arm_rd_stale`, 빌드 A에서 logits hash 불일치) 그 line을 덮어 썼다(`flush_clobber`). 생산자 규칙으로 ARM이 쓴 line은 모두 clean이라 이 flush는 쓰기를 만들지 않는다.
+
 ### 3.3 G5 통과 기준 (AXI BFM 시뮬레이션 통과)
 1. `model/src` 변경(O3 a) 뒤 `make test` PASS, 기존 덤프 `cmp` 동일.
 2. 호스트 테스트(3.1) 전 항목 PASS: 모든 mask/opt/run 조합 mismatch 0, COH 0, fallback 0, 결함 주입 10종 모두 FAIL로 검출, xilstub 문법 검사, Tcl stub 검사.
@@ -483,10 +514,10 @@ v1은 kernel 경계를 DDR 버퍼로 둔다(D11). 아래는 S6 측정(특히 호
 ## 6. 확인하지 못한 것
 - 보드 수치 전부: ARM baseline, HP 대역폭과 latency, 호출 비용(AXI-Lite 왕복, polling), cache 유지 비용, 100 MHz timing, LUT 수.
 - Vivado가 144비트와 210비트 `ram_sdp`에 512 x 72의 parity 비트를 데이터로 매핑하는지(빌드 P의 BRAM 성립 조건).
-- Questa에서 DPI imported context task가 시간 소비 exported task를 부르는 구성(이 프로젝트에서 아직 안 씀).
+- (S5-3에서 확인, 3.2절) Questa에서 DPI imported context task가 시간 소비 exported task를 부르는 구성.
 - 빌드 A 구성(KV_SRC 1, HS_MAX 64, TMAX 512)에서 260K(hs 8) attention, `vec_top` N_MAX 256(O7) 구성은 아직 시뮬레이션하지 않았다.
 - HP DDR segment 범위, HP0/HP1과 HP2/HP3의 DDR 포트 공유, AXI4 -> AXI3 변환, `Xil_DCacheInvalidateRange`의 부분 line 처리, cache line 크기와 `dsb` 포함 여부, SLCR PL reset 주소(모두 Xilinx 문서를 이 작업에서 열지 않음).
-- attention DDR KV를 260K에 쓸 때의 token cycle(시뮬레이션 측정 없음).
+- (S5-4에서 측정, 3.2절) attention DDR KV를 260K에 쓸 때의 token cycle. 빌드 A 구성(KV_SRC 1, HS_MAX 64, TMAX 512)의 260K는 시스템 TB에서 실행했다.
 - `vt` job bimg의 행렬 순서(bank base 배정을 같게 맞출 수 있는지).
 
 ## 7. 제안 하위 단계 (plan.md S5-1 ~ S5-6과 같음)

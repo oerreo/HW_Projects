@@ -123,6 +123,23 @@ flt f06_wrgb t '^KCMP .*k=gemv_.*mis=[1-9]' "WRGB skipped after x changed -> KCM
 flt f07_barrier t '^CHECK .*tok_mis=[1-9]' "ACTQ(att) before the deferred ATTN -> token mismatch" $F SX_BUILD=A SX_LIST=44 SX_RUNS=EK SX_FAULT=7
 flt f08_rdresp t '^IPERR .*kind=err .*err=0x000000[1-7]0' "IP RD_RESP -> IPERR" $F SX_BUILD=P SX_LIST=ff SX_RUNS=E SX_IPFAULT=rdresp SX_IPFAULT_OP=50
 flt f09_timeout t '^IPERR .*kind=timeout' "IP never ends -> IPERR timeout" $F SX_BUILD=P SX_LIST=ff SX_RUNS=E SX_IPFAULT=hang SX_IPFAULT_OP=50
+# S5-4: after a response error or a timeout the data must still be right: every CHECK has only
+# iperr (and, after a timeout, fallback calls of the disabled IP); token, hash, K compare, COH 0
+onlyip() { # case VAR=value ...
+  c0=$1
+  shift 1
+  go "$c0" t 1 "$@"
+  nbad=$(grep '^CHECK' "$LOG" | grep -c -v ' tok_mis=0 hash_mis=0 .*kmis=0 coh=0 ')
+  ncoh=$(grep -c '^COH' "$LOG")
+  if [ "$nbad" -eq 0 ] && [ "$ncoh" -eq 0 ] && [ "$(grep -c '^IPERR' "$LOG")" -eq 1 ]; then
+    ok "$c0: one IPERR, token / hash / KCMP / COH clean after the fault"
+  else
+    bad "$c0: CHECK lines with data errors $nbad, COH lines $ncoh"
+    grep -E '^(CHECK|COH|IPERR)' "$LOG" | head -4
+  fi
+}
+onlyip f08b_rdresp_data $F SX_BUILD=P SX_LIST=ff SX_RUNS=TK SX_IPFAULT=rdresp SX_IPFAULT_OP=50
+onlyip f09b_timeout_data $F SX_BUILD=P SX_LIST=ff SX_RUNS=T SX_IPFAULT=hang SX_IPFAULT_OP=50
 flt f10_guard t '^IPERR .*ip=ve kind=err err=0x00000004' "guard bypassed -> BAD_DESC" $F SX_BUILD=A SX_LIST=40 SX_RUNS=E SX_FAULT=10 SX_VE_NMAX=32
 flt f11_regorder t '^CHECK .*result=FAIL' "N written after CTRL" $F SX_BUILD=A SX_LIST=60 SX_RUNS=E SX_FAULT=11
 flt f01_m32 t32 '^COH .*kind=ip_rd_dirty' "producer flush missing, -m32" $F SX_BUILD=A SX_LIST=ff SX_RUNS=E SX_FAULT=1

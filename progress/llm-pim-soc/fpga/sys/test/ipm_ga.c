@@ -4,7 +4,9 @@
  * (model/src) with x at X_ADDR; y to Y_ADDR (y_en), first maximum to ARGMAX_IDX/VAL
  * (argmax_en, k_argmax). CYCLES: closed forms of section 5 for P = 1 (latency 1, no stall,
  * the "usual" case without a W burst blocked by the previous one); P = 2 uses ceil(ROWS/2)
- * in the same form [estimate]. RD_STALL = 5 per call (section 5 note), WR_STALL = 0.
+ * in the same form + 1 for even ROWS (section 5 item 6) [estimate; equal to the RTL on all
+ * 260K calls of the S5-4 system TB, all with even ROWS]. RD_STALL = 5 per call (section 5
+ * note), WR_STALL = 0.
  */
 #include <string.h>
 #include "ipm.h"
@@ -87,6 +89,9 @@ static int run(int fault) {
     } else {
       G.cyc = nb + R * (1u + nb) + 15u + xd + C_CHK;
     }
+    /* gemv_acc.md 5 item 6: P = 2 with even ROWS, the last row comes from slice 1 and the merge
+       takes it one cycle later (S5-4: the RTL system TB showed +1 on every such call) */
+    if (IPC.ga_p == 2 && !(rows & 1u)) G.cyc += 1u;
     G.rds = 5u;
     G.wrs = 0u;
   }

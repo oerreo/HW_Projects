@@ -30,3 +30,7 @@ model/.job*
 .j*
 fpga/sys/test/build/
 fpga/sys/test/.j*
+sim/.o*
+sim/.cc/
+sim/.x0/
+sim/.j*

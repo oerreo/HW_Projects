@@ -163,3 +163,21 @@
 - 미룬 것(S5-3): 두 HP 포트가 같은 버퍼를 봐야 하는 kernel 연쇄와 forward, 드라이버 C 구동, smoke에서의 CYCLES 식 대조.
 - 한계: A의 attention H_PAR 2 구성과 P의 H_PAR 1 구성은 elaboration과 lint만. 합성, timing, 보드 동작 미확인.
 - 다음: S5-3(시스템 TB 기반), S5-4(forward G5).
+
+## 2026-11-23: S5-3, S5-4 시스템 TB와 forward 검증 (G5 시뮬레이션 부분)  [notion: pending]
+- 한 일(hw-worker): `axi_mem_slave`에 `EXT_STORE`(HP 포트 4개가 C 쪽 DDR 이미지 하나를 공유)와 `inj_hang`. DPI HAL(`tb/sys_top/hal_dpi.c`, `plat_dpi.c`): `fpga/sys/sw`의 실행기와 드라이버를 수정 없이 컴파일해 `hal_rd`/`hal_wr`가 exported task로 AXI-Lite 트랜잭션을 내고 시뮬레이션 시간을 쓴다. S5-1의 cache 모사를 `hal_cache.c`로 분리해 RTL의 beat마다 일관성 검사가 돈다. 시스템 TB `tb_sys_fwd`, 테스트 `sys_smoke`(2 run), `sys_fwd`(21 run).
+- 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 488 run, fails 0(기존 465 + 23). 시스템 호스트 테스트 `SYSHOST items=36 fail=0`, baseline `HOSTTEST items=23 fail=0`. 로그 확인: 15M 위치 0..3 run은 tok_mis 0, hash_mis 0, coh 0, fb 0, iperr 0, CYCLES 식 대조 704건 불일치 0.
+- 범위(agent 보고): 빌드 P 260K(초기화 LDW, 위치 0..3, 위치 511 warm, mask 비트 단독 8종, mask 6종, opt 5종, XB_REG 0, 변형 PD), 빌드 A 260K(위치 0..3, 비트 단독, 위치 511, 변형 A2)와 15M(위치 0..3, K 모드 0..1, 위치 255 warm), 오류 주입 6종(읽기 응답, 쓰기 응답, 무응답을 빌드마다). 모든 정상 run에서 token, logits hash, K 비교, COH, fallback, IPERR 0.
+- 버그: (1) SW `drv_com.c`: IP timeout으로 그 IP를 끈 뒤 cache를 맞추지 않아 ARM 대체 실행이 옛 값을 읽음(빌드 A에서 logits hash 2 위치 불일치). timeout 시 `hal_flush_all()` 호출로 수정. 호스트 테스트의 결함 주입 case가 기대 FAIL에 COH를 가려 놓쳤던 것이라 오류 뒤 데이터를 보는 2항목(f08b, f09b) 추가. (2) 호스트 IP 모델 `ipm_ga.c`: P = 2, 짝수 ROWS의 +1 cycle 누락. (3) RTL 버그 없음.
+- S5-1 가정 판정(agent 보고): cache 검사 규칙, RMSNORM fx, 응답 오류 때 STATUS 0x6, ARGMAX의 4 B 쓰기는 RTL과 일치. kb 8 q 레코드는 코드 대조만(실행 안 함).
+- 호스트 모델 CYCLES 대 RTL(agent 보고): gemv_acc P = 1, vec 4 op, attn KVW 전부 일치. PIM run +0.02~+0.35%, attention BRAM 묶음 +0.26%, head 단위 -5.8%, DDR KV -2.6~-4.9%(추정식으로 남김).
+- CYCLES [측정, 시뮬레이션, latency 1, stall 없음, token당]: 빌드 P 260K 23,501(PIM 5,681, vec 15,680, attention 2,140), AXI-Lite 포함 31,688. 빌드 A 260K 57,198, 포함 63,819. 빌드 A 15M 2,012,535(GEMV 1,952,048), 포함 2,021,290. 위치 255 warm 2,209,722.
+- mutation(agent 보고): 드라이버 4종, top 배선 1종, IP 내부 2종, fault hook 7종 검출. 동치 mutant 2개(이유 기록).
+- 미확인: 메모리 stall과 random latency 아래의 시스템 TB(전부 latency 1), kb 8 실행, PIM "레코드마다 run"의 단독 측정(약 6,950) 대 시스템 TB(5,846) 차이의 원인, timeout 뒤 PL reset 경로, 보드 동작 전부.
+- 프로세스 노출(agent 보고): DPI 컴파일 중 cc1 인자에 상대 경로 소스 이름이 파일당 1초 미만 보임. 초기 1초 미만 명령 몇 개에 프로젝트 경로.
+
+## 2026-11-23: S5-5 Vivado/XSCT 스크립트  [notion: pending]
+- 한 일(hw-worker): `fpga/sys/`에 `create_project.tcl`(BUILD=A|P, 변형 A2/PD, PS7 + interconnect + module reference, 주소와 DDR segment 검사, `sys_build_config.txt`), shell `src/sys_a_bd.v`, `sys_p_bd.v`, `filelist.tcl`, `build.tcl`(utilization 계층, RAM/DSP 셀 목록, timing, `summary.txt`), `sw/xsct_build.tcl`(PL 프로그래밍, 15M 이미지 DDR 적재 포함), `test/stub_check.tcl`, README 4절(실행 순서, 측정 순서, 돌려받을 것, UNVERIFIED).
+- 결과: stub 검사 `STUBCHECK runs=43 fail=0` [수퍼바이저 재실행]. shell lint 9구성 경고 0, 오류 4종 주입 시 stub 검출 4/4 [agent 보고]. 스크립트와 system.md 사이 불일치 없음.
+- UNVERIFIED: Vivado와 XSCT에서 한 번도 실행하지 않음(속성 이름, module reference의 인터페이스 추론, 연결하지 않은 m02_axi의 validate, 합성 결과 전부, 100 MHz timing, BRAM parity 매핑).
+- 다음: 사용자 빌드(S5-6 리포트 분석), S4-8 정리.

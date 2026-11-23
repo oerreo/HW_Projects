@@ -13,12 +13,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* DDR of the cache model (hal_host.c). mem_rd/mem_wr return a pointer into the DDR image or
+/* DDR of the cache model (hal_cache.c). mem_rd/mem_wr return a pointer into the DDR image or
    NULL (bus error: address outside the modelled DDR); they also run the IP-side coherence
    checks (the IP reads a byte the CPU has written but not flushed; the IP writes into a line
    that holds unflushed CPU data). */
 const uint8_t *mem_rd(uint32_t pa, uint32_t n);
 uint8_t *mem_wr(uint32_t pa, uint32_t n);
+/* the DDR image without coherence checks (testbench reads only), NULL outside */
+const uint8_t *mem_peek(uint32_t pa, uint32_t n);
 
 /* injected IP fault for the op starting now on this slot: 0 none, 1 RD_RESP, 2 never ends */
 int ipm_fault(int slot);
