@@ -1,5 +1,7 @@
 # 계층 트리와 구현 상태 (S5-2 시점)
 
+- S5-3/S5-4 갱신(2026-11-23): 시스템 TB(DPI-C로 `fpga/sys/sw`의 프로그램이 `sys_a_top`/`sys_p_top`을 구동, HP 포트 4개가 C 쪽 DDR 이미지 하나를 공유)로 forward를 시뮬레이션했다. 근거 `docs/log.md` S5-3/S5-4, `./sim/run.sh all` **488 run, fails 0** [측정, 수퍼바이저 재실행]. 아래 S5-2 항목의 "forward 검증은 진행 중"은 이 항목으로 대체된다(보드는 여전히 미확인). 구조, `hal_rd` sequence, run 목록은 `sys_tb.md`, 사용자 보드 절차(Vivado/XSCT 스크립트, 미실행 UNVERIFIED)는 `board_flow.md`.
+
 - S5-2 갱신(2026-11-23): L4 `axil_xbar`, `sys_a_top`, `sys_p_top`을 "통과 (smoke)"로 바꿨다. 근거 `docs/log.md` S5-2, `./sim/run.sh all` **465 run, fails 0** [측정, 수퍼바이저 재실행](기존 424 + `axil_xbar` 30 + `sys_a_top` 6 + `sys_p_top` 5). smoke는 slot별 ID/CONFIG 대조, 빈 slot 읽기 0, IP마다 호출 하나의 golden(DPI) 대조, 호출마다 burst가 나간 HP 포트 집합 검사다. xbar mutation 8/8, top 배선 mutation 9/9 검출, lint 경고 0은 agent 보고(재실행 안 함). **forward 검증(S5-4, 시스템 TB에서 같은 버퍼를 두 HP 포트가 보는 IP 사이 연쇄 포함)은 진행 중**이고 아직 통과하지 않았다. 합성, 타이밍, 보드는 미확인. 다이어그램 `l4_sys_top.md`, SW 쪽 `sw_executor.md`, 개요 `system_overview.md`.
 
 - S4-7 갱신(2026-11-20): `rsqrt_nr`, `lut_lerp`(SIGM 모드 추가), `actq_core`, `rms_front`, `swi_front`, `vec_core`, `vec_csr`, `vec_top`을 "통과"로 바꿨다. 근거 `docs/log.md` S4-7, `./sim/run.sh all` **424 run, fails 0** [측정, 수퍼바이저 재실행](기존 368 + `lut_lerp` SIGM 4 + 신규 52). 두 모델의 K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX 레코드 전부 mismatch 0, mutation 35개 중 33개 검출(2개 동치), lint 경고 0은 agent 보고(재실행 안 함). 합성, 타이밍, 보드는 미확인. 다이어그램 `l2_vec_core.md`, `l0_l1_vec_leaf.md`, `l3_vec_top.md`, 통합 개요 `system_overview.md`(S5 계획 포함).

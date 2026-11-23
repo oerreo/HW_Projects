@@ -2,6 +2,7 @@
 
 - 원본과 확인일: 확인일 2026-11-20(S4-7 완료 뒤), 시스템 통합 부분(머리말 4번째 항목, 2절, 5절)은 2026-11-23(S5-0~S5-2 반영)에 갱신. kernel 호출 순서는 `model/src/fwd_h.c`의 `lm_h_forward`를 읽어 확인했다(golden이자 SW baseline). IP의 op와 데이터 배치는 `docs/spec/gemv_acc.md` 1절, `docs/spec/pim.md` 1~2절, `docs/spec/attn.md` 2절, `docs/spec/vec.md` 1~2절, ARM에 남기는 kernel은 `docs/spec/arch.md` 5.5절, HP 포트 배분의 원본은 `docs/spec/system.md` 1.3절(S5-0 스펙, S5-2 RTL로 구현 확인)이다. 4절 수치는 `docs/log.md` S4-4~S4-7 항목, 5절 수치는 S5-0, S5-2 항목에서 가져왔다.
 - **시스템 통합 상태(2026-11-23)**: L4 `axil_xbar`, `sys_a_top`, `sys_p_top`은 RTL이 있고 smoke 시뮬레이션을 통과했다(S5-2, `./sim/run.sh all` 465 run fails 0 [측정, 수퍼바이저 재실행]). smoke는 slot별 ID/CONFIG, IP마다 호출 하나의 golden 대조, HP 포트 집합 검사까지이고, **IP 사이 kernel 연쇄와 forward는 아직 시뮬레이션하지 않았다**(S5-3, S5-4. S5-4는 진행 중). 합성, 타이밍, 보드는 미확인. 상세 block diagram은 `l4_sys_top.md`, SW 쪽은 `sw_executor.md`.
+- **S5-3/S5-4 갱신(2026-11-23)**: 위 "forward는 아직 시뮬레이션하지 않았다"는 이 항목으로 대체된다. 시스템 TB forward 통과(`./sim/run.sh all` 488 run fails 0 [측정, 수퍼바이저 재실행], 보드 전). 시스템 TB의 구조와 run 목록은 `sys_tb.md`, 사용자 보드 절차(스크립트는 Vivado/XSCT 미실행, UNVERIFIED)는 `board_flow.md`.
 - **cycle 값은 모두 Questa 시뮬레이션 모델의 값이다**(`axi_mem_slave`, stall 없음, read/B latency 1, 100 MHz 타이밍 미확인). 보드 값이 아니고 HP 포트의 실제 latency와 대역폭, ARM 호출 비용, 캐시 flush 비용은 들어 있지 않다. 합계는 [계산]이다.
 - 통과한 L3 IP 4종: `gemv_acc_top`(S4-4), `pim_top`(S4-5), `attn_top`(S4-6, S4-6b), `vec_top`(S4-7). 회귀 `./sim/run.sh all` 424 run, fails 0 [측정, 수퍼바이저 재실행].
 
