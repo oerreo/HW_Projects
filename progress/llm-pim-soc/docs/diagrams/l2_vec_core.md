@@ -1,7 +1,7 @@
 # L2 vec_core: block, data flow, control flow, cycle 식
 
 - 원본과 확인일: 확인일 2026-11-20. `rtl/l2/vec_core.sv`(포트, unpacker, op 선택), `rtl/l1/rms_front.sv`, `rtl/l1/swi_front.sv`, `rtl/l1/actq_core.sv`, `rtl/l0/argmax_red.sv`(헤더 주석), `rtl/pkg/llm_pkg.sv`(`E_W` 8, `SH_W` 10, `AM_W` 17), 알고리즘과 구조 결정은 `docs/spec/arch.md` 5절, 측정값과 cycle 식은 `docs/spec/vec.md` 6절과 `docs/log.md` S4-7. 신호 이름, 비트폭, 전이 조건은 RTL 선언 그대로다. 충돌하면 RTL과 `vec.md`가 우선.
-- 상태: S4-7에서 단독 G4 통과. `./sim/run.sh all` 424 run, fails 0 [측정, 수퍼바이저 재실행]. 두 모델의 K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX 레코드 전부 mismatch 0, mutation 33/35 검출(2개 동치), lint 경고 0은 agent 보고(재실행 안 함). **보드는 미실행**이고 100 MHz 타이밍, LUT 수, DSP 실제 매핑은 확인하지 않았다.
+- 상태: S4-7에서 단독 G4 통과. `./sim/run.sh all` 424 run, fails 0 [측정, 수퍼바이저 재실행]. 2026-11-23 `d_want_o` 추가 후 회귀 491 run fails 0 [측정, 수퍼바이저 재실행, S5-4 보완]. 두 모델의 K_RMSNORM, K_SWIGLU, K_ACTQ, K_ARGMAX 레코드 전부 mismatch 0, mutation 33/35 검출(2개 동치), lint 경고 0은 agent 보고(재실행 안 함). **보드는 미실행**이고 100 MHz 타이밍, LUT 수, DSP 실제 매핑은 확인하지 않았다.
 - 기준 parameter(RTL 기본값): `N_MAX` 1024, `IDX_W` 16, `LUT_PIPE` 2, `Q_DEPTH` 8. 파생 폭: `NV_W` = `IDX_W` + 1 = 17, `NW` = clog2(`N_MAX` + 1) = 11, `AW` = clog2(`N_MAX`) = 10. `rms_front`의 `SS_W` = 30 + clog2(`N_MAX`) = 40, `U_W` = `SS_W` + 1 = 41. (260K 시스템 빌드가 `vec_top`에 넘기는 `N_MAX`는 이 문서에서 확인하지 않았다. `vec.md` 8절은 N_MAX 256을 가정하는 문장이 있다.)
 - **파형은 그리지 않았다.** 아래 FSM과 data flow는 RTL의 `typedef enum`, `case` 전이, 레지스터 갱신 조건에서 옮긴 것이다. cycle 식은 `vec.md` 6.1의 시뮬레이션 측정값이고, 식을 항으로 나눈 것은 RTL의 상태와 `vec.md`가 적은 항에서 맞춘 것이다(해당 표에 표시).
 - **`vec_core` 자체에는 `typedef enum` FSM이 없다.** 이 모듈의 control은 `busy_q`, `op_q`, `n_q`와 unpacker(`k_q`, `ek_q`, `cnt_q`, `lane_q`)뿐이고, op별 순서는 하위 모듈의 FSM(`rms_front` 12 state, `swi_front` 6 state, `actq_core` 8 state)이 정한다. 3절은 이 구조 그대로 그렸다.

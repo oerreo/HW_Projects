@@ -191,12 +191,12 @@
 - stall run의 RUN ticks/token [측정, 시뮬레이션, TB random 모델이라 보드 값 아님]: p_stall 43,613(stall 없음 31,688), a_stall 85,953(63,819), a_m2_stall 2,514,750(2,021,290).
 - 미확인: 메모리 모델의 random 패턴은 `+SEED`로 바뀌지 않음(시뮬레이터 기본 seed). stall 아래 오류 주입 조합, 변형 빌드의 stall run, gemv_acc WR_STALL이 시스템 run에서 0인 이유, vec N_MAX 256 구성의 시뮬레이션.
 
-## 2026-11-24: S4-8 정리: interactive viewer와 전체 회귀  [notion: pending]
+## 2026-11-24: S4-8 정리: interactive viewer와 전체 회귀  [notion: synced]
 - 한 일(hw-worker): `docs/viewer/sys_player.html`(단일 HTML, 외부 의존성 없음). 한 step = 드라이버가 낸 IP op 하나 또는 ARM kernel 호출 하나. 장면 4개(빌드 P 260K, 빌드 A 260K, 빌드 A 15M, 빌드 P stall run, 모두 위치 1의 token 하나, mask ff). block diagram 강조, step 상세, token 타임라인, kernel별 누적 CYCLES, player. 생성 스크립트 `docs/viewer/tools/build_viewer.py`, 렌더 검사 `check_render.mjs`.
 - trace: 시스템 TB에 `+VTRACE` 이벤트 trace 추가(TB만 변경: `hal_dpi.c`, `hal_cache_dpi.c`, `sys_tb.c`, `tb_sys_fwd.sv`, `sys_fwd.cfg`). RTL과 `fpga/sys/sw`는 불변.
 - 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 491 run, fails 0. 내장 데이터의 token CYCLES 합(스크립트로 확인): 23,471 / 57,058 / 2,012,157 / 34,488(stall, RD_STALL 4,948). 스크린샷 확인.
 - agent 보고(재실행 안 함): 생성 스크립트 대조 검사 58개 불일치 0(KSPLIT 분류별, slot별 stall 합, CYCTRACE 줄 단위, HP beat 합). headless Chrome에서 687 step 표시 검사 불일치 0, 콘솔 오류 0, 폭 400 px와 라이트/다크 확인.
 - 한계: ARM 시간은 TB가 모델링하지 않아 ARM step은 0 cycle. 수치는 시뮬레이션 값(보드 값 아님). Chrome 외 브라우저 미확인.
-- 관찰(미조사): 로그의 `RUN ... ip_ops=`(`sbench.c`의 `SX.nops`)가 일부 run에서 KSPLIT ops 합과 다름(p_stall run P 2 대 296, a_m2 run P 72 대 732). 검사와 viewer는 이 값을 쓰지 않음. 보드 로그 해석 전에 확인할 것.
+- 확인(오케스트레이터): agent가 관찰로 보고한 `ip_ops` 불일치는 실제 로그에서 재현되지 않음. `RUN` 줄의 `ip_ops`는 p_stall run P 296, a_m2 run P 728(= SYSTB의 starts 728)이다. a_m2의 KSPLIT ops 합 732와의 차 4는 위치 4개의 ARGMAX가 분류기 GEMV에 융합되어 별도 op가 없기 때문[추정, 위치 수와 일치].
 - Artifact로 게시(비공개).
-- 다음: 사용자 빌드와 보드 측정 대기(S5-6, S6). `ip_ops` 표시 확인.
+- 다음: 사용자 빌드와 보드 측정 대기(S5-6, S6).
