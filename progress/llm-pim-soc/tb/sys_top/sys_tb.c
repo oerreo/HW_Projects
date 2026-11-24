@@ -109,6 +109,7 @@ void tb_line(const char *l) {
   const char *ei = hal_env("EXP_IPERR_IP"), *ek = hal_env("EXP_IPERR_KIND");
   char v[40];
   tb_print(l);
+  tb_vt_line(l);
   if (starts(l, "SYS")) sys_check(l);
   else if (starts(l, "CHECK")) {
     S.checks++;
@@ -159,6 +160,7 @@ int sys_tb_main(int *rc) {
   exp_iperr = tb_env_l("EXP_IPERR", 0);
   exp_fb = tb_env_l("EXP_FB", 0);
   sys_prog_main();
+  tb_vt_close();
   req(TB.bad_cfg == 0, "testbench plusargs (TB_IPFAULT)");
   req(S.sys_lines == 1 && S.sys_ok, S.sys_lines == 1 ? S.sys_why : "SYS line missing");
   req(exp_checks > 0 && S.checks == exp_checks, "number of CHECK lines");

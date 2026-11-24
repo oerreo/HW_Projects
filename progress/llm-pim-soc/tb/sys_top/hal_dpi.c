@@ -31,6 +31,17 @@
  *   IP fault         +TB_IPFAULT=rdresp|wrresp|hang +TB_IPFAULT_SLOT=<slot> +TB_IPFAULT_OP=<n>:
  *                    at the n-th start of that IP the memory models of its HP ports answer
  *                    with SLVERR (until the driver sees busy = 0) or stop answering (hang).
+ *   viewer trace     +VTRACE=<file> (optional, S4-8 viewer docs/viewer/tools): one event per
+ *                    line, tick = sv_cycles (100 MHz testbench clock), ax = cumulative AXI-Lite
+ *                    reads and writes of that slot (this access included), b = cumulative
+ *                    R and W beats of the memory models HP0..HP3 (8 numbers, rd wr per port):
+ *                      K tick pos name                    hal_ctx: every kernel call (ARM or IP)
+ *                      S tick slot ctrl axr axw b.. r40..r7C   CTRL write with GO (b before the
+ *                                                         write, r = 16 descriptor registers)
+ *                      E tick slot status axr axw b..     first STATUS read with busy = 0
+ *                      R tick slot off val axr axw        read of ERR, CYCLES, RD_STALL, WR_STALL
+ *                      P tick cmd0 cmd1 cmd2 cmd3         pim CMD_PUSH
+ *                      L <program log line>               SYS, MODEL, KSPLIT, RUN, CHECK lines
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,6 +57,8 @@ extern int sv_axil_wr(unsigned int a, unsigned int d);
 extern int sv_axil_rd(unsigned int a, unsigned int *d);
 extern int sv_plusarg(const char *k, const char **v);
 extern void sv_inj(int slot, int kind, int on);
+extern long long sv_mem_beats(int k, int w);
+extern long long sv_cycles(void);
 
 systb_t TB;
 
@@ -58,6 +71,35 @@ static int busy_op[SYS_NSLOT];      /* a start was written, busy = 0 not yet see
 static FILE *ctr;
 static int inj_kind, inj_slot = -1, inj_on, inj_err_rd;
 static long inj_op = 1, inj_cnt;
+
+/* ---------------- viewer trace (+VTRACE) ---------------- */
+static FILE *vtr;
+static long ax_rd[SYS_NSLOT], ax_wr[SYS_NSLOT];
+
+static void vt_beats(void) {
+  int k;
+  for (k = 0; k < 4; k++) fprintf(vtr, " %lld %lld", sv_mem_beats(k, 0), sv_mem_beats(k, 1));
+}
+
+void tb_vt_ctx(const char *k, int pos) {
+  if (vtr) fprintf(vtr, "K %lld %d %s\n", sv_cycles(), pos, k);
+}
+
+void tb_vt_line(const char *l) {
+  static const char *const keep[] = {"SYS ", "MODEL ", "KSPLIT ", "RUN ", "CHECK "};
+  size_t i;
+  if (!vtr) return;
+  for (i = 0; i < sizeof(keep) / sizeof(keep[0]); i++)
+    if (!strncmp(l, keep[i], strlen(keep[i]))) {
+      fprintf(vtr, "L %s\n", l);
+      return;
+    }
+}
+
+void tb_vt_close(void) {
+  if (vtr) fclose(vtr);
+  vtr = NULL;
+}
 
 /* ---------------- plusargs ---------------- */
 static struct {
@@ -103,6 +145,10 @@ int hal_init(void) {
   {
     const char *cf = hal_env("CYCTRACE");
     ctr = fopen(cf ? cf : "cyc.txt", "w");
+  }
+  {
+    const char *vf = hal_env("VTRACE");
+    vtr = vf ? fopen(vf, "w") : NULL;
   }
   return 0;
 }
@@ -210,8 +256,16 @@ uint32_t hal_rd(int slot, uint32_t off) {
   off &= ~3u;
   sv_axil_rd(((unsigned)slot << 12) | off, &d);
   TB.n_rd++;
+  ax_rd[slot]++;
+  if (vtr && (off == R_ERR || off == R_CYCLES || off == R_RD_STALL || off == R_WR_STALL))
+    fprintf(vtr, "R %lld %d %x %u %ld %ld\n", sv_cycles(), slot, (unsigned)off, d, ax_rd[slot], ax_wr[slot]);
   if (off == R_CONFIG) cfgv[slot] = d;
   if (off == R_STATUS && busy_op[slot] && !(d & ST_BUSY)) {
+    if (vtr) {
+      fprintf(vtr, "E %lld %d %x %ld %ld", sv_cycles(), slot, d, ax_rd[slot], ax_wr[slot]);
+      vt_beats();
+      fputc('\n', vtr);
+    }
     busy_op[slot] = 0;
     if (inj_on && slot == inj_slot && inj_kind != 3) { /* error window ends with the op */
       char b[120];
@@ -258,9 +312,20 @@ void hal_wr(int slot, uint32_t off, uint32_t v) {
       TB.inj_done++;
     }
   }
+  if (vtr && off == R_CTRL && (v & 1u)) { /* beats before the start (the IP is idle) */
+    int i;
+    fprintf(vtr, "S %lld %d %x %ld %ld", sv_cycles(), slot, (unsigned)v, ax_rd[slot], ax_wr[slot] + 1);
+    vt_beats();
+    for (i = 0x40 / 4; i < 0x80 / 4; i++) fprintf(vtr, " %x", (unsigned)rg[slot][i]);
+    fputc('\n', vtr);
+  }
   sv_axil_wr(((unsigned)slot << 12) | off, v);
   TB.n_wr++;
+  ax_wr[slot]++;
   if (off < 0x80u) rg[slot][off / 4u] = v;
+  if (vtr && slot == SLOT_PI && off == PI_CMD_PUSH)
+    fprintf(vtr, "P %lld %x %x %x %x\n", sv_cycles(), (unsigned)rg[slot][PI_CMD0 / 4u],
+            (unsigned)rg[slot][PI_CMD1 / 4u], (unsigned)rg[slot][PI_CMD2 / 4u], (unsigned)rg[slot][PI_CMD3 / 4u]);
   if (off == R_CTRL && (v & 1u)) {
     memcpy(op_rg[slot], rg[slot], sizeof(op_rg[slot]));
     busy_op[slot] = 1;

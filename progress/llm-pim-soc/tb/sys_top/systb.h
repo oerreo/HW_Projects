@@ -28,5 +28,9 @@ void tb_line(const char *l);
 /* a testbench message to the simulator transcript and the log file */
 void tb_print(const char *l);
 long tb_env_l(const char *key, long d);
+/* viewer trace (+VTRACE=<file>, hal_dpi.c): kernel context, program log line, close */
+void tb_vt_ctx(const char *k, int pos);
+void tb_vt_line(const char *l);
+void tb_vt_close(void);
 
 #endif

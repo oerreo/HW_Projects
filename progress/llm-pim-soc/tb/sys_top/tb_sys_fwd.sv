@@ -29,6 +29,8 @@
 // Plusargs: +SEED +MAXD (AXI-Lite gaps, default 0) +WDOG (cycles, default 60,000,000) +PROF, the
 // program settings (+SX_LIST +SX_RUNS +SX_STEPS +SX_MODELS +SX_FAULT +DDR_CK +DDR_TK) and the
 // expectations (+EXP_BUILD +EXP_CHECKS +EXP_IPERR +EXP_IPERR_IP +EXP_IPERR_KIND +EXP_FB).
+// C-side traces: +CYCTRACE (CYCLES per op) and +VTRACE (viewer event trace, hal_dpi.c header; uses
+// the exported sv_mem_beats for the HP beat counts).
 `timescale 1ns / 1ps
 module tb_sys_fwd;
   import tb_util_pkg::*;
@@ -151,6 +153,7 @@ module tb_sys_fwd;
   export "DPI-C" function sv_plusarg;
   export "DPI-C" function sv_inj;
   export "DPI-C" function sv_mem_rstall;
+  export "DPI-C" function sv_mem_beats;
 
   task automatic sv_axil_wr(input int unsigned a, input int unsigned d);
     bfm.write0(16'(a), d);
@@ -179,6 +182,17 @@ module tb_sys_fwd;
       1: return longint'(g_hp[1].mem.n_st_r);
       2: return longint'(g_hp[2].mem.n_st_r);
       default: return longint'(g_hp[3].mem.n_st_r);
+    endcase
+  endfunction
+
+  // R (w = 0) or W (w = 1) beats so far of the memory model of HP port k (axi_mem_slave
+  // n_rd_beat / n_wr_beat); viewer trace of hal_dpi.c (+VTRACE), not a check
+  function automatic longint sv_mem_beats(input int k, input int w);
+    case (k)
+      0: return longint'(w ? g_hp[0].mem.n_wr_beat : g_hp[0].mem.n_rd_beat);
+      1: return longint'(w ? g_hp[1].mem.n_wr_beat : g_hp[1].mem.n_rd_beat);
+      2: return longint'(w ? g_hp[2].mem.n_wr_beat : g_hp[2].mem.n_rd_beat);
+      default: return longint'(w ? g_hp[3].mem.n_wr_beat : g_hp[3].mem.n_rd_beat);
     endcase
   endfunction
 

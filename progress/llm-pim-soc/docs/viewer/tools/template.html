@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>System Op Player</title>
+<style>
+/* Single page, no external resources. Sticky player bar, then the block diagram and the
+   step detail (two columns on wide screens), the token timeline and the kernel table. */
+:root {
+  --bg: #f3f5f8; --panel: #ffffff; --panel-2: #eef1f6; --fg: #16202c; --muted: #566173;
+  --line: #cfd6e0; --accent: #1f5fbf; --accent-bg: #dce8fb; --warn-bg: #fff4d6; --warn-fg: #6b4e00;
+  --off: #9aa4b2; --hot: #c2410c;
+  --c-gemv: #2f6fd0; --c-attn: #c0562b; --c-rms: #2e8b57; --c-actq: #8a5cc2;
+  --c-swi: #a07c00; --c-amax: #c2185b; --c-arm: #6b7686;
+  --font-ui: "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e131a; --panel: #151c26; --panel-2: #1c2531; --fg: #e3e9f1; --muted: #9ba7b7;
+    --line: #2c3747; --accent: #82acf5; --accent-bg: #1d3150; --warn-bg: #3a3014; --warn-fg: #f2d68a;
+    --off: #5d6878; --hot: #fb923c;
+    --c-gemv: #6ea0f0; --c-attn: #f08a5d; --c-rms: #5fcf8f; --c-actq: #b99af0;
+    --c-swi: #e0c040; --c-amax: #f06292; --c-arm: #8f9bab;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e131a; --panel: #151c26; --panel-2: #1c2531; --fg: #e3e9f1; --muted: #9ba7b7;
+  --line: #2c3747; --accent: #82acf5; --accent-bg: #1d3150; --warn-bg: #3a3014; --warn-fg: #f2d68a;
+  --off: #5d6878; --hot: #fb923c;
+  --c-gemv: #6ea0f0; --c-attn: #f08a5d; --c-rms: #5fcf8f; --c-actq: #b99af0;
+  --c-swi: #e0c040; --c-amax: #f06292; --c-arm: #8f9bab;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-ui);
+  font-size: 14px; line-height: 1.45; overflow-x: hidden; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px 32px; }
+h1 { font-size: 20px; margin: 16px 0 2px; }
+h2 { font-size: 15px; margin: 0 0 8px; }
+.sub { color: var(--muted); margin: 0 0 8px; }
+.warn { background: var(--warn-bg); color: var(--warn-fg); border-radius: 6px; padding: 8px 10px;
+  margin: 8px 0; font-size: 13px; }
+.bar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 8px 0;
+  border-bottom: 1px solid var(--line); }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+button, select { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 9px; min-height: 32px; cursor: pointer; }
+button:hover, select:hover { border-color: var(--accent); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.on { background: var(--accent-bg); border-color: var(--accent); }
+#scene { max-width: 100%; }
+.scrub { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.scrub input { flex: 1 1 auto; min-width: 0; }
+.mono { font-family: var(--font-mono); font-size: 12.5px; }
+.pos { white-space: nowrap; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; margin-top: 12px; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+.full { margin-top: 12px; }
+svg text { fill: var(--fg); font-family: var(--font-ui); }
+svg .box { fill: var(--panel-2); stroke: var(--line); stroke-width: 1.5; }
+svg .box.absent { fill: none; stroke: var(--off); stroke-dasharray: 5 4; }
+svg .box.act { fill: var(--accent-bg); stroke: var(--accent); stroke-width: 3; }
+svg .wire { stroke: var(--off); stroke-width: 2; fill: none; }
+svg .wire.off { stroke-dasharray: 5 4; }
+svg .wire.act { stroke: var(--accent); stroke-width: 4; }
+svg .muted { fill: var(--muted); }
+svg .hot { fill: var(--hot); font-weight: 600; }
+dl.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 10px; margin: 0; }
+dl.kv dt { color: var(--muted); }
+dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+.chip { display: inline-block; min-width: 1.6em; text-align: center; border-radius: 4px; padding: 0 4px;
+  color: #fff; font-weight: 700; font-family: var(--font-mono); font-size: 12px; }
+:root[data-theme="dark"] .chip { color: #0b1018; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip { color: #0b1018; } }
+.cmds { margin: 4px 0 0; padding-left: 18px; }
+.tl-wrap { position: relative; }
+#ov { display: block; width: 100%; height: 46px; cursor: pointer; background: var(--panel-2); border-radius: 4px; }
+#cursor { position: absolute; top: -4px; width: 0; height: 54px; border-left: 2px solid var(--fg); pointer-events: none; }
+.zoom { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-top: 10px; }
+.zc { border: 1px solid var(--line); border-radius: 5px; padding: 4px; min-width: 0; cursor: pointer;
+  background: var(--panel); font-size: 12px; line-height: 1.3; overflow: hidden; }
+.zc.cur { border: 2px solid var(--fg); }
+.zc.empty { visibility: hidden; }
+.zc .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12.5px; }
+.tblw { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: right; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+tr.cur td { background: var(--accent-bg); }
+tfoot td { font-weight: 700; }
+.pbar { display: inline-block; height: 8px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+.note { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
+.sum { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; margin-bottom: 8px; }
+.sum b { font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>System Op Player</h1>
+<p class="sub">llm-pim-soc 시스템 RTL 시뮬레이션에서 드라이버가 낸 IP op와 ARM kernel 호출을 token 하나 동안 순서대로 재생한다.</p>
+<div class="warn" id="warn"></div>
+
+<div class="bar">
+  <div class="row">
+    <select id="scene" aria-label="장면"></select>
+    <button id="b-first" title="처음 (Home)" aria-label="처음">|&lt;</button>
+    <button id="b-prev" title="한 step 뒤 (왼쪽 화살표)" aria-label="한 step 뒤">&lt;</button>
+    <button id="b-play" title="재생 / 정지 (space)" aria-label="재생">재생</button>
+    <button id="b-next" title="한 step 앞 (오른쪽 화살표)" aria-label="한 step 앞">&gt;</button>
+    <button id="b-last" title="끝 (End)" aria-label="끝">&gt;|</button>
+    <select id="speed" aria-label="속도">
+      <option value="1">1 step/s</option><option value="2">2 step/s</option>
+      <option value="5" selected>5 step/s</option><option value="10">10 step/s</option>
+      <option value="30">30 step/s</option>
+    </select>
+    <button id="b-theme" title="테마" aria-label="테마 전환">테마: 자동</button>
+  </div>
+  <div class="scrub">
+    <input type="range" id="scrub" min="0" max="0" value="0" aria-label="step 위치">
+    <span class="pos mono" id="pos"></span>
+  </div>
+</div>
+
+<p class="sub" id="sceneinfo" style="margin-top:8px"></p>
+
+<div class="grid">
+  <div class="panel">
+    <h2>시스템 구조와 현재 step</h2>
+    <svg id="blk" viewBox="0 0 640 370" width="100%" role="img" aria-label="시스템 block diagram"></svg>
+    <p class="note">굵은 파란 테두리: 현재 step의 IP(또는 ARM). 굵은 선: 이번 op에서 beat가 오간 HP 포트와 GP0 경로. 점선: 이 빌드에 없는 slot 또는 tie-off 포트. 구조 원본: docs/spec/system.md 1.3, docs/diagrams/l4_sys_top.md.</p>
+  </div>
+  <div class="panel">
+    <h2>현재 step</h2>
+    <dl class="kv" id="detail"></dl>
+    <ol class="cmds mono" id="cmds"></ol>
+  </div>
+</div>
+
+<div class="panel full">
+  <h2>token 타임라인</h2>
+  <div class="sum" id="sum"></div>
+  <div class="row" style="margin-bottom:6px">
+    <span class="note" style="margin:0">가로축:</span>
+    <button id="x-cyc" class="on">CYCLES 누적 (op 사이 간격 없음)</button>
+    <button id="x-tick">시뮬레이션 tick (드라이버 시간 포함)</button>
+  </div>
+  <div class="tl-wrap">
+    <svg id="ov" viewBox="0 0 1000 46" preserveAspectRatio="none" aria-label="token 타임라인"></svg>
+    <div id="cursor"></div>
+  </div>
+  <div class="zoom" id="zoom"></div>
+  <div class="legend" id="legend"></div>
+  <p class="note">막대 길이 = op의 CYCLES 레지스터 값. ARM step은 시뮬레이션 시간이 0이라 회색 세로선으로만 표시한다. 막대를 누르면 그 step으로 이동한다. 기호: G GEMV, C cls GEMV, A ATTN, W KVW, R RMSNORM, Q ACTQ, S SWIGLU, M ARGMAX, ARM ARM kernel.</p>
+</div>
+
+<div class="panel full">
+  <h2>kernel 종류별 CYCLES (이 token)</h2>
+  <div class="tblw"><table>
+    <thead><tr><th>kernel</th><th>op 수 (현재까지 / token)</th><th>CYCLES 현재까지</th><th>CYCLES token</th><th>token 비율</th><th>RD_STALL</th><th>WR_STALL</th></tr></thead>
+    <tbody id="tb"></tbody>
+    <tfoot id="tf"></tfoot>
+  </table></div>
+  <p class="note">op 수와 CYCLES는 실행기의 KSPLIT 분류(pim RUN은 첫 MACAB의 행렬, KVW는 attn)를 따른다. 합계, 누적, 비율은 생성 스크립트가 trace 값을 더해 넣은 값이다. 현재 step의 kernel 행이 강조된다.</p>
+</div>
+
+<p class="note" id="src"></p>
+</div>
+
+<script>
+const DATA = /*__TRACE_DATA__*/;
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const GNAME = { gemv: "GEMV", attn: "attention", rms: "RMSNORM", actq: "ACTQ", swi: "SWIGLU", amax: "ARGMAX", arm: "ARM kernel" };
+  const IPN = { ga: "gemv_acc (slot 0)", pi: "pim (slot 1)", at: "attn (slot 2)", ve: "vec (slot 3)", arm: "PS / ARM" };
+  const S = { sc: null, i: 0, playing: false, timer: null, xmode: "cyc" };
+  const fmt = (n) => n.toLocaleString("en-US");
+  const col = (g) => "var(--c-" + g + ")";
+  function letter(st) {
+    if (st.t === "arm") return "ARM";
+    if (st.op === "KVW") return "W";
+    if (st.k === "gemv_cls") return "C";
+    return { gemv: "G", attn: "A", rms: "R", actq: "Q", swi: "S", amax: "M" }[st.g] || "?";
+  }
+  function layerTxt(l) {
+    if (l === "embed") return "embed (layer 0 이전)";
+    if (l === "final") return "final (마지막 rmsnorm 이후)";
+    return "layer " + l;
+  }
+  function el(tag, attrs, text) {
+    const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  // ---------------- block diagram ----------------
+  const B = {};
+  function drawBlock() {
+    const sc = S.sc, svg = $("blk");
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    const W = (id, d, cls) => { const p = el("path", { d: d, class: "wire " + (cls || "") }); svg.appendChild(p); B[id] = p; return p; };
+    const box = (id, x, y, w, h, cls, l1, l2) => {
+      const r = el("rect", { x: x, y: y, width: w, height: h, rx: 6, class: "box " + (cls || "") });
+      svg.appendChild(r); B[id] = r;
+      svg.appendChild(el("text", { x: x + w / 2, y: y + (l2 ? h / 2 - 3 : h / 2 + 5), "text-anchor": "middle", "font-size": 14, "font-weight": 600 }, l1));
+      if (l2) svg.appendChild(el("text", { x: x + w / 2, y: y + h / 2 + 14, "text-anchor": "middle", "font-size": 11.5, class: "muted" }, l2));
+    };
+    // wires first (under the boxes)
+    const ipx = [20, 175, 330, 485], ipw = 135;
+    W("gp0", "M320 58 L320 86");
+    const slotOn = [sc.slots.ga, sc.slots.pi, sc.slots.at, sc.slots.ve];
+    for (let k = 0; k < 4; k++) W("xs" + k, "M" + (ipx[k] + ipw / 2) + " 124 L" + (ipx[k] + ipw / 2) + " 152", slotOn[k] ? "" : "off");
+    const hpx = [20, 175, 330, 485];
+    // IP -> HP wiring of the build (system.md 1.3)
+    const links = sc.build === "A" ? [[0, 0], [2, 1], [3, 3]] : [[1, 0], [2, 1], [2, 2], [3, 3]];
+    B.links = [];
+    for (const [s, h] of links) {
+      const x1 = ipx[s] + ipw / 2 + (s === 2 && h === 2 ? 30 : 0) + (s === 2 && h === 1 ? -20 : 0);
+      const x2 = hpx[h] + ipw / 2;
+      const p = W("l" + s + h, "M" + x1 + " 206 C" + x1 + " 232 " + x2 + " 228 " + x2 + " 252");
+      B.links.push({ s: s, h: h, p: p });
+    }
+    if (sc.build === "A") W("l22", "M" + (hpx[2] + ipw / 2) + " 232 L" + (hpx[2] + ipw / 2) + " 252", "off");
+    for (let h = 0; h < 4; h++) W("hd" + h, "M" + (hpx[h] + ipw / 2) + " 292 L" + (hpx[h] + ipw / 2) + " 318");
+    W("psddr", "M150 34 L6 34 L6 340 L20 340");
+    // boxes
+    box("ps", 160, 10, 320, 48, "", "PS: ARM Cortex-A9", "드라이버, 실행기, ARM kernel");
+    box("xb", 20, 86, 600, 38, "", "M_AXI_GP0 -> axil_xbar (AXI4-Lite, slot 4 KiB)", null);
+    const ipn = [["gemv_acc", "slot 0"], ["pim", "slot 1"], ["attn", "slot 2"], ["vec", "slot 3"]];
+    for (let k = 0; k < 4; k++) {
+      if (slotOn[k]) box("ip" + k, ipx[k], 152, ipw, 54, "", ipn[k][0], ipn[k][1]);
+      else box("ip" + k, ipx[k], 152, ipw, 54, "absent", "slot " + k + ": 없음", ipn[k][0] + " 자리");
+    }
+    for (let h = 0; h < 4; h++) {
+      const on = sc.hp_map["HP" + h] !== "tie-off";
+      box("hp" + h, hpx[h], 252, ipw, 40, on ? "" : "absent", "HP" + h, sc.hp_map["HP" + h]);
+      B["hpt" + h] = el("text", { x: hpx[h] + ipw / 2 + 6, y: 309, "text-anchor": "start", "font-size": 11.5, class: "hot" }, "");
+    }
+    box("ddr", 20, 318, 600, 40, "", "DDR (TB: HP 포트마다 axi_mem_slave, 같은 DDR 이미지)", null);
+    for (let h = 0; h < 4; h++) svg.appendChild(B["hpt" + h]);
+    B.pst = el("text", { x: 328, y: 78, "text-anchor": "start", "font-size": 11.5, class: "hot" }, "");
+    svg.appendChild(B.pst);
+    svg.appendChild(el("text", { x: 12, y: 190, "font-size": 11, class: "muted", transform: "rotate(-90 12 190)" }, "ARM 메모리 경로"));
+  }
+  function setCls(node, base, on) { node.setAttribute("class", base + (on ? " act" : "")); }
+  function updBlock(st) {
+    const sc = S.sc;
+    const slotOn = [sc.slots.ga, sc.slots.pi, sc.slots.at, sc.slots.ve];
+    const cur = { ga: 0, pi: 1, at: 2, ve: 3 }[st.ip];
+    setCls(B.ps, "box", st.t === "arm");
+    setCls(B.psddr, "wire", st.t === "arm");
+    setCls(B.gp0, "wire", st.t === "ip");
+    setCls(B.xb, "box", st.t === "ip");
+    for (let k = 0; k < 4; k++) {
+      setCls(B["ip" + k], slotOn[k] ? "box" : "box absent", k === cur);
+      setCls(B["xs" + k], slotOn[k] ? "wire" : "wire off", k === cur);
+    }
+    for (let h = 0; h < 4; h++) {
+      const r = st.hp[2 * h], w = st.hp[2 * h + 1], used = r + w > 0;
+      const on = sc.hp_map["HP" + h] !== "tie-off";
+      setCls(B["hp" + h], on ? "box" : "box absent", used);
+      setCls(B["hd" + h], "wire", used);
+      B["hpt" + h].textContent = used ? "R " + fmt(r) + " / W " + fmt(w) : "";
+    }
+    for (const L of B.links) setCls(L.p, "wire", L.s === cur && st.hp[2 * L.h] + st.hp[2 * L.h + 1] > 0);
+    B.pst.textContent = st.t === "ip" ? "AXI-Lite rd " + fmt(st.axr) + " / wr " + fmt(st.axw) : "";
+  }
+
+  // ---------------- detail ----------------
+  function dl(rows) {
+    const d = $("detail");
+    while (d.firstChild) d.removeChild(d.firstChild);
+    for (const [k, v] of rows) {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd");
+      if (v instanceof Node) dd.appendChild(v); else dd.textContent = v;
+      d.appendChild(dt); d.appendChild(dd);
+    }
+  }
+  function chip(st) {
+    const s = document.createElement("span");
+    const c = document.createElement("span");
+    c.className = "chip"; c.style.background = col(st.g); c.textContent = letter(st);
+    s.appendChild(c); s.appendChild(document.createTextNode(" " + st.k + " (" + GNAME[st.g] + ")"));
+    return s;
+  }
+  function updDetail(st) {
+    const sc = S.sc, rows = [["step", (S.i + 1) + " / " + sc.steps.length]];
+    if (st.t === "arm") {
+      rows.push(["실행", "ARM (PS)"], ["kernel", chip(st)], ["layer", layerTxt(st.lay)], ["호출", st.size],
+        ["시작 tick", fmt(st.t0) + " (token 시작 기준)"],
+        ["시간", "시뮬레이션 0 cycle. TB는 ARM 실행 시간을 모델링하지 않는다(plat_dpi.c). 보드에서는 0이 아니다."]);
+    } else {
+      rows.push(["IP", IPN[st.ip]], ["op", st.op], ["kernel", chip(st)], ["layer", layerTxt(st.lay)]);
+      if (st.size) rows.push(["크기", st.size]);
+      rows.push(["CYCLES", fmt(st.cyc)], ["RD_STALL", fmt(st.rs)], ["WR_STALL", fmt(st.ws)],
+        ["시작 tick", fmt(st.t0) + " (CTRL GO 쓰기, token 시작 기준)"],
+        ["busy 해제 확인", fmt(st.t1) + " (드라이버가 STATUS busy 0을 읽은 tick)"],
+        ["AXI-Lite", "rd " + fmt(st.axr) + ", wr " + fmt(st.axw) + " (이 slot, 이전 op 뒤부터; STATUS polling 포함)"]);
+      const hp = [];
+      for (let h = 0; h < 4; h++) if (st.hp[2 * h] + st.hp[2 * h + 1] > 0) hp.push("HP" + h + " R " + fmt(st.hp[2 * h]) + " / W " + fmt(st.hp[2 * h + 1]));
+      rows.push(["HP beats", hp.length ? hp.join(", ") : "없음"]);
+      if (st.note) rows.push(["참고", st.note]);
+    }
+    dl(rows);
+    const ol = $("cmds");
+    while (ol.firstChild) ol.removeChild(ol.firstChild);
+    if (st.cmds) for (const c of st.cmds) { const li = document.createElement("li"); li.textContent = c; ol.appendChild(li); }
+    ol.hidden = !st.cmds;
+  }
+
+  // ---------------- timeline ----------------
+  function xr(st) {
+    const sc = S.sc;
+    if (S.xmode === "cyc") return [st.x0 / sc.tok_cyc, st.cyc / sc.tok_cyc];
+    return [st.t0 / sc.tok_ticks, st.cyc / sc.tok_ticks];
+  }
+  function drawTimeline() {
+    const sc = S.sc, svg = $("ov");
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    S.rects = [];
+    sc.steps.forEach((st, i) => {
+      const [x, w] = xr(st);
+      let r;
+      if (st.t === "arm") r = el("rect", { x: x * 1000 - 0.6, y: 2, width: 1.2, height: 42, fill: col("arm"), opacity: 0.8 });
+      else r = el("rect", { x: x * 1000, y: 8, width: Math.max(w * 1000, 0.3), height: 30, fill: col(st.g) });
+      r.addEventListener("click", (ev) => { ev.stopPropagation(); stop(); setPos(i); });
+      svg.appendChild(r); S.rects.push(r);
+    });
+    const leg = $("legend");
+    while (leg.firstChild) leg.removeChild(leg.firstChild);
+    const seen = [];
+    for (const st of sc.steps) if (seen.indexOf(st.g) < 0) seen.push(st.g);
+    for (const g of seen) {
+      const s = document.createElement("span");
+      const c = document.createElement("span"); c.className = "chip"; c.style.background = col(g);
+      c.textContent = { gemv: "G C", attn: "A W", rms: "R", actq: "Q", swi: "S", amax: "M", arm: "ARM" }[g];
+      s.appendChild(c); s.appendChild(document.createTextNode(" " + GNAME[g] + (sc.grp[g] ? " " + fmt(sc.grp[g]) + " cyc" : "")));
+      leg.appendChild(s);
+    }
+    const sum = $("sum");
+    while (sum.firstChild) sum.removeChild(sum.firstChild);
+    const item = (k, v) => { const s = document.createElement("span"); s.textContent = k + " "; const b = document.createElement("b"); b.textContent = v; s.appendChild(b); sum.appendChild(s); };
+    item("token CYCLES 합", fmt(sc.tok_cyc));
+    item("IP op", fmt(sc.n_ip));
+    item("ARM step", fmt(sc.n_arm));
+    item("RD_STALL 합", fmt(sc.tok_rs));
+    item("WR_STALL 합", fmt(sc.tok_ws));
+    item("token 시뮬레이션 tick", fmt(sc.tok_ticks));
+  }
+  function updTimeline(st) {
+    const [x, w] = xr(st);
+    const svg = $("ov"), cur = $("cursor");
+    const px = (x + (st.t === "arm" ? 0 : w / 2)) * svg.clientWidth;
+    cur.style.left = Math.max(0, Math.min(svg.clientWidth - 2, px)) + "px";
+    S.rects.forEach((r, i) => r.setAttribute("opacity", i === S.i ? 1 : (S.sc.steps[i].t === "arm" ? 0.55 : 0.5)));
+    const z = $("zoom");
+    while (z.firstChild) z.removeChild(z.firstChild);
+    for (let d = -3; d <= 3; d++) {
+      const j = S.i + d, c = document.createElement("div");
+      c.className = "zc" + (d === 0 ? " cur" : "");
+      if (j < 0 || j >= S.sc.steps.length) { c.className += " empty"; c.textContent = "-"; z.appendChild(c); continue; }
+      const s = S.sc.steps[j];
+      const ch = document.createElement("span"); ch.className = "chip"; ch.style.background = col(s.g); ch.textContent = letter(s);
+      const n1 = document.createElement("div"); n1.className = "nm"; n1.appendChild(ch);
+      n1.appendChild(document.createTextNode(" " + (j + 1)));
+      const n2 = document.createElement("div"); n2.className = "nm"; n2.textContent = s.t === "arm" ? s.k : s.k;
+      const n3 = document.createElement("div"); n3.className = "nm mono"; n3.textContent = s.t === "arm" ? "0 cyc" : fmt(s.cyc) + " cyc";
+      c.appendChild(n1); c.appendChild(n2); c.appendChild(n3);
+      c.title = (j + 1) + ": " + (s.t === "arm" ? "ARM " : s.op + " ") + s.k + ", " + layerTxt(s.lay);
+      c.addEventListener("click", () => { stop(); setPos(j); });
+      z.appendChild(c);
+    }
+  }
+
+  // ---------------- table ----------------
+  function updTable(st) {
+    const sc = S.sc, tb = $("tb");
+    while (tb.firstChild) tb.removeChild(tb.firstChild);
+    const td = (tr, v) => { const c = document.createElement("td"); if (v instanceof Node) c.appendChild(v); else c.textContent = v; tr.appendChild(c); };
+    sc.rows.forEach((r, j) => {
+      const tr = document.createElement("tr");
+      if (st.t === "ip" && st.k === r.k) tr.className = "cur";
+      const nm = document.createElement("span");
+      const ch = document.createElement("span"); ch.className = "chip"; ch.style.background = col(r.g);
+      ch.textContent = letter({ t: "ip", g: r.g, k: r.k, op: "" });
+      nm.appendChild(ch); nm.appendChild(document.createTextNode(" " + r.k));
+      td(tr, nm);
+      td(tr, fmt(st.cn[j]) + " / " + fmt(r.n));
+      td(tr, fmt(st.cc[j]));
+      td(tr, fmt(r.cyc));
+      const p = document.createElement("span");
+      const bar = document.createElement("span"); bar.className = "pbar"; bar.style.width = Math.round(r.pct * 0.6) + "px"; bar.style.background = col(r.g);
+      p.appendChild(bar); p.appendChild(document.createTextNode(r.pct.toFixed(1) + " %"));
+      td(tr, p);
+      td(tr, fmt(r.rs)); td(tr, fmt(r.ws));
+      tb.appendChild(tr);
+    });
+    const tf = $("tf");
+    while (tf.firstChild) tf.removeChild(tf.firstChild);
+    const tr = document.createElement("tr");
+    td(tr, "합계");
+    td(tr, fmt(st.cn.reduce((a, b) => a + b, 0)) + " / " + fmt(sc.n_ip));
+    td(tr, fmt(st.cc.reduce((a, b) => a + b, 0)));
+    td(tr, fmt(sc.tok_cyc)); td(tr, "100.0 %"); td(tr, fmt(sc.tok_rs)); td(tr, fmt(sc.tok_ws));
+    tf.appendChild(tr);
+  }
+
+  // ---------------- player ----------------
+  function setPos(i) {
+    const n = S.sc.steps.length;
+    S.i = Math.max(0, Math.min(n - 1, i));
+    const st = S.sc.steps[S.i];
+    $("scrub").value = S.i;
+    $("pos").textContent = "step " + (S.i + 1) + " / " + n;
+    updBlock(st); updDetail(st); updTimeline(st); updTable(st);
+  }
+  function tick() {
+    if (S.i >= S.sc.steps.length - 1) { stop(); return; }
+    setPos(S.i + 1);
+  }
+  function play() {
+    if (S.i >= S.sc.steps.length - 1) setPos(0);
+    S.playing = true; $("b-play").textContent = "정지"; $("b-play").setAttribute("aria-label", "정지");
+    clearInterval(S.timer);
+    S.timer = setInterval(tick, 1000 / Number($("speed").value));
+  }
+  function stop() {
+    S.playing = false; clearInterval(S.timer); S.timer = null;
+    $("b-play").textContent = "재생"; $("b-play").setAttribute("aria-label", "재생");
+  }
+  function setScene(k) {
+    S.sc = DATA.scenes[k];
+    const sc = S.sc;
+    $("scrub").max = sc.steps.length - 1;
+    $("sceneinfo").textContent = "빌드 " + sc.build + " (" + (sc.build === "A" ? "sys_a_top" : "sys_p_top") + "), 모델 " + sc.model +
+      " (dim " + sc.dim + ", layer " + sc.layers + ", head " + sc.heads + ", kv head " + sc.kv_heads + ", vocab " + fmt(sc.vocab) + "), " +
+      "위치 " + sc.pos + "의 token, run P, mask " + sc.mask + ", opt " + sc.opt + ". 메모리 모델: " + sc.mem +
+      ". 출처: sys_fwd run " + sc.label + ".";
+    drawBlock(); drawTimeline();
+    setPos(Math.min(S.i, sc.steps.length - 1));
+  }
+
+  // ---------------- init ----------------
+  $("warn").textContent = "모든 수치는 RTL 시뮬레이션(Questa, 100 MHz TB clock, 1 tick = 1 cycle) 값이다. 메모리는 TB의 AXI 메모리 모델(latency 1, stall 없음; stall 장면만 TB random 모델)이고 ARM 시간은 0으로 잡힌다. 보드 측정값이 아니다.";
+  $("src").textContent = "데이터: " + DATA.source + ". viewer는 값을 계산하지 않고 내장된 trace 값만 표시한다. 재생성 방법은 docs/viewer/README.md.";
+  const sel = $("scene");
+  DATA.scenes.forEach((sc, k) => { const o = document.createElement("option"); o.value = k; o.textContent = (k + 1) + ". " + sc.title + " (" + sc.steps.length + " step)"; sel.appendChild(o); });
+  sel.addEventListener("change", () => { stop(); setScene(Number(sel.value)); });
+  $("b-first").addEventListener("click", () => { stop(); setPos(0); });
+  $("b-prev").addEventListener("click", () => { stop(); setPos(S.i - 1); });
+  $("b-next").addEventListener("click", () => { stop(); setPos(S.i + 1); });
+  $("b-last").addEventListener("click", () => { stop(); setPos(S.sc.steps.length - 1); });
+  $("b-play").addEventListener("click", () => { if (S.playing) stop(); else play(); });
+  $("speed").addEventListener("change", () => { if (S.playing) play(); });
+  $("scrub").addEventListener("input", () => { stop(); setPos(Number($("scrub").value)); });
+  $("ov").addEventListener("click", (ev) => {
+    const r = $("ov").getBoundingClientRect(), f = (ev.clientX - r.left) / r.width;
+    let best = 0, bd = 2;
+    S.sc.steps.forEach((st, i) => { const [x, w] = xr(st); const d = Math.abs(x + w / 2 - f); if (d < bd) { bd = d; best = i; } });
+    stop(); setPos(best);
+  });
+  const setX = (m) => { S.xmode = m; $("x-cyc").className = m === "cyc" ? "on" : ""; $("x-tick").className = m === "tick" ? "on" : ""; drawTimeline(); setPos(S.i); };
+  $("x-cyc").addEventListener("click", () => setX("cyc"));
+  $("x-tick").addEventListener("click", () => setX("tick"));
+  const themes = ["auto", "light", "dark"], tname = { auto: "자동", light: "라이트", dark: "다크" };
+  let ti = 0;
+  $("b-theme").addEventListener("click", () => {
+    ti = (ti + 1) % 3;
+    if (themes[ti] === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", themes[ti]);
+    $("b-theme").textContent = "테마: " + tname[themes[ti]];
+  });
+  window.addEventListener("resize", () => updTimeline(S.sc.steps[S.i]));
+  document.addEventListener("keydown", (e) => {
+    const tag = e.target && e.target.tagName;
+    if (tag === "SELECT" || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === " " || e.code === "Space") { e.preventDefault(); if (S.playing) stop(); else play(); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); stop(); setPos(S.i + 1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); stop(); setPos(S.i - 1); }
+    else if (e.key === "Home") { e.preventDefault(); stop(); setPos(0); }
+    else if (e.key === "End") { e.preventDefault(); stop(); setPos(S.sc.steps.length - 1); }
+  });
+  setScene(0);
+})();
+</script>
+</body>
+</html>
