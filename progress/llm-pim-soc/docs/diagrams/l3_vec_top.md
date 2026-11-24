@@ -2,6 +2,7 @@
 
 - 원본과 확인일: 확인일 2026-11-20(S4-7 완료 뒤). `rtl/l3/vec_top.sv`(포트, 인스턴스, read/write 명령 순서기, packer, 종료 판정), `rtl/l3/vec_csr.sv`(레지스터, descriptor 검사, 호출 상태). 데이터 배치, 레지스터 맵, 실행 규칙, CYCLES 식의 원본은 `docs/spec/vec.md`(이 문서는 요약이고 충돌하면 `vec.md`와 RTL이 우선). `vec_core` 내부는 `l2_vec_core.md`, leaf는 `l0_l1_vec_leaf.md`. 측정값은 `docs/log.md` S4-7.
 - 상태: RTL 시뮬레이션 통과. `./sim/run.sh all` 424 run, fails 0 [측정, 수퍼바이저 재실행, `log.md` S4-7]. `vec_top` 12 run, `vec_csr` 6 run(`vec.md` 7절). 두 모델 forward 순서 전 레코드(260K 1,224 호출, 15M 804 호출)와 합성 1,500 호출에서 mismatch 0, mutation 35개 중 33개 검출(2개 동치), lint 경고 0은 agent 보고(재실행 안 함). **보드는 미실행**이고 100 MHz 타이밍, LUT 수는 확인하지 않았다.
+- S5-4 보완(2026-11-23): RD_STALL 계수 수정(`vec_core.d_want_o` 추가, `rd_stall_ev` 식 변경)을 1, 2절에 반영했다. 수정 뒤 회귀 `./sim/run.sh all` 491 run, fails 0 [측정, 수퍼바이저 재실행, `log.md` 2026-11-23 S5-4 보완]. 위 상태 줄의 424 run은 S4-7 시점 값이다.
 - 기본 parameter(RTL 기본값): `N_MAX` 1024, `IDX_W` 16, `LUT_PIPE` 2, `Q_DEPTH` 8, `MAX_BURST` 16, `OUTS` 4, `RD_FIFO` 64(= `MAX_BURST` x `OUTS`), `WR_FIFO` 32(= 2 x `MAX_BURST`), `IDW` 1, `FCLK_MHZ` 100, `ADDR_W` 12. 파생 폭: `NV_W` = `IDX_W` + 1 = 17.
 - **파형은 그리지 않았다.** 호출 timeline은 RTL의 레지스터 갱신 조건과 `vec.md` 4절, 6.2절에서 옮긴 cycle 정의 표이고, 시뮬레이션 trace에서 뽑은 것이 아니다. `CYCLES`와 닫힌 식은 `vec.md` 6.2의 시뮬레이션 측정(TB의 `top_cyc` 모델과 일치)이다.
 - 이 모듈은 인스턴스, 배선, 읽기와 쓰기 명령 순서기, packer, 종료 판정이다. 연산은 `vec_core`, 레지스터와 descriptor 검사는 `vec_csr`, AXI 동작은 engine이 한다. HP 포트 하나(read master 1, write master 1)를 쓴다.
@@ -15,13 +16,14 @@ flowchart LR
     csr["u_csr: vec_csr<br/>start_o (cycle v = s + 1), busy_o, done_i<br/>latched: op_o 2b, in0/in1/out/scl 32b, n_o NV_W 17b,<br/>qmax_o 16b, f_o, ge_o E_W 8b signed, epsc_o 32b<br/>입력: am_valid/idx IDX_W/val 32b, rd_err, wr_err, rd_stall, wr_stall"]:::mod
     bc["byte 수 (shift만, 곱셈 없음)<br/>n32 = 32'(d_n), q16 = (op == ACTQ && qmax != 127)<br/>b_in0 = n32 << 2<br/>b_in1 = RMS ? n32 << 1 : n32 << 2<br/>b_out = AMAX ? 4 : q16 ? n32 << 1 : n32"]:::logic
     rseq["read 명령 순서기<br/>rc_n_q 2b (남은 명령), rc_k_q (0 IN0, 1 IN1)<br/>start: rc_n_q <= (RMS 또는 SWI) ? 2 : 1<br/>rc_addr = rc_k_q ? d_in1 : d_in0"]:::cut
-    rd["u_rd: axi_rd_eng<br/>AW 32, LEN_W 32, MAX_BURST, OUTS, FIFO_DEPTH = RD_FIFO<br/>cmd_addr 32b, cmd_bytes 32b<br/>d_data 64b, d_valid, d_ready, d_last"]:::mod
+    rd["u_rd: axi_rd_eng<br/>AW 32, LEN_W 32, MAX_BURST, OUTS, FIFO_DEPTH = RD_FIFO<br/>cmd_addr 32b, cmd_bytes 32b<br/>d_data 64b, d_valid, d_ready, d_last<br/>busy_o -> rd_busy (u_rd.busy_o 사용), stall_o 미연결"]:::mod
     core["u_core: vec_core<br/>start_i = start, op_i, n_i, f_i, qmax_i, ge_i, epsc_i<br/>beat 입력 d_data 64b<br/>q_valid/q_ready/q 16b, m 17b, e SH_W 10b, scl_valid<br/>am_idx IDX_W, am_max 32b, busy, done (c_done)"]:::mod
     wseq["write 명령 순서기<br/>wc_n_q 2b, wc_k_q (0 OUT, 1 SCL)<br/>start: wc_n_q <= AMAX ? 1 : 2<br/>wc_addr = wc_k_q ? d_scl : d_out<br/>wc_bytes = wc_k_q ? 8 : b_out"]:::cut
     pk["packer<br/>ph_q 2b: PK_Q, PK_S, PK_A, PK_D<br/>acc_q 64b, lane_q 3b, qc_q NV_W<br/>pk_valid_q, pk_data_q 64b<br/>q: int8 8개 또는 int16 4개/beat (마지막 beat 부분)<br/>PK_S: {32'(e), 32'(m)}, PK_A: {32'd0, 32'(am_idx)}"]:::cut
     wr["u_wr: axi_wr_eng<br/>AW 32, LEN_W 32, MAX_BURST, OUTS, FIFO_DEPTH = WR_FIFO<br/>cmd_addr 32b, cmd_bytes 32b<br/>in_data 64b, in_valid, in_ready"]:::mod
     hr["m_axi ar/r<br/>HP read 포트"]:::ext
     hw["m_axi aw/w/b<br/>HP write 포트"]:::ext
+    stallc["rd_stall_ev<br/>= rd_busy && d_want && !d_valid"]:::logic
     done["종료 판정 (run_done)<br/>busy && !start && cd_q && ph_q == PK_D<br/>&& !pk_valid_q && wc_n_q == 0 && rc_n_q == 0 && !wr_busy<br/>am_valid = run_done && op == OP_AMAX"]:::logic
 
     ps --> axil
@@ -37,6 +39,8 @@ flowchart LR
     rd <--> hr
     rd -->|"d_valid, d_data 64b, d_last"| core
     core -->|"d_ready = pop"| rd
+    core -->|"d_want (valid와 무관)"| stallc
+    rd -->|"rd_busy (u_rd.busy_o), d_valid"| stallc
     csr -->|"start, d_op, d_n, d_f, d_qmax, d_ge, d_epsc"| core
     core -->|"q_valid, q 16b"| pk
     pk -->|"q_ready"| core
@@ -51,7 +55,8 @@ flowchart LR
     core -->|"c_done -> cd_q"| done
     done -->|"run_done -> done_i"| csr
     done -->|"am_valid"| csr
-    rd -.->|"rd_err_ev (RRESP[1] handshake), rd_stall_ev"| csr
+    rd -.->|"rd_err_ev (RRESP[1] handshake)"| csr
+    stallc -.->|"rd_stall_ev"| csr
     wr -.->|"wr_err_ev (BRESP[1] handshake), wr_stall_ev"| csr
 
     classDef ext fill:#ffffff,stroke:#333333,color:#000
@@ -94,7 +99,7 @@ flowchart LR
 | e | `run_done`: `vec_core` done을 봤고(`cd_q`), `ph_q == PK_D`, packer가 모든 beat를 넘겼고(`!pk_valid_q`), `wc_n_q == 0`, `rc_n_q == 0`, `axi_wr_eng`가 idle(마지막 B를 받음)인 첫 cycle. `done_i`로 `vec_csr`가 `done_sticky`와 OPS를 갱신 | `vec_top`의 `run_done`, `vec.md` 4.3 |
 
 - 진행 중인 호출 중에 `CTRL`에 start를 쓰면 `START_BUSY`(op가 틀리면 BAD_OP도)로 무시된다. `done` cycle(e)의 `CTRL`은 새 호출로 수락된다(`idle = ... || done_i`). op가 1..4가 아니면 BAD_OP만 서고 `done_sticky`는 그대로(`vec.md` 4.1 표).
-- `STATUS.busy`는 `chk_q || busy_q`라 s + 1부터 e까지 1이다. `CYCLES`는 `chk_q || busy_q`인 cycle마다 증가해 e - s다(검사 1 cycle 포함). `RD_STALL`은 같은 구간에서 `axi_rd_eng`의 `stall_o`(core가 read 데이터를 기다림), `WR_STALL`은 `axi_wr_eng`의 `stall_o`(packer의 beat를 write engine이 받지 못함)인 cycle 수다.
+- `STATUS.busy`는 `chk_q || busy_q`라 s + 1부터 e까지 1이다. `CYCLES`는 `chk_q || busy_q`인 cycle마다 증가해 e - s다(검사 1 cycle 포함). `RD_STALL`은 같은 구간에서 `rd_stall_ev = rd_busy && d_want && !d_valid`(`rd_busy` = `u_rd.busy_o`, `d_want` = `vec_core.d_want_o`, core가 원소를 받을 수 있는데 read beat가 없는 cycle)의 수다. `u_rd.stall_o`는 연결하지 않았다: 그 식은 `busy && d_ready && !d_valid`인데 `vec_core.d_ready_o`가 beat의 pop이라 `d_valid`를 포함해 구조상 항상 0이었다(2026-11-23 S5-4 보완에서 수정, `vec.md` 3절 주). latency 1 메모리 모델(stall 없음)에서 op당 4 [측정, 시뮬레이션, `vec.md` 3절, `CYC=1` run]. `WR_STALL`은 `axi_wr_eng`의 `stall_o`(packer의 beat를 write engine이 받지 못함)인 cycle 수다.
 
 ## 3. 레지스터 요약 (32비트, offset은 byte)
 

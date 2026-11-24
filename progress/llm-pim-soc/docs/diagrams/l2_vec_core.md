@@ -12,7 +12,7 @@
 flowchart LR
     subgraph IN["입력 포트"]
         call["call<br/>start_i, op_i 2b (0 RMS, 1 SWI, 2 ACTQ, 3 AMAX)<br/>n_i NV_W 17b, f_i E_W 8b signed, qmax_i 16b<br/>ge_i E_W 8b signed, epsc_i 32b"]
-        beat["read beat stream<br/>d_valid_i, d_ready_o, d_last_i<br/>d_data_i 64b"]
+        beat["read beat stream<br/>d_valid_i, d_ready_o, d_want_o, d_last_i<br/>d_data_i 64b"]
     end
 
     subgraph CORE["vec_core"]
@@ -53,6 +53,7 @@ flowchart LR
     aq -->|"done_o"| dn
     am -->|"done_o"| dn
     dn -->|"d_ready_o = pop"| beat
+    dn -->|"d_want_o = busy_q && !ek_q && e_ready"| beat
     dn --> st
 
     classDef mod fill:#d8f0d8,stroke:#2e7d32,stroke-width:2px,color:#000
@@ -63,7 +64,7 @@ flowchart LR
 - 초록 = 하위 모듈 인스턴스, 파랑 = 조합 논리, 노랑 = 레지스터가 있는 control.
 - 한 호출은 read engine의 명령 순서(호출자인 `vec_top`이 발행)대로 beat를 받는다: RMSNORM은 x(int32 [n]) 뒤에 g(int16 [n]), SWIGLU는 h1 뒤에 h3, ACTQ와 ARGMAX는 v 하나. unpacker가 명령 하나의 마지막 원소를 받으면 `k_q`를 1로 올리고, 마지막 명령(RMSNORM, SWIGLU은 `k_q` = 1, ACTQ와 ARGMAX는 첫 명령)이면 `ek_q`를 올려 이후 beat를 받지 않는다.
 - 마지막 beat의 호출 밖 원소는 버린다(`pop`이 `e_last`에서도 선다). 원소는 cycle마다 최대 1개.
-- 입력 backpressure는 `e_ready`(각 front 또는 `actq_core`의 `v_ready_o`)가 `d_ready_o`로 이어진다. 출력 쪽은 `q_ready_i`와 `actq_core`의 q FIFO credit이 처리한다. front의 y/g 출력은 backpressure가 없다(valid만): `actq_core`가 LOAD 동안 매 cycle 받는다.
+- 입력 backpressure는 `e_ready`(각 front 또는 `actq_core`의 `v_ready_o`)가 `d_ready_o`로 이어진다. **`d_ready_o`와 `d_want_o`는 다르다**(2026-11-23 S5-4 보완, RTL `vec_core.sv` 헤더 주석과 `d_ready_o = pop`, `d_want_o = busy_q && !ek_q && e_ready`): `d_ready_o`는 beat의 pop(마지막 lane의 원소를 받는 cycle)이라 `d_valid_i`가 이미 포함된 값이고, `d_want_o`는 "beat가 있으면 원소를 받을 상태"를 `d_valid_i`와 무관하게 낸다. `vec_top`이 RD_STALL(core가 read 데이터를 기다린 cycle)을 `d_want_o`로 세고, `d_ready_o`로는 셀 수 없다(`d_ready_o`와 `!d_valid`가 함께 참일 수 없음). `d_ready_o`와 cycle 수는 바뀌지 않았다. 출력 쪽은 `q_ready_i`와 `actq_core`의 q FIFO credit이 처리한다. front의 y/g 출력은 backpressure가 없다(valid만): `actq_core`가 LOAD 동안 매 cycle 받는다.
 - 공유 buffer 포트 선택은 `op_q == OP_RMS ? rb_* : sb_*` 하나이고, 다른 op(ACTQ, ARGMAX)에서는 `sb_*`(swi_front의 포트, 쓰지 않음)가 선택된 채 있다. buffer는 RMSNORM이면 x, SWIGLU이면 silu를 담는다.
 
 ## 2. data flow (op별)

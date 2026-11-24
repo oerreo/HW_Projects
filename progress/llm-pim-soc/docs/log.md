@@ -182,7 +182,7 @@
 - UNVERIFIED: Vivado와 XSCT에서 한 번도 실행하지 않음(속성 이름, module reference의 인터페이스 추론, 연결하지 않은 m02_axi의 validate, 합성 결과 전부, 100 MHz timing, BRAM parity 매핑).
 - 다음: 사용자 빌드(S5-6 리포트 분석), S4-8 정리.
 
-## 2026-11-23: S5-4 보완: stall 아래 forward, PIM cycle 수치 정정, vec RD_STALL 수정  [notion: pending]
+## 2026-11-23: S5-4 보완: stall 아래 forward, PIM cycle 수치 정정, vec RD_STALL 수정  [notion: synced]
 - PIM "레코드마다 run" cycle 차이의 원인(hw-worker): `system.md` 4.4절의 "약 6,950"은 `pim_top` TB의 random stall run(20% stall, R latency 1~30) 값(평균 6,974)이었다. stall 없이 같은 TB를 다시 돌리면 위치 0..3에서 5,822~5,852이고 시스템 TB의 5,846과 맞는다. RTL 차이 없음. `system.md`, `pim.md`, `s5calc.py`와 다이어그램 두 곳을 고침. 빌드 P의 PL 시간 [계산, 100 MHz 가정]은 375.6~389.1 us/token(이전 상한 400.1). 이 로그의 이전 항목에 적힌 6,950과 400.1은 이 항목으로 대체한다.
 - stall 아래 시스템 forward(hw-worker): `tb_sys_fwd`에 `+PROF`(HP 메모리 모델의 random stall과 latency), run 3개 추가(`p_stall` 빌드 P 260K, `a_stall` 빌드 A 260K, `a_m2_stall` 빌드 A 15M 위치 0). token, logits hash, K 비교, COH, fallback, IPERR, AXI 위반 모두 0. stall run에서는 CYCLES 닫힌 식을 하한으로 검사.
 - RTL 버그(성능 계수기, 데이터 영향 없음): `vec_top`의 RD_STALL이 구조상 항상 0이었다(`vec_core`의 `d_ready_o`가 `d_valid_i`를 포함해 `axi_rd_eng.stall_o` 조건이 성립하지 않음). `vec_core`에 `d_want_o`를 추가하고 `vec_top`이 `rd_busy && d_want && !d_valid`로 세게 수정. `d_ready_o`와 cycle 수는 불변. unit TB가 DUT 내부 event를 그대로 세어 놓쳤던 것이라 `tb_vec_top`, `tb_vec_core`, `tb_attn_top`, 시스템 TB에 기대값과 "> 0" 검사 추가. 호스트 모델 `ipm_ve.c`도 맞춤(latency 1에서 op당 4).

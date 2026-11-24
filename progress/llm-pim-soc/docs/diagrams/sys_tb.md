@@ -2,7 +2,7 @@
 
 - 원본과 확인일: 2026-11-23. 소스 `tb/sys_top/tb_sys_fwd.sv`, `hal_dpi.c`, `plat_dpi.c`, `sys_tb.c`, `sys_main_dpi.c`, `tb/common/axil_bfm.sv`, `tb/common/axi_mem_slave.sv`, 회귀 설정 `sim/tests/sys_smoke.cfg`, `sys_fwd.cfg`, 설명 `docs/spec/system.md` 3.2절, `docs/spec/hierarchy.md` 3.13절, 결과 `docs/log.md`(2026-11-23 S5-3, S5-4).
 - 이 그림은 소스에서 읽은 구조이고, 시뮬레이션 trace에서 뽑은 파형이 아니다. 2절의 시간 표시는 `axil_bfm.read`의 코드 순서이며 cycle 수는 적지 않았다(측정하지 않음).
-- 결과(`log.md`, [측정, 수퍼바이저 재실행]): `./sim/run.sh all` 488 run, fails 0. 합성, timing, 보드는 미확인.
+- 결과(`log.md`, [측정, 수퍼바이저 재실행]): `./sim/run.sh all` 491 run, fails 0(2026-11-23 S5-4 보완 뒤, 이전 488 run에서 stall run 3개와 vec RD_STALL 수정 관련 기대값 검사 추가). 합성, timing, 보드는 미확인.
 
 ## 1. block diagram
 
@@ -94,7 +94,7 @@ sequenceDiagram
 - `axil_bfm`은 `+MAXD`(AXI-Lite 간격, 기본 0)만큼 랜덤 간격을 둔다. 대기 한도를 넘으면 `$fatal` `AXIL_TIMEOUT`.
 - 이 task의 cycle 수(xbar 3 cycle 등)는 `log.md` S5-2의 측정값이지 이 그림에서 새로 잰 값이 아니다.
 
-## 3. run 목록 (`sim/tests/sys_fwd.cfg` 21 run, `sys_smoke.cfg` 2 run)
+## 3. run 목록 (`sim/tests/sys_fwd.cfg` 24 run, `sys_smoke.cfg` 2 run)
 
 모든 run은 같은 `tb_sys_fwd`이고 `-gBUILD`(0 = A, 1 = P), `-gVAR`(1 = A2 또는 PD, 2 = XB_REG 0), plusarg(`+SX_MODELS`, `+SX_STEPS`, `+SX_LIST`, `+SX_RUNS`, `+EXP_CHECKS`)만 다르다. run 종류 글자: P 분해(CYCLES 포함), K kernel 비교(IP 호출마다 ARM kernel과 비교), W warm start(앞 위치를 ARM에서 돌려 KV를 채운 뒤 마지막 위치만 IP). 모델 1 = 260K, 2 = 15M. mask의 비트 정의는 `system.md` 4.1절.
 
@@ -128,9 +128,13 @@ sequenceDiagram
 | `p_err_rd` | P | 260K 0..1 | ff / P | pim(slot 1) SLVERR 읽기 |
 | `p_err_wr` | P | 260K 0..1 | ff / P | attn(slot 2) SLVERR 쓰기 |
 | `p_err_hang` | P | 260K 0..1 | ff / P | vec(slot 3) timeout, `+EXP_FB=1000` |
+| `p_stall` | P (`+PROF=2`, `+MAXD=1`) | 260K 0..1 | ff / P, K | stall run. HP 4개 모두 AR/AW/W/R/B 50 % stall, R latency 1~60, B 1~40 |
+| `a_stall` | A (`+PROF=3`) | 260K 0..1 | ff / P, K | stall run. 포트마다 다른 profile(HP0 stall 1's, HP1 2's, HP2 30 % / R 5~40 / B 1~10, HP3 10 % / R 1~80 / B 1~60) |
+| `a_m2_stall` | A (`+PROF=1`) | 15M 0 | ff / P | stall run. HP 4개 모두 20 % stall, R latency 1~30, B 1~20. 15M 이미지 필요 |
 
 - 정상 run의 통과 조건: 프로그램이 slot 표로 기대 빌드(`+EXP_BUILD`)를 찾고, 모든 CHECK의 `tok_mis`, `hash_mis`, `kmis`, `coh` 0, (주입 없으면) `fb`, `iperr` 0, `RESULT PASS`, gemv_acc(P = 1)와 vec 모든 op의 CYCLES == 닫힌 식, memory model 프로토콜 tag 0, 끝에 idle.
 - 오류 주입 run: 주입한 IPERR만 기대(`+EXP_IPERR_IP`, `+EXP_IPERR_KIND`)하고 token, hash, K 비교, COH는 여전히 0. 프로그램 RESULT는 FAIL이 정상(`sys_fwd.cfg` 머리 주석).
 - `sys_fwd.cfg`의 15M run 3개는 `data/third_party/models/`의 `stories15M.bin`, `tokenizer.bin`이 있어야 돈다(cfg `NEED`).
-- 결과(`log.md`, [측정, 수퍼바이저 재실행]): 위 23 run을 포함한 전체 회귀 488 run, fails 0. 15M 위치 0..3 run의 로그에서 `tok_mis` 0, `hash_mis` 0, `coh` 0, `fb` 0, `iperr` 0, CYCLES 식 대조 704건 불일치 0.
-- 미확인(`log.md`): 모든 run이 메모리 latency 1, stall 없음이다. stall과 random latency 아래의 시스템 TB는 하지 않았다.
+- `+PROF=<n>`(`tb_sys_fwd.sv` 머리 주석, 2026-11-23 S5-4 보완): HP memory model 4개에 random backpressure와 latency를 건다(`axi_mem_slave`의 `cfg_stall`/`cfg_lat`). 0(기본) stall 없음 latency 1, 1 = AR/AW/W/R/B 20 % stall에 R latency 1~30, B 1~20, 2 = 50 %에 R 1~60, B 1~40, 3 = 포트마다 다름. `PROF` != 0이면 C 쪽(`hal_dpi.c`)이 같은 값을 읽어 CYCLES 닫힌 식을 **하한**으로 검사하고(`CYC_LOW`), 모든 op에서 RD_STALL, WR_STALL <= CYCLES(`ST_BAD`)를 확인하며, HP3 R stall이 있었으면 vec RD_STALL 합 > 0(`VE_RDST`)을 요구한다. 끝에 `AXI_MEM_STALL`(채널별 stall)과 `SYSTB STALL` 줄이 찍힌다. stall run 3개 모두 token, logits hash, K 비교, COH, fallback, IPERR, AXI 위반 0(`log.md`). stall run의 RUN ticks/token [측정, 시뮬레이션, TB random 모델, 보드 값 아님]: p_stall 43,613(stall 없음 31,688), a_stall 85,953(63,819), a_m2_stall 2,514,750(2,021,290).
+- 결과(`log.md`, [측정, 수퍼바이저 재실행]): 위 24 run을 포함한 전체 회귀 491 run, fails 0. 15M 위치 0..3 run의 로그에서 `tok_mis` 0, `hash_mis` 0, `coh` 0, `fb` 0, `iperr` 0, CYCLES 식 대조 704건 불일치 0.
+- 미확인(`log.md` 2026-11-23 S5-4 보완): 메모리 모델의 random 패턴이 `+SEED`로 바뀌지 않음(시뮬레이터 기본 seed), stall 아래 오류 주입 조합, 변형 빌드(A2, PD, XB_REG 0)의 stall run, vec 외 gemv_acc WR_STALL이 시스템 run에서 0인 이유. (stall 아래 시스템 TB는 위 3개 run으로 해결.) PROF 0 run은 모두 메모리 latency 1, stall 없음.
