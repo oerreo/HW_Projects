@@ -1,0 +1,79 @@
+# ----------------------------------------------------
+# ---- A FAST FORWARD ERROR CORRECTION TOOLBOX >> ----
+# ----------------------------------------------------
+# Parameters:
+# * Simulation ------------------------------------
+#    ** Type                      = BFER
+#    ** Type of bits              = int32
+#    ** Type of reals             = float32
+#    ** Date (UTC)                = 2026-11-26 08:02:40
+#    ** Git version               = v4.7.4
+#    ** Code type (C)             = LDPC
+#    ** Noise range               = 3.6 -> 3.6 dB
+#    ** Noise type (E)            = EBN0
+#    ** Seed                      = 7
+#    ** Statistics                = off
+#    ** Debug mode                = off
+#    ** Inter frame level         = 1
+#    ** Multi-threading (t)       = 1 thread(s)
+#    ** Coset approach (c)        = no
+#    ** Coded monitoring          = no
+#    ** Bad frames tracking       = off
+#    ** Bad frames replay         = off
+#    ** Bit rate                  = 0.841309 (1723/2048)
+# * Source ----------------------------------------
+#    ** Type                      = AZCW
+#    ** Implementation            = STD
+#    ** Info. bits (K_info)       = 1723
+# * Codec -----------------------------------------
+#    ** Type                      = LDPC
+#    ** Info. bits (K)            = 1723
+#    ** Codeword size (N_cw)      = 2048
+#    ** Frame size (N)            = 2048
+#    ** Code rate                 = 0.841309 (1723/2048)
+# * Encoder ---------------------------------------
+#    ** Type                      = AZCW
+#    ** Systematic                = yes
+# * Decoder ---------------------------------------
+#    ** Type (D)                  = BP_FLOODING
+#    ** Implementation            = NMS
+#    ** Systematic                = yes
+#    ** H matrix path             = ../data/third_party/alist/eth_1723_2048.alist
+#    ** H matrix reordering       = NONE
+#    ** Num. of iterations (i)    = 30
+#    ** Normalize factor          = 0.500000
+#    ** Stop criterion (syndrome) = on
+#    ** Stop criterion depth      = 1
+# * Modem -----------------------------------------
+#    ** Type                      = BPSK
+#    ** Implementation            = STD
+#    ** Bits per symbol           = 1
+#    ** Sigma square              = on
+# * Channel ---------------------------------------
+#    ** Type                      = AWGN
+#    ** Implementation            = STD
+#    ** Complex                   = off
+#    ** Add users                 = off
+# * Monitor ---------------------------------------
+#    ** Lazy reduction            = off
+#    ** Frame error count (e)     = 100
+#    ** Compute mutual info       = no
+# * Terminal --------------------------------------
+#    ** Show Sigma                = off
+#    ** Enabled                   = yes
+#    ** Frequency (ms)            = 500
+# 
+# The simulation is running...
+(WW) Info bits positions not provided, trying to extract them from the generator matrix...
+# ---------------------||--------------------------------------------------------||---------------------
+#  Signal Noise Ratio  ||    Bit Error Rate (BER) and Frame Error Rate (FER)     ||  Global throughput  
+#         (SNR)        ||                                                        ||  and elapsed time   
+# ---------------------||--------------------------------------------------------||---------------------
+# ----------|----------||------------|----------|----------|----------|----------||----------|----------
+#     Es/N0 |    Eb/N0 ||        FRA |       BE |       FE |      BER |      FER ||  SIM_THR |    ET/RT 
+#      (dB) |     (dB) ||            |          |          |          |          ||   (Mb/s) | (hhmmss) 
+# ----------|----------||------------|----------|----------|----------|----------||----------|----------
+       2.85 |     3.60 ||       1484 |     1269 |       32 | 4.96e-04 | 2.16e-02 ||    5.109 | 00h00'01  *
+       2.85 |     3.60 ||       2971 |     3065 |       76 | 5.99e-04 | 2.56e-02 ||    5.116 | 00h00'00  *
+       2.85 |     3.60 ||       4009 |     4017 |      100 | 5.82e-04 | 2.49e-02 ||    5.146 | 00h00'01   
+# End of the simulation.

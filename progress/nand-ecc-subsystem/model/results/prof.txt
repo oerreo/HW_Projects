@@ -1,0 +1,28 @@
+# PC per-kernel wall time, ms per codeword (mean over 300 frames), code n 9216 k 8192
+
+## condition alpha 1.4, sense levels 1, raw BER 2.626e-03, avg iterations 2.15, FE 0 / 300
+K_MSG                     0.0019 ms    0.3 %
+K_ENC                     0.0409 ms    5.5 %
+K_CHAN                    0.0635 ms    8.5 %
+K_SENSE                   0.0018 ms    0.2 %
+K_LLR                     0.0019 ms    0.2 %
+K_DEC(fix 6,7,8)          0.6327 ms   84.4 %
+K_SYND                    0.0074 ms    1.0 %
+(float NMS layered)       0.4348 ms
+K_BCH_ENC                 0.0687 ms
+K_BCH_SYND                0.7250 ms
+K_BCH_BM                  0.0199 ms
+K_BCH_CHIEN               0.1418 ms
+total                     0.7500 ms (LDPC chain K_MSG..K_SYND)
+BCH decode total          0.8866 ms
+
+## condition alpha 2.1, sense levels 7, raw BER 1.546e-02, avg iterations 5.33, FE 1 / 300
+K_MSG                     0.0019 ms    0.1 %
+K_ENC                     0.0400 ms    2.2 %
+K_CHAN                    0.0614 ms    3.4 %
+K_SENSE                   0.0018 ms    0.1 %
+K_LLR                     0.0018 ms    0.1 %
+K_DEC(fix 6,7,8)          1.6772 ms   93.6 %
+K_SYND                    0.0074 ms    0.4 %
+(float NMS layered)       1.0524 ms
+total                     1.7915 ms (LDPC chain K_MSG..K_SYND)

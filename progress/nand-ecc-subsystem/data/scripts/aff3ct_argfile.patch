@@ -1,0 +1,40 @@
+Read the command-line arguments from the file named by the environment variable A_ARGS when the
+program is started without arguments (keeps simulation options out of the process table on a
+shared server). Whitespace separated tokens, '#' starts a comment line.
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -1,3 +1,5 @@
+ #include <cstdlib>
++#include <cstdio>
++#include <cstring>
+ #include <exception>
+ #include <iostream>
+@@ -247,6 +249,28 @@
+ int
+ main(int argc, char** argv)
+ {
++    const char* af = std::getenv("A_ARGS");
++    if (argc == 1 && af != nullptr)
++    {
++        static std::vector<std::string> tok;
++        static std::vector<char*> av;
++        FILE* f = std::fopen(af, "r");
++        if (f == nullptr) return EXIT_FAILURE;
++        char line[4096];
++        tok.push_back(argv[0]);
++        while (std::fgets(line, sizeof(line), f) != nullptr)
++        {
++            if (line[0] == '#') continue;
++            char* save = nullptr;
++            for (char* t = strtok_r(line, " \t\r\n", &save); t != nullptr; t = strtok_r(nullptr, " \t\r\n", &save))
++                tok.push_back(t);
++        }
++        std::fclose(f);
++        for (auto& s : tok)
++            av.push_back(&s[0]);
++        av.push_back(nullptr);
++        return aff3ct_sim_main((int)tok.size(), av.data());
++    }
+     return aff3ct_sim_main(argc, argv);
+ }
+ #endif

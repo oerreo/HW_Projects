@@ -1,0 +1,3 @@
+--sim-type BFER -C LDPC --src-type AZCW -t 1 -S 7 -s 0.1 -m 3.7 -M 3.71 -e 50
+-K 7156 -N 8176 --dec-type BP_FLOODING --dec-implem SPA -i 50
+--dec-h-path ../data/third_party/alist/ccsds_c2_7156_8176.alist

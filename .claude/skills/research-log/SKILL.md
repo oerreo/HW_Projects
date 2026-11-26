@@ -47,5 +47,5 @@ description: Use when a milestone finishes, a design decision is made, or a meas
 - 프로젝트별 URL
   - pqc-ntt-ip: 페이지 `https://app.notion.com/p/41a85d190ab2818a8a1cc62e7fc35f66`, Process data source `collection://b1b85d19-0ab2-8273-a78d-878cb7ae11d3`
   - llm-pim-soc: 페이지 `https://app.notion.com/p/41c85d190ab281048597d638b3d34d14`, Process data source `collection://94e85d19-0ab2-82b9-88c7-873882363481`
-  - nand-ecc-subsystem (To Do): 페이지 `https://app.notion.com/p/41c85d190ab2819fa8e4c9f8851e0713`, Process data source `collection://df485d19-0ab2-82b0-8af5-07251cd36877`
+  - nand-ecc-subsystem (Progressed, 2026-11-25 시작): 페이지 `https://app.notion.com/p/41c85d190ab2819fa8e4c9f8851e0713`, Process data source `collection://df485d19-0ab2-82b0-8af5-07251cd36877`
 - 페이지 본문은 Notion-flavored Markdown. 처음 쓰기 전에 `notion://docs/notion-flavored-markdown-spec`을 notion fetch로 읽는다.

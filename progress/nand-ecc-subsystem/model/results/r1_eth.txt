@@ -1,0 +1,25 @@
+# code ../data/third_party/alist/eth_1723_2048.alist n 2048 k 1723 chan awgn seed 101 max_fe 100
+# dec0 ref:spa:flood:it=100
+# dec1 ref:spa:layer:it=100
+# dec2 ref:nms:flood:a=0.5:it=30
+pt 3.4 sigma 0.521204 rber_ana 0.0000e+00 rber_tab 0.0000e+00 rber_meas 2.7279e-02 frames 1514 sec 12.5
+  d0 fe 115 fer 7.5958e-02 fe_info 115 ber_info 1.9811e-03 undet 0 avg_it 14.828 dec_ms 4.4682 cls 0 0 0 hist 0 0 0 0 46 69
+  d1 fe 100 fer 6.6050e-02 fe_info 100 ber_info 1.7178e-03 undet 0 avg_it 10.834 dec_ms 3.0360 cls 0 0 0 hist 0 0 0 0 41 59
+  d2 fe 207 fer 1.3672e-01 fe_info 207 ber_info 3.2592e-03 undet 0 avg_it 11.546 dec_ms 0.6832 cls 0 0 0 hist 0 0 2 7 103 95
+  prof_ms msg 0.0001 enc 0.0042 chan 0.0749 llr 0.0000
+pt 3.6 sigma 0.509339 rber_ana 0.0000e+00 rber_tab 0.0000e+00 rber_meas 2.4807e-02 frames 12348 sec 46.5
+  d0 fe 131 fer 1.0609e-02 fe_info 131 ber_info 2.6928e-04 undet 0 avg_it 6.781 dec_ms 2.1054 cls 0 0 0 hist 0 0 0 1 51 79
+  d1 fe 100 fer 8.0985e-03 fe_info 100 ber_info 2.1471e-04 undet 0 avg_it 4.001 dec_ms 1.1537 cls 0 0 0 hist 0 0 0 0 33 67
+  d2 fe 325 fer 2.6320e-02 fe_info 325 ber_info 5.8898e-04 undet 0 avg_it 7.079 dec_ms 0.4209 cls 0 0 0 hist 4 0 2 7 197 115
+  prof_ms msg 0.0001 enc 0.0041 chan 0.0747 llr 0.0000
+pt 3.8 sigma 0.497745 rber_ana 0.0000e+00 rber_tab 0.0000e+00 rber_meas 2.2275e-02 frames 163644 sec 406.2
+  d0 fe 169 fer 1.0327e-03 fe_info 169 ber_info 2.5649e-05 undet 0 avg_it 4.401 dec_ms 1.3865 cls 0 0 0 hist 0 0 0 4 76 89
+  d1 fe 100 fer 6.1108e-04 fe_info 100 ber_info 1.5921e-05 undet 0 avg_it 2.466 dec_ms 0.7200 cls 0 0 0 hist 1 0 0 0 28 71
+  d2 fe 453 fer 2.7682e-03 fe_info 452 ber_info 6.0339e-05 undet 0 avg_it 4.943 dec_ms 0.2931 cls 0 0 0 hist 2 2 5 4 312 128
+  prof_ms msg 0.0001 enc 0.0038 chan 0.0745 llr 0.0000
+pt 4 sigma 0.486415 rber_ana 0.0000e+00 rber_tab 0.0000e+00 rber_meas 1.9899e-02 frames 880187 sec 1800.1
+  d0 fe 44 fer 4.9989e-05 fe_info 44 ber_info 1.2284e-06 undet 0 avg_it 3.497 dec_ms 1.1156 cls 0 0 0 hist 0 0 0 1 21 22
+  d1 fe 16 fer 1.8178e-05 fe_info 16 ber_info 4.7410e-07 undet 0 avg_it 2.047 dec_ms 0.5967 cls 0 0 0 hist 0 0 0 0 6 10
+  d2 fe 106 fer 1.2043e-04 fe_info 106 ber_info 2.4239e-06 undet 0 avg_it 3.918 dec_ms 0.2404 cls 0 0 0 hist 0 1 1 4 82 18
+  prof_ms msg 0.0001 enc 0.0064 chan 0.0760 llr 0.0000
+# done

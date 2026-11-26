@@ -201,7 +201,7 @@
 - Artifact로 게시(비공개).
 - 다음: 사용자 빌드와 보드 측정 대기(S5-6, S6).
 
-## 2026-11-26: S5-4 후속: 남은 시뮬레이션 미확인 항목  [notion: pending]
+## 2026-11-26: S5-4 후속: 남은 시뮬레이션 미확인 항목  [notion: synced]
 - 한 일(hw-worker): 24 run 추가. vec N_MAX 256 구성(unit, 시스템 TB 변형 PV), guard fallback(vec N_MAX 128, `pn_fb`), attention q/K 8비트 형식(`attn_top` 4 run, golden의 K8V8 dump 설정 추가), stall 아래 오류 주입 6 run, 변형 빌드(A2, PD, XB_REG 0) stall run, 메모리 모델 seed를 바꾼 stall run 4개(`-sv_seed`), gemv_acc WR_STALL 레지스터 검사.
 - SW 버그(`fpga/sys/sw/sx_exec.c`): IP가 켜진 상태에서 guard로 한 호출만 ARM으로 갈 때 cache를 맞추지 않아 IP가 쓴 입력을 옛 값으로 읽음(vec N_MAX 128에서 token과 hash 2 위치 불일치, `arm_rd_stale` 20건). 그 경우 `hal_flush_all()`을 부르도록 수정(timeout 경로와 같은 처리). 두 모델의 크기가 기본 구성의 한도 안이라 이전에는 실행되지 않던 경로. RTL 변경 없음.
 - 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 515 run, fails 0. `SYSHOST items=36 fail=0`. `pn_fb` 로그: fallback 20(run마다 10), tok_mis 0, hash_mis 0, coh 0. viewer 입력 trace 불변(재생성한 HTML의 md5 동일).

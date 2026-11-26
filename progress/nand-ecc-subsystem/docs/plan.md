@@ -7,7 +7,7 @@ NAND/SSD용 ECC 서브시스템 전체(채널 모델, LLR 생성, LDPC encoder/d
 | 단계 | 내용 | 통과 기준 | 상태 |
 |---|---|---|---|
 | N0 | 서베이(G0): 오류 모델, SSD ECC, 공개 code 행렬, decoder 구조와 FPGA 사례, 범위 제안 | `survey/survey.md`, 출처 확인 구분 | 완료 (2026-11-24) |
-| N1 | 범위와 시스템 스펙(G0): code 구성(QC-LDPC, 구성 알고리즘과 girth/rank 검증), 채널 모델과 LLR 형식, decoder 알고리즘과 고정소수점 형식의 후보, IP 분할과 자원 계산, HW/SW 인터페이스 초안, test data 계획, 측정 계획 | `spec/scope.md`, `spec/code.md`, `spec/channel.md`, 열린 결정 목록과 권고. 오케스트레이터 검토 후 확정 | 완료 (2026-11-25). 주 code `model/code/qc_m128.txt`: 4-cycle 0, girth 6, rank 1024, encoding 1,000/1,000 (수퍼바이저 재실행). 열린 결정 23개 확정(`spec/scope.md` 10절) |
+| N1 | 범위와 시스템 스펙(G0): code 구성(QC-LDPC, 구성 알고리즘과 girth/rank 검증), 채널 모델과 LLR 형식, decoder 알고리즘과 고정소수점 형식의 후보, IP 분할과 자원 계산, HW/SW 인터페이스 초안, test data 계획, 측정 계획 | `spec/scope.md`, `spec/code.md`, `spec/channel.md`, 열린 결정 목록과 권고. 오케스트레이터 검토 후 확정 | 완료 (2026-11-25). 주 code `model/code/qc_m128.txt`: 4-cycle 0, girth 6, rank 1024, encoding 1,000/1,000 (수퍼바이저 재실행). 열린 결정 23개 확정(`spec/scope.md` 11절) |
 | N2 | C 전체 구현(G1): code 생성기, encoder, 채널 모델(MLC 해석, TLC fit), LLR 생성, decoder(float BP/min-sum 참조, 고정소수점 layered min-sum), BCH, FER 시뮬레이터 | 외부 기준(CCSDS C2, 802.3an 행렬과 오픈소스 참조 구현)과 교차 검증, 자체 code의 FER 곡선, 단위 테스트 | 대기 |
 | N2b | 형식 평가: LLR 비트폭 4/5/6, 감지 레벨 수, normalized/offset min-sum 계수, iteration 수, 조기 종료 | 형식 결정과 근거(FER 손실 대 비용) | 대기 |
 | N3 | Test data(G2)와 ARM baseline 프로그램, 프로파일 방법 | `data/README.md`, baseline 실행 파일(사용자 보드 실행) | 대기 |

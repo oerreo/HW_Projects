@@ -1,8 +1,8 @@
 # 시스템 SW: 실행기 `sx_exec`, 오프로드 mask, cache 규칙, 호스트 검증
 
-- 원본과 확인일: 확인일 2026-11-23(S5-2 완료 뒤, 시스템 forward 검증 S5-4 진행 중). `fpga/sys/sw/sx.h`, `sx_exec.c`, `hal.h`, `scfg.h`, `sbench.c`(호출 위치만), `fpga/sys/README.md`를 읽어 확인했다. 설계 원본은 `docs/spec/system.md` 2절(SW 구조), 3.1절(호스트 검증)이고 충돌하면 코드와 `system.md`가 우선이다.
-- 상태: 호스트(PC x86-64)에서 spec 기반 IP 모델로 통과. 시스템 호스트 테스트 `SYSHOST items=34 fail=0`, `make test` TOTAL 16,686,497 항목 mismatch 0 [측정, 수퍼바이저 재실행, `log.md` S5-1]. 684 run의 세부 수치(token, logits hash, KCMP 2,029,960 호출, COH, fallback, IPERR 모두 0)와 결함 주입 12종 검출은 agent 보고(재실행한 테스트의 내부 수치, 개별 확인 안 함). **ARM 컴파일, Xilinx API, 보드 실행은 한 번도 하지 않았다**(`hal_xil.c`는 stub 헤더 문법 검사만).
-- 이 SW는 RTL을 구동한 적이 없다. 호스트의 IP 모델은 spec 문서로 쓴 C 모델이고 RTL이 아니다(5절). RTL과의 대조는 S5-3, S5-4의 시스템 TB에서 한다.
+- 원본과 확인일: 확인일 2026-11-23(S5-2 완료 뒤). 2026-11-26 갱신: S5-4와 후속 검증 완료 뒤 guard fallback과 timeout의 전체 flush를 반영(나머지 절은 다시 대조하지 않음). `fpga/sys/sw/sx.h`, `sx_exec.c`, `hal.h`, `scfg.h`, `sbench.c`(호출 위치만), `fpga/sys/README.md`를 읽어 확인했다. 설계 원본은 `docs/spec/system.md` 2절(SW 구조), 3.1절(호스트 검증)이고 충돌하면 코드와 `system.md`가 우선이다.
+- 상태: 호스트(PC x86-64)에서 spec 기반 IP 모델로 통과. 시스템 호스트 테스트 `SYSHOST items=36 fail=0`, `make test` TOTAL 16,686,497 항목 mismatch 0 [측정, 수퍼바이저 재실행, `log.md` S5-1]. 684 run의 세부 수치(token, logits hash, KCMP 2,029,960 호출, COH, fallback, IPERR 모두 0)와 결함 주입 12종 검출은 agent 보고(재실행한 테스트의 내부 수치, 개별 확인 안 함). **ARM 컴파일, Xilinx API, 보드 실행은 한 번도 하지 않았다**(`hal_xil.c`는 stub 헤더 문법 검사만).
+- (S5-1 시점의 서술. S5-3/S5-4에서 같은 SW가 DPI로 RTL 시스템 top을 구동해 forward를 통과함, `sys_tb.md`.) 호스트의 IP 모델은 spec 문서로 쓴 C 모델이고 RTL이 아니다(5절). RTL과의 대조는 S5-3, S5-4의 시스템 TB에서 한다.
 
 ## 1. SW 구조도
 
@@ -15,7 +15,8 @@ flowchart TD
     exec["sx_exec(user, kcall_t *c)<br/>kernel 호출마다 한 번<br/>1. cat_of: kid, 버퍼 포인터로 범주와 mask 비트 결정<br/>2. 묶음이 쌓여 있고 c가 못 들어가면 sx_barrier<br/>3. writes_a8이면 x 세대 증가<br/>4. mask 비트 on이면 ip_on + guard 검사"]:::exec
 
     arm_k["arm_exec: k_exec(c) (ARM kernel, golden과 같은 함수)<br/>mask != 0이면 출력을 hal_flush"]:::arm
-    fb["fallback: guard 실패 또는 IP 죽음<br/>-> arm_exec + fb 카운트 (0이어야 함)"]:::arm
+    fb["fallback: guard 실패 또는 IP 죽음<br/>guard 실패이고 IP가 켜져 있으면 먼저 hal_flush_all()<br/>-> arm_exec + fb 카운트 (0이어야 함)"]:::arm
+    tmo["IP timeout (drv_go, drv_com.c)<br/>해당 IP dead 표시 + hal_flush_all() 후 DRV_TIMEOUT 반환<br/>-> 이후 그 IP의 호출은 fallback으로 ARM"]:::drv
 
     subgraph DRV["IP 드라이버 (fpga/sys/sw)"]
         ga["ga_gemv (drv_ga.c)<br/>빌드 A의 GEMV, cls + argmax 융합"]:::drv
@@ -35,6 +36,8 @@ flowchart TD
     exec -->|"mask 비트 off"| arm_k
     exec -->|"mask 비트 on, guard 통과"| DRV
     exec -->|"mask 비트 on, guard 실패"| fb
+    com -->|"STATUS busy 한도 초과"| tmo
+    tmo -.->|"dead -> ip_on 거짓"| fb
     fb --> arm_k
     ga --> com
     pi --> com
@@ -118,6 +121,7 @@ ACP를 쓰지 않으므로 ARM이 유지한다(`system.md` 2.2절, `arch.md` 7.1
 | 2 | 생산자 flush: mask != 0인 run에서 ARM이 실행한 kernel의 출력 버퍼(`kbuf_t.out`)를 실행 직후 `hal_flush`. 드라이버가 만든 q 레코드, ARGMAX index도 같다 | `arm_exec` -> `flush_out` |
 | 3 | 소비자 invalidate: IP 호출이 끝난 뒤, 그 출력을 ARM이 이 run에서 읽을 때만 출력 범위를 `hal_inval` | `need_inv_y`, `need_inv_a8`, 각 `*_call`의 `inv` |
 | 4 | IP 시작 전에 출력 범위를 flush할 필요 없음: 규칙 1, 2로 IP가 쓰는 범위에는 dirty line이 없다. `OPT_COH_STRICT`는 이 불변식이 깨졌는지 보는 디버그 옵션 | `README.md` |
+| 6 | 전체 flush로 다시 맞추는 경우(`hal_flush_all`): (a) IP가 timeout된 직후(`drv_go`, 그 IP의 이후 호출이 ARM에서 돌며 소비자 규칙 때문에 invalidate하지 않은 IP 출력을 읽음), (b) mask 비트가 켜져 있고 IP도 살아 있는데 guard가 실패해 한 호출만 ARM으로 가는 때(`sx_exec`, 그 호출의 입력을 만든 생산자들이 소비자 = IP로 보고 invalidate를 생략했을 수 있음). ARM이 쓴 line은 규칙 2로 이미 clean이므로 write-back은 없다는 것이 코드 주석의 근거. IP가 이미 dead라 fallback하는 호출에서는 timeout 때 flush했으므로 다시 부르지 않음(`if (ip_on(x, bit))`). 2026-11-25 S5-4 후속에서 (b)를 추가(vec N_MAX 128 구성의 `pn_fb` run에서 `arm_rd_stale` 20건과 token, hash 2 위치 불일치가 났던 SW 버그의 수정) | `sx_exec.c`의 `sx_exec`, `drv_com.c`의 `drv_go` |
 | 5 | CTRL 쓰기 전에 `hal_dsb`(flush 함수 끝에 있다고 보나 [미확인], 드라이버가 명시적으로 넣는다) | `hal.h` 주석 |
 
 ### 3.2 소비자 invalidate 조건 (IP 출력별, `README.md`와 `need_inv_*`)
@@ -224,7 +228,7 @@ flowchart TD
 | KVW 발행 시점 | KV_SRC 0(빌드 P)에서 layer l의 첫 `K_ATTN2` 호출(head 0) 때, 그 head를 큐에 넣기 전에 `at_kvw(l, T-1)`을 발행. 같은 (layer, 위치)에서는 다시 안 냄. 실패하면 `kvw_l`을 -1로 되돌려 다음 호출에서 재발행. ATTN op는 마지막 head에서 나가므로 KVW가 먼저 나간다. KV_SRC 1(빌드 A)은 KVW 없음 | `attn_call` |
 | BRAM KV warm start | run W는 `sx_kv_sync(upto)`로 지난 위치의 KVW를 몰아서 냄. ATTN을 켠 일반 run은 위치 0부터 돈다 | `README.md`, `system.md` 2.2절 |
 | cls와 argmax 융합 | 빌드 A, `OPT_FUSE_AM`, C와 M 모두 on이면 cls GEMV에 argmax_en을 켜고(`fused` = 1), 뒤따르는 `K_ARGMAX`는 IP를 부르지 않고 카운트만 함(run K에서는 비교) | `ga_call`, `vec_call` |
-| 실패 처리 | IP op가 `DRV_ERR` 또는 `DRV_TIMEOUT`이면 해당 호출을 ARM `redo`로 계산. ATTN은 head별 q 사본(`qsave`)으로 다시 계산 | `attn_flush`, `pim_flush`, `redo` |
+| 실패 처리 | IP op가 `DRV_ERR` 또는 `DRV_TIMEOUT`이면 해당 호출을 ARM `redo`로 계산. ATTN은 head별 q 사본(`qsave`)으로 다시 계산. timeout이면 `drv_go`가 이미 `hal_flush_all()`을 부른 상태. guard 실패 fallback은 IP가 켜져 있을 때 `hal_flush_all()` 뒤 `arm_exec`(규칙 6) | `attn_flush`, `pim_flush`, `redo` |
 
 - ACTQ를 IP로 보내는지 ARM에 두는지는 mask 비트 Qh, Qa로 run마다 정한다(`arch.md` 5.1은 ARM 유지 권고, 보드 측정 전이라 결정 근거 없음).
 
@@ -287,7 +291,7 @@ flowchart LR
 
 ### 5.4 한계
 
-- **IP 모델은 RTL이 아니다.** 통과는 SW의 흐름, 배치 변환, 일관성 규칙, 로그 형식이 spec 문서와 맞는다는 것만 보인다. RTL과 spec이 다르면 이 검증으로는 드러나지 않는다. RTL 대조는 S5-3, S5-4(시스템 TB)의 몫이다(`plan.md` 기준 S5-3, S5-4는 "대기"로 적혀 있음).
+- **IP 모델은 RTL이 아니다.** 통과는 SW의 흐름, 배치 변환, 일관성 규칙, 로그 형식이 spec 문서와 맞는다는 것만 보인다. RTL과 spec이 다르면 이 검증으로는 드러나지 않는다. RTL 대조는 S5-3, S5-4(시스템 TB)의 몫이다(S5-3, S5-4는 2026-11-23 완료).
 - cache 모사는 모델이다. 실제 Cortex-A9 L1과 PL310 L2의 동작, 부분 line 처리, 쓰기 버퍼, `dsb` 효과는 보드에서만 확인된다 [미확인].
 - agent가 spec에 가정으로 정하고 RTL을 보지 않은 항목(`log.md` S5-1): vec RMSNORM의 fx, attention q 레코드의 kb = 8 container, 응답 오류 때 STATUS의 done과 err 동시 표시, ARGMAX의 OUT_ADDR, 닫힌 CYCLES 식이 없는 경우의 추정. S5-3/S5-4에서 RTL과 대조해 확정한다.
 - 이 서버에서 한 번도 실행하지 않은 것: ARM 컴파일, `hal_xil.c`의 Xilinx API, 보드 polling 한도와 실제 PL 시간의 관계, 빈 slot이 0과 OKAY를 내는 것의 보드 동작(RTL에서는 `l4_sys_top.md` 2절대로 확인).

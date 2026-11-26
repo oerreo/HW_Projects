@@ -1,0 +1,11 @@
+# third-party downloads and builds (data/scripts/fetch.sh, build_aff3ct.sh), never committed
+data/third_party/
+# build products
+model/build/
+# job files and scratch outputs of long runs
+.job*
+.j*
+model/.job*
+model/run/
+model/results/*.ck
+model/results/aff/*.part

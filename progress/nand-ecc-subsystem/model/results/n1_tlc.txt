@@ -1,0 +1,43 @@
+# code code/qc_m128.txt n 9216 k 8192 chan tlc seed 11 max_fe 50
+# dec0 fix:w=6,7,8:nms=12:it=20:et=a
+# dec1 ref:nms:layer:a=0.75:it=20
+# dec2 fix:w=6,6,8:nms=12:it=20:et=a
+# dec3 bch
+# pt 1.2 refs 210.824 lut -15 15
+pt 1.2 sigma 0.000000 rber_ana 8.8754e-04 rber_tab 8.8754e-04 rber_meas 8.8763e-04 frames 224415 sec 500.2
+  d0 fe 0 fer 0.0000e+00 fe_info 0 ber_info 0.0000e+00 undet 0 avg_it 1.329 dec_ms 0.4592 cls 0 0 0 hist 0 0 0 0 0 0
+  d1 fe 0 fer 0.0000e+00 fe_info 0 ber_info 0.0000e+00 undet 0 avg_it 1.329 dec_ms 0.3032 cls 0 0 0 hist 0 0 0 0 0 0
+  d2 fe 586 fer 2.6112e-03 fe_info 585 ber_info 2.4187e-03 undet 295 avg_it 1.358 dec_ms 0.5300 cls 4446631 5854 559 hist 1 0 0 0 2 583
+  d3 fe 0 fer 0.0000e+00 fe_info 0 ber_info 0.0000e+00 undet 0 avg_it 0.000 dec_ms 0.6556 cls 0 0 0 hist 0 0 0 0 0 0 fer_binom 2.4607e-44
+  prof_ms msg 0.0030 enc 0.0410 chan 0.0760 llr 0.0104
+pt 1.3 sigma 0.000000 rber_ana 1.6186e-03 rber_tab 1.6186e-03 rber_meas 1.6184e-03 frames 179577 sec 501.2
+  d0 fe 0 fer 0.0000e+00 fe_info 0 ber_info 0.0000e+00 undet 0 avg_it 1.768 dec_ms 0.6616 cls 0 0 0 hist 0 0 0 0 0 0
+  d1 fe 0 fer 0.0000e+00 fe_info 0 ber_info 0.0000e+00 undet 0 avg_it 1.768 dec_ms 0.4128 cls 0 0 0 hist 0 0 0 0 0 0
+  d2 fe 3624 fer 2.0181e-02 fe_info 3619 ber_info 1.7654e-02 undet 1593 avg_it 2.005 dec_ms 0.8205 cls 25970045 27591 5760 hist 3 2 1 2 4 3612
+  d3 fe 0 fer 0.0000e+00 fe_info 0 ber_info 0.0000e+00 undet 0 avg_it 0.000 dec_ms 0.6841 cls 0 0 0 hist 0 0 0 0 0 0 fer_binom 6.9877e-28
+  prof_ms msg 0.0030 enc 0.0410 chan 0.0755 llr 0.0105
+pt 1.4 sigma 0.000000 rber_ana 2.6263e-03 rber_tab 2.6263e-03 rber_meas 2.6264e-03 frames 135478 sec 500.8
+  d0 fe 0 fer 0.0000e+00 fe_info 0 ber_info 0.0000e+00 undet 0 avg_it 2.137 dec_ms 0.8282 cls 0 0 0 hist 0 0 0 0 0 0
+  d1 fe 0 fer 0.0000e+00 fe_info 0 ber_info 0.0000e+00 undet 0 avg_it 2.131 dec_ms 0.5075 cls 0 0 0 hist 0 0 0 0 0 0
+  d2 fe 10449 fer 7.7127e-02 fe_info 10436 ber_info 6.2307e-02 undet 2864 avg_it 3.209 dec_ms 1.3500 cls 69150331 66317 28308 hist 5 7 4 5 20 10408
+  d3 fe 0 fer 0.0000e+00 fe_info 0 ber_info 0.0000e+00 undet 0 avg_it 0.000 dec_ms 0.7290 cls 0 0 0 hist 0 0 0 0 0 0 fer_binom 2.9147e-16
+  prof_ms msg 0.0030 enc 0.0412 chan 0.0759 llr 0.0108
+pt 1.5 sigma 0.000000 rber_ana 3.9041e-03 rber_tab 3.9041e-03 rber_meas 3.9047e-03 frames 102987 sec 501.6
+  d0 fe 0 fer 0.0000e+00 fe_info 0 ber_info 0.0000e+00 undet 0 avg_it 2.671 dec_ms 1.0706 cls 0 0 0 hist 0 0 0 0 0 0
+  d1 fe 0 fer 0.0000e+00 fe_info 0 ber_info 0.0000e+00 undet 0 avg_it 2.653 dec_ms 0.6243 cls 0 0 0 hist 0 0 0 0 0 0
+  d2 fe 14246 fer 1.3833e-01 fe_info 14245 ber_info 9.7127e-02 undet 980 avg_it 4.899 dec_ms 2.0729 cls 81943320 56258 60029 hist 0 2 1 7 9 14227
+  d3 fe 0 fer 0.0000e+00 fe_info 0 ber_info 0.0000e+00 undet 0 avg_it 0.000 dec_ms 0.7813 cls 0 0 0 hist 0 0 0 0 0 0 fer_binom 1.7040e-08
+  prof_ms msg 0.0030 enc 0.0410 chan 0.0753 llr 0.0104
+pt 1.6 sigma 0.000000 rber_ana 5.4279e-03 rber_tab 5.4279e-03 rber_meas 5.4302e-03 frames 75562 sec 500.8
+  d0 fe 2 fer 2.6468e-05 fe_info 2 ber_info 1.0824e-07 undet 0 avg_it 3.527 dec_ms 1.4545 cls 67 2 12 hist 0 0 0 0 2 0
+  d1 fe 1 fer 1.3234e-05 fe_info 1 ber_info 4.5234e-08 undet 0 avg_it 3.485 dec_ms 0.8242 cls 28 1 11 hist 0 0 0 0 1 0
+  d2 fe 19823 fer 2.6234e-01 fe_info 19820 ber_info 1.2888e-01 undet 411 avg_it 7.682 dec_ms 3.2637 cls 79774506 44535 110426 hist 2 1 1 4 4 19811
+  d3 fe 54 fer 7.1464e-04 fe_info 54 ber_info 5.8659e-06 undet 0 avg_it 0.000 dec_ms 0.8436 cls 0 0 0 hist 0 0 0 0 0 0 fer_binom 8.4699e-04
+  prof_ms msg 0.0030 enc 0.0411 chan 0.0754 llr 0.0107
+pt 1.7 sigma 0.000000 rber_ana 7.1633e-03 rber_tab 7.1633e-03 rber_meas 7.1474e-03 frames 4087 sec 40.7
+  d0 fe 50 fer 1.2234e-02 fe_info 49 ber_info 7.6074e-05 undet 0 avg_it 5.446 dec_ms 2.2921 cls 2547 59 415 hist 2 0 1 1 9 37
+  d1 fe 51 fer 1.2479e-02 fe_info 50 ber_info 8.1002e-05 undet 0 avg_it 5.358 dec_ms 1.2567 cls 2712 47 421 hist 1 0 0 2 9 39
+  d2 fe 1409 fer 3.4475e-01 fe_info 1408 ber_info 8.2664e-02 undet 4 avg_it 10.320 dec_ms 4.4130 cls 2767633 2112 9799 hist 1 0 0 0 4 1404
+  d3 fe 749 fer 1.8326e-01 fe_info 749 ber_info 1.5515e-03 undet 0 avg_it 0.000 dec_ms 0.9085 cls 0 0 0 hist 0 0 0 0 0 0 fer_binom 1.7469e-01
+  prof_ms msg 0.0030 enc 0.0410 chan 0.0755 llr 0.0104
+# done

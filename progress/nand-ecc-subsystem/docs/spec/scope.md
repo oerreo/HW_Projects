@@ -284,7 +284,7 @@ FER loop 모드: data PRNG → `ldpc_enc` → `chan_emu` → `llr_gen` → `ldpc
 - XC7Z020의 FF 수(이 문서에서 쓰지 않음), LUTRAM 구성별 LUT 비용, shifter 실제 LUT 수, 100 MHz 달성 여부(합성 전).
 - HP 포트 실효 대역폭(Zybo 미측정).
 
-## 10. 결정 (오케스트레이터, 2026-11-25)
+## 11. 결정 (오케스트레이터, 2026-11-25)
 9절의 열린 결정 23개를 권고대로 확정한다. 아래는 조건을 붙인 것이다.
 - C3(girth 6 수용): 조건부. N2의 FER 곡선에서 error floor가 FER 1e-5보다 위에서 보이면 code 구성(shift 탐색 강화, parity부 구조 변경: C2의 대안)을 다시 연다. weight-2 열 896개가 원인 후보이므로 N2에서 실패 frame의 오류 위치 통계를 남긴다.
 - D1(Z = 128 완전 병렬): LUT [추정] 20k~28k는 합성 전 값이다. N4의 첫 모듈(shifter, lane datapath)에서 구조 기준 계산을 다시 하고, 사용자 Vivado 리포트 전에는 확정 수치로 쓰지 않는다. 넘치면 lane 수를 parameter로 줄일 수 있게 설계한다(Z의 약수).

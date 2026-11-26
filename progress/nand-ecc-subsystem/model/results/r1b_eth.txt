@@ -1,0 +1,8 @@
+# code ../data/third_party/alist/eth_1723_2048.alist n 2048 k 1723 chan awgn seed 202 max_fe 300
+# dec0 ref:nms:flood:a=0.5:it=30
+# dec1 ref:spa:flood:it=100
+pt 4 sigma 0.486415 rber_ana 0.0000e+00 rber_tab 0.0000e+00 rber_meas 1.9897e-02 frames 2149386 sec 2400.0
+  d0 fe 272 fer 1.2655e-04 fe_info 272 ber_info 2.6627e-06 undet 0 avg_it 3.917 dec_ms 0.1965 cls 0 0 0 hist 0 1 1 6 221 43
+  d1 fe 141 fer 6.5600e-05 fe_info 141 ber_info 1.6039e-06 undet 0 avg_it 3.496 dec_ms 0.8476 cls 0 0 0 hist 0 0 0 2 65 74
+  prof_ms msg 0.0001 enc 0.0039 chan 0.0636 llr 0.0000
+# done
