@@ -200,3 +200,12 @@
 - 확인(오케스트레이터): agent가 관찰로 보고한 `ip_ops` 불일치는 실제 로그에서 재현되지 않음. `RUN` 줄의 `ip_ops`는 p_stall run P 296, a_m2 run P 728(= SYSTB의 starts 728)이다. a_m2의 KSPLIT ops 합 732와의 차 4는 위치 4개의 ARGMAX가 분류기 GEMV에 융합되어 별도 op가 없기 때문[추정, 위치 수와 일치].
 - Artifact로 게시(비공개).
 - 다음: 사용자 빌드와 보드 측정 대기(S5-6, S6).
+
+## 2026-11-26: S5-4 후속: 남은 시뮬레이션 미확인 항목  [notion: pending]
+- 한 일(hw-worker): 24 run 추가. vec N_MAX 256 구성(unit, 시스템 TB 변형 PV), guard fallback(vec N_MAX 128, `pn_fb`), attention q/K 8비트 형식(`attn_top` 4 run, golden의 K8V8 dump 설정 추가), stall 아래 오류 주입 6 run, 변형 빌드(A2, PD, XB_REG 0) stall run, 메모리 모델 seed를 바꾼 stall run 4개(`-sv_seed`), gemv_acc WR_STALL 레지스터 검사.
+- SW 버그(`fpga/sys/sw/sx_exec.c`): IP가 켜진 상태에서 guard로 한 호출만 ARM으로 갈 때 cache를 맞추지 않아 IP가 쓴 입력을 옛 값으로 읽음(vec N_MAX 128에서 token과 hash 2 위치 불일치, `arm_rd_stale` 20건). 그 경우 `hal_flush_all()`을 부르도록 수정(timeout 경로와 같은 처리). 두 모델의 크기가 기본 구성의 한도 안이라 이전에는 실행되지 않던 경로. RTL 변경 없음.
+- 결과 [측정, 수퍼바이저 재실행]: `./sim/run.sh all` 515 run, fails 0. `SYSHOST items=36 fail=0`. `pn_fb` 로그: fallback 20(run마다 10), tok_mis 0, hash_mis 0, coh 0. viewer 입력 trace 불변(재생성한 HTML의 md5 동일).
+- agent 보고(재실행한 run의 내부 수치와 고의 오류 검사): N_MAX 256에서 260K 최대 n 172 수용, token당 vec cycle 불변. kb 8 run 4개 mismatch 0, `attn_core`의 kb 조건을 바꾼 RTL 사본은 kb 8 run에서만 FAIL(기존 run으로는 못 잡던 결함 종류). stall 아래 오류 주입은 주입한 IPERR 1건만. gemv_acc WR_STALL이 시스템 run에서 0인 것은 구조상 정상(write buffer 32 beat가 차야 하며 y 생산이 beat당 9~74 cycle). seed를 바꾸면 stall 계수가 달라지고 모두 통과.
+- 운영: 2026-11-25 18:10~19:35에 Questa eval 라이선스 10개가 모두 사용 중이어서 run마다 15~56분 대기(다른 사용자와의 경합으로 보임).
+- 프로세스 노출(agent 보고): 대기 명령 2개에 모듈 이름이 든 상대 경로가 수 분 보임. 발견 후 중지.
+- 미확인: 실행기의 8비트 q 레코드 변환을 시스템 수준에서 실행하지 못함(프로그램 형식이 K12V8 고정). guard fallback은 vec만 실행(gemv, pim, attention guard는 같은 수정이 적용되나 실행 증거 없음). 호스트 테스트에 guard fallback 뒤 데이터 검사가 없음. N_MAX 256의 합성 결과.

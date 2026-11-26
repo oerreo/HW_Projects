@@ -533,6 +533,13 @@ int sx_exec(void *user, const kcall_t *c) {
   if (writes_a8(x, c)) x->xgen++;
   if (bit && (x->mask & bit)) {
     if (!ip_on(x, bit) || !guard(x, c, bit, m)) {
+      /* guard fallback while the IP is on (S5-4 follow-up, RTL system TB with vec N_MAX 128:
+         SWIGLU n 172 on the ARM read h1 / h3 that the PIM wrote, arm_rd_stale): the producers
+         of this call's inputs chose their invalidates by the mask (consumer = IP), so lines of
+         IP outputs may be stale in the cache. Clean + invalidate the whole D-cache first, as
+         after a timeout (drv_com.c); every ARM-written line is already clean (producer rule),
+         so this writes nothing back. */
+      if (ip_on(x, bit)) hal_flush_all();
       x->sk[sk].fb++;
       x->fb++;
       return arm_exec(x, c, sk);

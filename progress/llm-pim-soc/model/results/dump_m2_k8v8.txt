@@ -1,0 +1,2 @@
+# positions computed 256 dumped 6 (pos 0-3,127,255)
+dump records 1428

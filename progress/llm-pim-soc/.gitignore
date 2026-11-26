@@ -37,3 +37,5 @@ sim/.j*
 sim/.k*
 sim/.pre/
 docs/viewer/tools/build/
+sim/.q
+sim/.t

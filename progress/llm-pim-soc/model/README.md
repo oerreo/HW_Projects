@@ -67,6 +67,7 @@ trace 내용: gemv는 행별 `S`, actq는 `amax`와 `k_aq_t`, rmsnorm은 `k, ss,
 | `m1/`, `m2/manifest.txt` | `rec <kernel> <파일 안 index> <기록 위치 서수> <prm...>`, 파일별 레코드 수 | 같음 |
 | `m1/`, `m2/rrec.bin`, `rrec_map.txt` | 모든 행렬(층마다 wq wk wv wo w1 w3 w2, 끝에 cls)의 gemv 행 레코드(header 8 B + 행, 8 B padding, `arch.md` 2.2). 260K 288,704 B, 15M 15,586,816 B | `vt` job rrec |
 | `pim/bank0..3.hex`, `bimg_map.txt` | 260K PIM bank RAM image, NB 4 x LB 16, depth 4096, 행렬 순서는 rrec와 같음. 한 줄 = 144비트 word(상위 16비트 tag, lane i = 비트 8i+7..8i). 행의 첫 word tag = 행 가수, 나머지 0. 사용 4,072 word | `vt` job bimg |
+| `d5.bin`, `d6.bin`, `m1k8/`, `m2k8/` | d3, d4와 같은 위치의 K8V8 덤프(q, K, V int8, kb = vb = 8)와 kernel별 분할. `attn_top` TB의 kb 8 run 입력(2026-11-25) | `cfg/d5.cfg`, `cfg/d6.cfg`, `vt` job split |
 | `SHA256SUMS` | 위 파일의 체크섬 | `vec.sh` |
 | `../results/range_k12v8.txt` | A10 지수(E)와 shift(SH) 범위표. 모든 레코드를 trace와 함께 재생(재생 불일치 0) | `vt` job range |
 

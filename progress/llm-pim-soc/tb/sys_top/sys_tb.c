@@ -4,7 +4,8 @@
  * renamed by sys_main_dpi.c) against the RTL through hal_dpi.c / plat_dpi.c, collects its log
  * lines and judges them:
  *   SYS     the build found by the program's own slot detection (all 16 slots) equals
- *           +EXP_BUILD (A | P, or the variants A2 = GA_P 2, PD = AT_KV_SRC 1) with the ID /
+ *           +EXP_BUILD (A | P, or the variants A2 = GA_P 2, PD = AT_KV_SRC 1, PV = vec
+ *           N_MAX 256, PN = vec N_MAX 128 through -gVE_N_MAX=128) with the ID /
  *           CONFIG values of system.md 1.7 (written here from the spec, not from the RTL), no
  *           other slot answers
  *   CHECK   exactly +EXP_CHECKS run checks; each: tok_mis, hash_mis, kmis, coh = 0 (token and
@@ -12,13 +13,16 @@
  *           kernel compare); without fault injection also fb = 0, iperr = 0, result PASS
  *   faults  +EXP_IPERR=<n> (+EXP_IPERR_IP, +EXP_IPERR_KIND): the IPERR count of all runs is n,
  *           every IPERR line names that IP and kind, the program RESULT is FAIL;
- *           +EXP_FB=<n>: fallback calls allowed (hang: later calls of the disabled IP)
+ *           +EXP_FB=<n>: fallback calls allowed (hang: later calls of the disabled IP);
+ *           +EXP_FB_EXACT=1: exactly n (guard fallback runs, e.g. build PN); with n > 0 and no
+ *           fault the program's CHECK and RESULT must be FAIL (it counts fallback as a failure)
  *   other   no COH, SKIP, kernel_error, MSUM errors, INIT rc != 0; CYCLES closed form
  *           mismatches (hal_dpi.c) = 0; no memory beat outside the arena; program RESULT PASS
  *   stall   +PROF != 0 (memory stall and random latency): CYCLES >= closed form (CYC_LOW = 0)
  *           instead of equality, every RD_STALL / WR_STALL <= its CYCLES (ST_BAD = 0); a
  *           "SYSTB STALL" line per slot with the sums; R stalls of the HP3 memory model (vec
- *           port, tb_sys_fwd.sv sv_mem_rstall) imply a vec RD_STALL sum > 0 (VE_RDST)
+ *           port, tb_sys_fwd.sv sv_mem_rstall) imply a vec RD_STALL sum > 0 (VE_RDST; only when the
+ *           program read the vec counters, i.e. not in a run K only program)
  * Output: every program line in the transcript and in sys.log, then "SYSTB ..." summary lines.
  */
 #include <stdio.h>
@@ -94,6 +98,8 @@ static void sys_check(const char *l) {
     t[8].p = 0x00000008ul;
     t[9].p = 0;
   }
+  if (eb && !strcmp(eb, "PV")) t[10].p = 0x01001064ul; /* build P with vec N_MAX 256 (O7) */
+  if (eb && !strcmp(eb, "PN")) t[10].p = 0x00801064ul; /* build P with vec N_MAX 128 (guard test) */
   if (!S.sys_ok) snprintf(S.sys_why, sizeof(S.sys_why), "build %s expected %s", S.build, eb ? eb : "?");
   for (i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
     unsigned long want = p ? t[i].p : t[i].a, got = (unsigned long)fnum(l, t[i].k);
@@ -149,6 +155,7 @@ static void req(int ok, const char *what) {
 
 int sys_tb_main(int *rc) {
   long exp_checks, exp_iperr, exp_fb;
+  int fb_exact;
   long long hp3_rst = -1;
   char b[400];
   memset(&S, 0, sizeof(S));
@@ -159,6 +166,7 @@ int sys_tb_main(int *rc) {
   exp_checks = tb_env_l("EXP_CHECKS", -1);
   exp_iperr = tb_env_l("EXP_IPERR", 0);
   exp_fb = tb_env_l("EXP_FB", 0);
+  fb_exact = tb_env_l("EXP_FB_EXACT", 0) != 0;
   sys_prog_main();
   tb_vt_close();
   req(TB.bad_cfg == 0, "testbench plusargs (TB_IPFAULT)");
@@ -174,15 +182,26 @@ int sys_tb_main(int *rc) {
   req(TB.st_bad == 0, "RD_STALL / WR_STALL larger than CYCLES (ST_BAD)");
   if (TB.prof) {
     hp3_rst = sv_mem_rstall(3);
-    req(hp3_rst == 0 || TB.rd_st[3] > 0, "HP3 R stalled but vec RD_STALL sum 0 (VE_RDST)");
+    /* only when the program read the vec counters (run P / W measure every op; a run K-only
+       program reads none, so the sum is 0 without meaning, 2026-11-25) */
+    if (TB.cyc_ops[3] > 0)
+      req(hp3_rst == 0 || TB.rd_st[3] > 0, "HP3 R stalled but vec RD_STALL sum 0 (VE_RDST)");
+    else
+      tb_print("SYSTB VE_RDST not applicable: no vec CYCLES / RD_STALL read (run K only)");
   }
   req(TB.beats_bad == 0, "AXI beat outside the arena");
   req(S.fb <= exp_fb, "fallback calls (CHECK fb)");
+  if (fb_exact) req(S.fb == exp_fb, "fallback calls differ from +EXP_FB (EXP_FB_EXACT)");
   if (exp_iperr == 0) {
     req(S.iperr == 0 && S.iperr_lines == 0, "IPERR");
     req(S.init_bad == 0, "INIT rc");
-    req(S.check_pass == S.checks, "CHECK result FAIL");
-    req(S.result_lines == 1 && S.result_pass == 1 && TB.prog_rc == 0, "program RESULT");
+    if (fb_exact && exp_fb > 0) { /* the program counts every fallback call as a failure (sbench.c) */
+      req(S.check_pass == 0, "CHECK result must be FAIL (expected fallback)");
+      req(S.result_lines == 1 && S.result_pass == 0 && TB.prog_rc == 1, "program RESULT must be FAIL (expected fallback)");
+    } else {
+      req(S.check_pass == S.checks, "CHECK result FAIL");
+      req(S.result_lines == 1 && S.result_pass == 1 && TB.prog_rc == 0, "program RESULT");
+    }
   } else {
     req(TB.inj_done == 1, "fault injection did not happen");
     req(S.iperr == exp_iperr, "IPERR count differs from the injected faults");

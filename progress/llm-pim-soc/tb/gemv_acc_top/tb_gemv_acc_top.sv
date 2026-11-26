@@ -184,6 +184,7 @@ module tb_gemv_acc_top #(
   longint c_ly = -1;
   longint n_starts = 0, n_dones = 0;
   longint t_rdst = 0, t_wrst = 0;          // TB stall counts of the current call
+  longint s_rdst_reg = 0, s_wrst_reg = 0;  // sums of the RD_STALL / WR_STALL register reads
   longint n_wfull = 0, n_cred[2] = '{0, 0}, n_rspace[2] = '{0, 0}, n_rfull[2] = '{0, 0};
   longint n_coll_c0 = 0, n_coll_c1 = 0, n_coll_err = 0;
   bit  model_on = 1'b0;
@@ -580,8 +581,10 @@ module tb_gemv_acc_top #(
     end
     rd(A_RDSTALL, d);
     if (d !== 32'(t_rdst)) c_cyc.fail($sformatf("%s: RD_STALL %0d, TB %0d", c.tag, d, t_rdst)); else c_cyc.pass();
+    if (!$isunknown(d)) s_rdst_reg += d;
     rd(A_WRSTALL, d);
     if (d !== 32'(t_wrst)) c_cyc.fail($sformatf("%s: WR_STALL %0d, TB %0d", c.tag, d, t_wrst)); else c_cyc.pass();
+    if (!$isunknown(d)) s_wrst_reg += d;
     // R beats per port
     for (int p = 0; p < P; p++) begin
       int rp = (P == 1) ? c.rows : (p == 0 ? (c.rows + 1) / 2 : c.rows / 2);
@@ -924,7 +927,14 @@ module tb_gemv_acc_top #(
              n_wfull, n_cred[0], n_cred[1], n_rspace[0], n_rspace[1], n_rfull[0], n_rfull[1]);
     $display("collisions: CTRL start=0 at done %0d, CTRL start=1 at done %0d, ERR set and W1C same bit %0d",
              n_coll_c0, n_coll_c1, n_coll_err);
+    $display("stall registers: RD_STALL sum %0d, WR_STALL sum %0d", s_rdst_reg, s_wrst_reg);
+    // the registers themselves (not only the TB's probe count) must see the events: memory stalls
+    // (+PROF != 0) in RD_STALL, long write blocks (+WBLK) in WR_STALL (2026-11-25)
+    if (prof != 0 && n_calls > 0) begin
+      if (s_rdst_reg == 0) c_reach.fail("PROF != 0: RD_STALL register 0 in every call"); else c_reach.pass();
+    end
     if (wblk) begin
+      if (s_wrst_reg == 0) c_reach.fail("WBLK: WR_STALL register 0 in every call"); else c_reach.pass();
       if (n_wfull == 0) c_reach.fail("WBLK: write buffer never full"); else c_reach.pass();
       for (int p = 0; p < P; p++) begin
         if (n_cred[p] == 0) c_reach.fail($sformatf("WBLK: slice %0d credit limit never reached", p)); else c_reach.pass();
@@ -944,7 +954,7 @@ module tb_gemv_acc_top #(
       chks.push_back(c_model);
       chks.push_back(c_csr);
       if (err_t) chks.push_back(c_err);
-      if (wblk || coll) chks.push_back(c_reach);
+      if (wblk || coll || (prof != 0 && n_calls > 0)) chks.push_back(c_reach);
       void'(tb_final_report(chks));
     end
     $finish;

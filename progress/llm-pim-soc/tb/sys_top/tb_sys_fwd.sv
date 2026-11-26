@@ -36,7 +36,9 @@ module tb_sys_fwd;
   import tb_util_pkg::*;
 
   parameter int BUILD = 0;   // 0 sys_a_top, 1 sys_p_top
-  parameter int VAR   = 0;   // 0 defaults, 1 A2 (GA_P 2) / PD (AT_KV_SRC 1), 2 XB_REG 0
+  parameter int VAR   = 0;   // 0 defaults, 1 A2 (GA_P 2) / PD (AT_KV_SRC 1), 2 XB_REG 0,
+                             // 3 (BUILD 1 only) PV: build P with vec N_MAX 256 (system.md O7)
+  if (VAR < 0 || VAR > 3 || (VAR == 3 && BUILD != 1)) $error("tb_sys_fwd: VAR=%0d not defined for BUILD=%0d", VAR, BUILD);
 
   logic clk = 1'b0, rst_n = 1'b0;
   always #5 clk = ~clk;
@@ -125,6 +127,8 @@ module tb_sys_fwd;
       sys_p_top #(.AT_KV_SRC(1)) dut (`SYSF_CONN);
     end else if (VAR == 2) begin : g_v
       sys_p_top #(.XB_REG(0)) dut (`SYSF_CONN);
+    end else if (VAR == 3) begin : g_v
+      sys_p_top #(.VE_N_MAX(256)) dut (`SYSF_CONN);
     end else begin : g_v
       sys_p_top dut (`SYSF_CONN);
     end
