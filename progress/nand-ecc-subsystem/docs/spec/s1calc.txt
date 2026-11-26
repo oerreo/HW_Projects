@@ -1,0 +1,83 @@
+code: model/code/qc_m128.txt  mb 8 nb 72 Z 128  n 9216 k 8192  block edges 273  dc per layer [34, 34, 34, 34, 35, 34, 34, 34]
+assumptions: PL clock 100 MHz, HP port 64 bit, 1 block (Z lanes) per cycle, decoder = layered, two-phase CNU (read dc blocks, then write dc blocks)
+
+[1] cycles per iteration (Z = 128 lanes, full parallel)
+    non-overlapped: sum(2*dc + L) ; overlapped: next layer reads while the previous writes
+    L 2: non-overlapped 562 | overlapped natural column order 295 (stall 22) | overlapped split read/write order 273 (stall 0) | lower bound 273
+    L 4: non-overlapped 578 | overlapped natural column order 311 (stall 38) | overlapped split read/write order 273 (stall 0) | lower bound 273
+    L 6: non-overlapped 594 | overlapped natural column order 327 (stall 54) | overlapped split read/write order 273 (stall 0) | lower bound 273
+    L 8: non-overlapped 610 | overlapped natural column order 343 (stall 70) | overlapped split read/write order 273 (stall 0) | lower bound 273
+
+[2] throughput, info bits 8192 per codeword
+    input 8 bit/LLR: 1152 beats/codeword; output hard bits: 128 beats; HP-port bound 86806 codeword/s = 711 Mbps info
+    input 6 bit packed (10/beat): 922 beats/codeword; output hard bits: 128 beats; HP-port bound 108460 codeword/s = 889 Mbps info
+    decoder (L 6, overlapped split order 273 cycles/iter, + drain 41), input double-buffered:
+    iter   cyc/cw       Mbps(P=128)  Mbps(P=64)     Mbps(P=32)    
+    1      314          711.1        711.1          711.1         
+    2      587          711.1        711.1          368.2         
+    3      860          711.1        487.9          247.0         
+    5      1406         582.6        295.6          148.9         
+    10     2771         295.6        148.9          74.7          
+    15     4136         198.1        99.5           49.9          
+    20     5501         148.9        74.7           37.4          
+    (P < Z: every block takes Z/P cycles; the cyclic-shift network for P < Z is not costed here)
+
+[3] memory (BRAM36 used as 512 x 72 SDP [R52]; counts = ceil(width/72) x ceil(depth/512))
+    msg 4 bit / APP 6 bit:
+      APP             55296 bit, word  768 bit x  72 deep (x2 ping-pong = 144 deep) -> BRAM36 11
+      R edge-wise    139776 bit, word  512 bit x 273 deep -> BRAM36 8
+      R compressed    47232 bit = min1,min2,idx 12 bit x 1024 checks (word 1536 bit x 8 deep, FF/LUTRAM) + sign/edge 34944 bit (word 128 x 273 deep -> BRAM36 2)
+      Q buffer        31360 bit (dc_max 35 x Z x (APP+1)) -> BRAM36 13 if in BRAM
+    msg 5 bit / APP 7 bit:
+      APP             64512 bit, word  896 bit x  72 deep (x2 ping-pong = 144 deep) -> BRAM36 13
+      R edge-wise    174720 bit, word  640 bit x 273 deep -> BRAM36 9
+      R compressed    49280 bit = min1,min2,idx 14 bit x 1024 checks (word 1792 bit x 8 deep, FF/LUTRAM) + sign/edge 34944 bit (word 128 x 273 deep -> BRAM36 2)
+      Q buffer        35840 bit (dc_max 35 x Z x (APP+1)) -> BRAM36 15 if in BRAM
+    msg 6 bit / APP 8 bit:
+      APP             73728 bit, word 1024 bit x  72 deep (x2 ping-pong = 144 deep) -> BRAM36 15
+      R edge-wise    209664 bit, word  768 bit x 273 deep -> BRAM36 11
+      R compressed    51328 bit = min1,min2,idx 16 bit x 1024 checks (word 2048 bit x 8 deep, FF/LUTRAM) + sign/edge 34944 bit (word 128 x 273 deep -> BRAM36 2)
+      Q buffer        40320 bit (dc_max 35 x Z x (APP+1)) -> BRAM36 16 if in BRAM
+
+[4] cyclic shifter for Z = 128, log2 stages 7
+    width 6 bit: 2:1 mux 5376; if a LUT6 does a 4:1 mux (2 stages) -> about 3072 LUT per shifter [추정]
+    width 7 bit: 2:1 mux 6272; if a LUT6 does a 4:1 mux (2 stages) -> about 3584 LUT per shifter [추정]
+    width 8 bit: 2:1 mux 7168; if a LUT6 does a 4:1 mux (2 stages) -> about 4096 LUT per shifter [추정]
+
+[5] board FER depth (codeword/s = F / max(decoder cycles, emulator cycles, 0 IO when in-PL))
+    avg iter  2, emulator  4 cells/cycle: dec   587 cyc, emu  2304 cyc ->   43403 cw/s, 1.56e+08 cw/h, FER floor at 100 frame errors per hour 6.4e-07, per 8 h 8.0e-08
+    avg iter  2, emulator  8 cells/cycle: dec   587 cyc, emu  1152 cyc ->   86806 cw/s, 3.12e+08 cw/h, FER floor at 100 frame errors per hour 3.2e-07, per 8 h 4.0e-08
+    avg iter  2, emulator 16 cells/cycle: dec   587 cyc, emu   576 cyc ->  170358 cw/s, 6.13e+08 cw/h, FER floor at 100 frame errors per hour 1.6e-07, per 8 h 2.0e-08
+    avg iter  5, emulator  4 cells/cycle: dec  1406 cyc, emu  2304 cyc ->   43403 cw/s, 1.56e+08 cw/h, FER floor at 100 frame errors per hour 6.4e-07, per 8 h 8.0e-08
+    avg iter  5, emulator  8 cells/cycle: dec  1406 cyc, emu  1152 cyc ->   71124 cw/s, 2.56e+08 cw/h, FER floor at 100 frame errors per hour 3.9e-07, per 8 h 4.9e-08
+    avg iter  5, emulator 16 cells/cycle: dec  1406 cyc, emu   576 cyc ->   71124 cw/s, 2.56e+08 cw/h, FER floor at 100 frame errors per hour 3.9e-07, per 8 h 4.9e-08
+    avg iter 10, emulator  4 cells/cycle: dec  2771 cyc, emu  2304 cyc ->   36088 cw/s, 1.30e+08 cw/h, FER floor at 100 frame errors per hour 7.7e-07, per 8 h 9.6e-08
+    avg iter 10, emulator  8 cells/cycle: dec  2771 cyc, emu  1152 cyc ->   36088 cw/s, 1.30e+08 cw/h, FER floor at 100 frame errors per hour 7.7e-07, per 8 h 9.6e-08
+    avg iter 10, emulator 16 cells/cycle: dec  2771 cyc, emu   576 cyc ->   36088 cw/s, 1.30e+08 cw/h, FER floor at 100 frame errors per hour 7.7e-07, per 8 h 9.6e-08
+    ARM-fed (no emulator) [추정]: Cortex-A9 667 MHz, cycles per cell sample C_s; codeword = 9216 samples
+      C_s  40 -> 0.55 ms/codeword -> 1809 cw/s, 6.51e+06 cw/h (channel generation only)
+      C_s  80 -> 1.11 ms/codeword -> 905 cw/s, 3.26e+06 cw/h (channel generation only)
+      C_s 300 -> 4.15 ms/codeword -> 241 cw/s, 8.68e+05 cw/h (channel generation only)
+
+[6] CLT Gaussian approximation: P(X > x sigma), X = (sum of K U(0,1) - K/2) / sqrt(K/12)
+    x 2: Gaussian 2.275e-02 | K  4 2.127e-02 (ratio 0.935) | K  8 2.202e-02 (ratio 0.968) | K 12 2.228e-02 (ratio 0.979)
+    x 3: Gaussian 1.350e-03 | K  4 2.148e-04 (ratio 0.159) | K  8 8.268e-04 (ratio 0.612) | K 12 1.007e-03 (ratio 0.746)
+    x 4: Gaussian 3.167e-05 | K  4 0.000e+00 (ratio 0.000) | K  8 2.090e-06 (ratio 0.066) | K 12 8.526e-06 (ratio 0.269)
+    x 5: Gaussian 2.867e-07 | K  4 0.000e+00 (ratio 0.000) | K  8 0.000e+00 (ratio 0.000) | K 12 2.088e-09 (ratio 0.007)
+    tail cut: K uniforms cannot exceed sqrt(3K) sigma: K 4 -> 3.46, K 12 -> 6.00
+    discrete inverse-CDF sampling with a 32-bit uniform: smallest nonzero region probability 2^-32 = 2.33e-10
+
+[7] TLC example from survey 1.2(c) ([R5], P/E 500, 15 days); Gaussian per state, equal priors
+    hard references (Gaussian intersections): 13.90, 93.49, 151.45, 211.40, 262.47, 315.66, 369.00
+    page boundaries: LSB R3 (P3|P4); CSB R1, R5; MSB R0, R2, R4, R6 -> hard reads 1 / 2 / 4
+    sigma scale 1.00: raw BER  LSB 1.197e-04  CSB 2.769e-04  MSB 2.137e-04  mean 2.035e-04
+    sigma scale 1.25: raw BER  LSB 1.029e-03  CSB 2.247e-03  MSB 2.140e-03  mean 1.805e-03
+    sigma scale 1.50: raw BER  LSB 3.456e-03  CSB 7.340e-03  MSB 7.920e-03  mean 6.239e-03
+    sigma scale 2.00: raw BER  LSB 1.232e-02  CSB 2.551e-02  MSB 3.189e-02  mean 2.324e-02
+    soft example, LSB page, sigma scale 1.5, levels hard +6 at R3 + j*delta, j = -3..3, delta 4:
+    region 0..7 LLR = ln P(bit 0)/P(bit 1): -8.96, -3.55, -2.06, -0.60, 0.82, 2.20, 3.53, 8.17
+
+[8] binary BCH, k = 8192, parity budget 1024 bits
+    m 13: n_max 8191 < k + m, impossible
+    GF(2^14): t max 73, parity 1015 bits, shortened (n, k) = (9207, 8192), rate 0.889758, cosets smaller than m: [(129, 7)]
+    GF(2^15): t max 68, parity 1020 bits, shortened (n, k) = (9212, 8192), rate 0.889275, cosets smaller than m: []

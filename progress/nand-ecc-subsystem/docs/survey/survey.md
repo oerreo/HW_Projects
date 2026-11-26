@@ -312,3 +312,8 @@ BCH
 - [R47] D. V. Sarwate, N. R. Shanbhag, "High-Speed Architectures for Reed-Solomon Decoders," IEEE TVLSI, vol. 9, no. 5, Oct. 2001.
 - [R48] US 2011/0239094, "Error correction mechanisms for flash memories." https://patents.justia.com/patent/20110239094 (검색 요약 기준)
 - [R49] "High-throughput Low-latency Hardware Implementation of BCH Decoders," arXiv:2606.17837 (검색 요약 기준); Chien 병렬 사이클 수는 같은 검색의 par.nsf.gov 자료 https://par.nsf.gov/servlets/purl/10525578 (검색 요약 기준)
+
+추가 (2026-11-25, N1 스펙 작성 중 확인)
+- [R50] D. Blackman, S. Vigna, "Scrambled Linear Pseudorandom Number Generators," arXiv:1805.01407 (ACM TOMS 게재, DOI 10.1145/3460772는 검색 요약 기준). 참조 C 코드 https://prng.di.unimi.it/xoshiro128starstar.c 원문 확인: 상태 128 bit, 출력 `rotl(s[1] * 5, 7) * 9`, 주기 2^128 − 1, public domain 헌정(사용·수정·배포 허용).
+- [R51] Digilent, Zybo Z7 Reference Manual. https://digilent.com/reference/programmable-logic/zybo-z7/reference-manual (페이지 직접 열람 실패, 검색 요약 기준): Cortex-A9 dual-core 667 MHz, 1 GB DDR3L 32-bit bus 1066 MT/s.
+- [R52] AMD UG953 Vivado 7 series libraries, RAMB36E1. https://docs.amd.com/r/en-US/ug953-vivado-7series-libraries/RAMB36E1 (검색 요약 기준): simple dual port 72 bit x 512 deep 구성 가능, TDP는 1 bit x 32K ~ 36 bit x 1K.
