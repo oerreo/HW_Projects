@@ -9,3 +9,5 @@ transcript
 INCA_libs/
 .claude/settings.local.json
 **/hls/*/out/*/rtl.rpt
+__pycache__/
+*.pyc

@@ -14,3 +14,15 @@
 - 결정(오케스트레이터): 열린 결정 23개를 권고대로 확정(`spec/scope.md` 11절). girth 6은 조건부 수용(N2 FER에서 error floor가 1e-5 위에 보이면 code 구성을 다시 연다).
 - 미확인: 이 code의 최소 거리와 trapping set, FER(아직 한 번도 돌리지 않음), TLC fit 표의 다른 P/E·retention 격자 값(서베이에 없음), 외부 파일의 재배포 조건, 자원 수치 전부(합성 전).
 - 다음: N2(C 전체 구현, G1).
+
+## 2026-11-27: N2 C 전체 구현 (G1)  [notion: pending]
+- 한 일(hw-worker): `model/src`(code loader, encoder, 채널 모델 TLC/MLC, 감지, LLR, float 참조 decoder(SPA flooding/layered, NMS/OMS), 고정소수점 layered min-sum, BCH GF(2^14) t 73, read retry 정책), FER 시뮬레이터와 도구, `docs/spec/numeric.md`(고정소수점 bit-exact 규칙), `docs/spec/n2_results.md`, `data/`(받는 스크립트, checksum, 문헌 parameter 표).
+- 결과 [측정, 수퍼바이저 재실행]: `make test` 49항목 failed 0, 결정성 PASS(checkpoint 재시작 포함), 고정소수점 C 대 독립 Python 구현의 kernel 경계 값 대조 8구성 mismatch 0.
+- 외부 기준 비교(agent 보고, `n2_results.md`): 802.3an (2048,1723)과 CCSDS C2 (8176,7156)를 같은 decoder로 복호해 오픈소스 참조 구현(직접 빌드)과 공개 참조 곡선에 비교. 비교 약 25개가 통계 오차 안. 4.0 dB 부근(FER 1e-4~1e-5)의 차이는 모두 이 구현이 약간 좋은 방향(z -1.1~-2.2)이며 원인은 확인하지 않음.
+- 자체 code FER(agent 보고): AWGN 3.8 dB 5.4e-3, 4.0 dB 1.4e-5(오류 1개). NAND(TLC fit, P/E 3000, 30일, LSB page, (6,7,8)): FER 1e-2가 되는 raw BER이 hard 7.2e-3, +2 1.05e-2, +4 1.35e-2, +6 1.55e-2. raw BER 5.43e-3에서 BCH 7.2e-4 대 LDPC hard 2.6e-5(오류 2개). 낮은 FER 점은 오류 수가 50개 기준에 못 미침(0~22개).
+- 발견: 고정소수점 (6,6,8)과 (5,6,7)은 FER이 2e-3~1e-2에서 내려가지 않고 undetected 오류가 다수(AWGN 4.2 dB에서 오류 961개 중 591개). (6,7,8)은 같은 조건에서 오류 0. C와 Python이 그 frame에서도 값 단위로 같아 구현 오류가 아니라 포화 규칙의 성질로 판단. 메커니즘은 미분석.
+- 결정(오케스트레이터): 형식 후보를 w_m = w_ch + 1, w_a = w_m + 1로 변경, 기본 (6,7,8). undetected 수를 평가 지표에 추가. 메커니즘 분석을 N2b에 포함(`spec/scope.md` 결정 추가).
+- 프로파일 [측정, PC]: hard 0.75 ms/codeword(decoder 84%), +6 soft 1.79 ms(decoder 94%). BCH 복호 0.89 ms.
+- 미확인: FER 1e-5 아래(error floor), MLC 모델과 MSB/CSB page의 곡선, read retry 정책의 곡선, 참조 구현과의 frame 단위 비교, 외부 파일의 재배포 조건(저장소에 넣지 않음).
+- 기록상 주의: N2 파일 대부분은 검수 전에 문서 커밋 `ddcc0d9`에 함께 들어갔다(오케스트레이터가 `git add -A`로 범위를 넓게 잡은 실수). 검수는 이 항목의 재실행으로 사후에 했다. 함께 들어간 `__pycache__`는 제거.
+- 다음: N2b(형식 평가와 (6,6) 불안정 분석), N3(ARM baseline).
